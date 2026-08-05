@@ -1,0 +1,81 @@
+# securance-app 기본 설정(계획서 6절). 프로필별 값은 application-{profile}.yml로 분리한다
+# (local/dev/prod). DB 자격증명은 레거시(ini 평문)와 달리 환경변수로 외부화한다.
+
+spring:
+  application:
+    name: secuhub
+
+  datasource:
+    url: ${SECURANCE_DB_URL:jdbc:mariadb://localhost:3306/securance_gate}
+    username: ${SECURANCE_DB_USER:securance}
+    password: ${SECURANCE_DB_PASSWORD:}
+    driver-class-name: org.mariadb.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate # 스키마 변경은 Flyway로만 — Hibernate가 스키마를 건드리지 않는다.
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  thymeleaf:
+    cache: false # 운영 프로필(application-prod.yml)에서 true로 재정의.
+
+  # RabbitMQ/Redis는 항상 오토컨피규레이션 대상이며, 실제 연결 시도는 아래 securance.* 플래그로
+  # on/off 제어한다(계획서 6절 — 재배포 없이 설정 변경만으로 전환).
+  rabbitmq:
+    host: ${SECURANCE_RABBITMQ_HOST:localhost}
+    port: ${SECURANCE_RABBITMQ_PORT:5672}
+    username: ${SECURANCE_RABBITMQ_USER:guest}
+    password: ${SECURANCE_RABBITMQ_PASSWORD:guest}
+
+  data:
+    redis:
+      host: ${SECURANCE_REDIS_HOST:localhost}
+      port: ${SECURANCE_REDIS_PORT:6379}
+
+  quartz:
+    job-store-type: memory # RAMJobStore(레거시와 동일) — 다중 인스턴스 클러스터링은 후속 과제.
+    properties:
+      org:
+        quartz:
+          threadPool:
+            threadCount: 10
+
+securance:
+  server:
+    mode: SERVER               # SERVER | CLIENT — 백엔드↔게이트 TCP 연결 방향(계획서 3.1절)
+    host: 0.0.0.0
+    port: 9000
+    client-port: 9000
+    accept-backlog: 2048
+    actor-queue-capacity: 2000
+    db-writer-shards: 8        # 1,000+ 디바이스 규모에서는 16~32 권장(계획서 3.7절)
+
+  scheduler:
+    job-concurrency: 64        # Quartz 잡 팬아웃 동시성 상한(계획서 3.7절)
+    net-check-interval-seconds: 5
+
+  control:
+    dispatch-mode: QUEUED      # QUEUED | DIRECT — 프론트엔드 제어 명령 전송 방식(연결 방향과 독립, 계획서 5.5절)
+
+  messaging:
+    rabbitmq:
+      enabled: false            # true로 바꾸면 RabbitGateEventPublisher가 활성화된다(후속 작업, 계획서 5.3절).
+
+  cache:
+    redis:
+      enabled: false            # true로 바꾸면 Redis 세션/캐시가 활성화된다(후속 작업).
+
+server:
+  port: 8080
+
+logging:
+  level:
+    kr.co.securance.secuhub: INFO

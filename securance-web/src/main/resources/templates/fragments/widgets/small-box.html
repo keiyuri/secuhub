@@ -1,0 +1,14 @@
+<!--/* 계획서 5.2절: adminlte-react SmallBox와 동일한 props(title/text/icon/theme/url/urlText). */-->
+<div xmlns:th="http://www.thymeleaf.org"
+     th:fragment="smallBox(title, text, icon, theme, url, urlText)"
+     th:class="'small-box text-bg-' + ${theme}">
+  <div class="inner">
+    <h3 th:text="${title}">0</h3>
+    <p th:text="${text}">텍스트</p>
+  </div>
+  <i th:if="${icon}" th:class="'small-box-icon bi ' + ${icon}"></i>
+  <a th:if="${url}" th:href="${url}"
+     class="small-box-footer link-light link-underline-opacity-0 link-underline-opacity-50-hover">
+    <span th:text="${urlText ?: '자세히'}">자세히</span> <i class="bi bi-link-45deg"></i>
+  </a>
+</div>

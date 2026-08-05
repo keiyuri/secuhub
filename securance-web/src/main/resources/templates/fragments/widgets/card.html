@@ -1,0 +1,27 @@
+<!--/*
+  계획서 5.1/5.2절: adminlte-react Card와 동일한 마크업. 접기/삭제/최대화는 자체 JS 재구현 없이
+  순정 adminlte.js의 data-lte-toggle을 그대로 사용한다(별도 스크립트 불필요).
+  bodyContent는 프래그먼트 표현식(~{...})으로 전달한다 — 위젯마다 다른 본문을 넣기 위함.
+*/-->
+<div xmlns:th="http://www.thymeleaf.org"
+     th:fragment="card(cardId, title, theme, variant, collapsible, removable, maximizable, bodyContent)"
+     th:id="${cardId}"
+     th:class="'card' +
+               (${variant == 'outline'} ? ' card-outline card-' + ${theme} :
+                (${variant == 'solid'} ? ' text-bg-' + ${theme} : ' card-' + ${theme}))">
+  <div class="card-header">
+    <h3 class="card-title" th:text="${title}">제목</h3>
+    <div class="card-tools" th:if="${collapsible or removable or maximizable}">
+      <button th:if="${collapsible}" type="button" class="btn btn-tool" data-lte-toggle="card-collapse">
+        <i class="bi bi-dash-lg"></i>
+      </button>
+      <button th:if="${maximizable}" type="button" class="btn btn-tool" data-lte-toggle="card-maximize">
+        <i class="bi bi-fullscreen"></i>
+      </button>
+      <button th:if="${removable}" type="button" class="btn btn-tool" data-lte-toggle="card-remove">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+  </div>
+  <div class="card-body" th:insert="${bodyContent}">본문</div>
+</div>

@@ -1,0 +1,16 @@
+<!--/* 계획서 5.2절: adminlte-react InfoBox와 동일한 props. */-->
+<div xmlns:th="http://www.thymeleaf.org"
+     th:fragment="infoBox(text, number, icon, theme, progress, progressText)"
+     class="info-box">
+  <span th:class="'info-box-icon text-bg-' + ${theme} + ' shadow-sm'">
+    <i th:if="${icon}" th:class="'bi ' + ${icon}"></i>
+  </span>
+  <div class="info-box-content">
+    <span class="info-box-text" th:text="${text}">항목</span>
+    <span class="info-box-number" th:text="${number}">0</span>
+    <div th:if="${progress}" class="progress">
+      <div class="progress-bar" th:class="'progress-bar bg-' + ${theme}" th:style="'width: ' + ${progress} + '%'"></div>
+    </div>
+    <span th:if="${progressText}" class="progress-description" th:text="${progressText}"></span>
+  </div>
+</div>

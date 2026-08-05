@@ -1,0 +1,29 @@
+package kr.co.securance.secuhub.server.connection
+
+/**
+ * `securance-scheduler`(Quartz 잡)에 노출되는 좁은 커넥션 조회/제어 인터페이스(계획서 3.6절).
+ *
+ * 레거시 `IConnectionRegistry`에 대응한다. 잡은 이 인터페이스만 알면 되고
+ * [GateConnectionActor]/Netty 내부 구현을 직접 참조하지 않는다 — 두 모듈 간 경계를 명확히 유지한다.
+ */
+interface GateConnectionRegistry {
+
+    /** 현재 연결된 모든 커넥션의 스냅샷 — `NetCheckJob`(securance-scheduler)이 순회하며 생존을 확인한다. */
+    fun allConnections(): Collection<GateConnectionState>
+
+    /** 디바이스 IP로 커넥션을 조회한다. 연결되어 있지 않으면 null. */
+    fun findConnection(dtlIp: String): GateConnectionState?
+
+    /**
+     * 커넥션을 닫는다.
+     * @param updateNetState 오프라인 상태를 DB에 반영할지 여부 — 재연결 레이스 가드(계획서 3.3절)를
+     *   위해, 동일 IP의 더 최신 연결이 이미 존재함을 호출자가 확인한 경우 false를 전달한다.
+     */
+    suspend fun closeConnection(dtlIp: String, updateNetState: Boolean = true)
+
+    /**
+     * 지정한 레인으로 패킷을 전송한다(커넥션의 액터 체인에 enqueue). 커넥션이 없거나 대기열이
+     * 가득 차면(계획서 3.3절 [kr.co.securance.secuhub.common.exception.GateTaskRejectedException]) false를 반환한다.
+     */
+    fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean
+}

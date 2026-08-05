@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<!--/* 계획서 5.2절: 위젯 추가/수정 가능한 관리자 대시보드 1차 화면. */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>대시보드</title></head>
+<body>
+<div layout:fragment="content">
+
+  <!-- 1행: 요약 지표(SmallBox) — adminlte-react widgets/small-box 패턴, col-lg-3 col-6 그리드 -->
+  <div class="row">
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
+           ${summary.onlineGateCount}, '온라인 게이트', 'bi-hdd-network', 'success', '/gates/net-state', '자세히')}"></div>
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
+           ${summary.offlineGateCount}, '오프라인 게이트', 'bi-hdd-network-fill', 'danger', '/gates/net-state', '자세히')}"></div>
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
+           ${summary.unresolvedErrorCount}, '미해결 오류', 'bi-exclamation-triangle', 'warning', '/gates/errors', '자세히')}"></div>
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
+           ${summary.todayTrafficCount}, '오늘 통행량', 'bi-people', 'info', '/control/history', '자세히')}"></div>
+  </div>
+
+  <!-- 2행: 위젯 카드 컬럼 — SortableJS 드래그 재배치(계획서 5.2절), 위젯 추가/삭제는 후속 작업 -->
+  <div class="row">
+    <div class="col-lg-7 connectedSortable">
+
+      <div th:replace="~{fragments/widgets/card :: card(
+             'widget-gate-errors', '게이트 상태 요약 (uvw_anlz_error 대응)', 'danger', 'outline',
+             true, true, true, ~{::#gateErrorsBody})}"></div>
+
+      <div th:block id="gateErrorsBody" th:remove="tag">
+        <div class="table-responsive">
+          <table class="table table-sm table-striped">
+            <thead>
+              <tr><th>게이트</th><th>오류</th><th>발생일시</th><th>해결여부</th></tr>
+            </thead>
+            <tbody>
+              <tr th:if="${#lists.isEmpty(recentErrors)}">
+                <td colspan="4" class="text-center text-muted">최근 미해결 오류가 없습니다.</td>
+              </tr>
+              <tr th:each="err : ${recentErrors}">
+                <td th:text="${err.dtlIp}">IP</td>
+                <td th:text="${err.description}">오류 설명</td>
+                <td th:text="${err.analDate}">일시</td>
+                <td th:text="${err.resolveYn}">N</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="col-lg-5 connectedSortable">
+
+      <div th:replace="~{fragments/widgets/card :: card(
+             'widget-traffic', '통행량 (uvw_user_cnt 대응)', 'info', 'outline',
+             true, true, false, ~{::#trafficBody})}"></div>
+
+      <div th:block id="trafficBody" th:remove="tag">
+        <div th:replace="~{fragments/widgets/info-box :: infoBox(
+               '오늘 총 통행량', ${summary.todayTrafficCount}, 'bi-graph-up', 'info', null, null)}"></div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

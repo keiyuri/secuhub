@@ -1,0 +1,16 @@
+# 로컬 개발용 설정 예시. `application-local.yml`로 복사해 실제 값을 채운 뒤 사용한다
+# (application-local.yml은 .gitignore에 등록되어 있어 커밋되지 않는다 — 계획서 7.1절).
+#
+# 실행: java -jar securance-app.jar --spring.profiles.active=local
+#   또는 ./gradlew.bat :securance-app:bootRun --args="--spring.profiles.active=local"
+
+spring:
+  datasource:
+    url: jdbc:mariadb://192.168.0.91:3306/securance_gate
+    username: securance
+    password: changeme
+
+securance:
+  server:
+    mode: SERVER
+    port: 9000

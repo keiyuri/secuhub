@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!--/*
+  계획서 5.1절: adminlte-react DashboardLayout과 동일한 body 클래스 계약
+  (layout-fixed, sidebar-expand-lg, fixed-header, fixed-sidebar 등)을 서버에서 렌더링한다.
+  다크모드는 <html data-bs-theme>과 localStorage['lte-theme'] 키를 그대로 사용해
+  추후 React(@adminlte/react) 전환 시에도 동일 키로 호환되게 유지한다.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout">
+<head>
+  <meta charset="UTF-8"/>
+  <title layout:title-pattern="$CONTENT_TITLE · securance">securance</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" th:href="@{/vendor/adminlte/css/adminlte.min.css}"/>
+  <script>
+    // FOUC 방지를 위해 head에서 즉시 적용 — adminlte-react와 동일한 localStorage 키(lte-theme) 사용.
+    (function () {
+      var saved = localStorage.getItem('lte-theme') || 'light';
+      var resolved = saved === 'auto'
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : saved;
+      document.documentElement.setAttribute('data-bs-theme', resolved);
+    })();
+  </script>
+</head>
+<body class="layout-fixed sidebar-expand-lg fixed-header fixed-sidebar bg-body-tertiary">
+  <div class="app-wrapper">
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/sidebar :: sidebar(${menu})}"></div>
+    <div class="sidebar-overlay"></div>
+
+    <main class="app-main">
+      <div class="app-content-header" th:if="${pageTitle}">
+        <div class="container-fluid">
+          <div class="row">
+            <div class="col-sm-6"><h3 class="mb-0" th:text="${pageTitle}">제목</h3></div>
+          </div>
+        </div>
+      </div>
+      <div class="app-content">
+        <div class="container-fluid" layout:fragment="content">
+          <p>본문이 여기 들어갑니다.</p>
+        </div>
+      </div>
+    </main>
+
+    <div th:replace="~{fragments/footer :: footer}"></div>
+  </div>
+
+  <script th:src="@{/vendor/bootstrap/js/bootstrap.bundle.min.js}"></script>
+  <script th:src="@{/vendor/adminlte/js/adminlte.min.js}"></script>
+  <script th:src="@{/vendor/sortablejs/sortable.min.js}"></script>
+  <script th:src="@{/js/dashboard-widgets.js}" layout:fragment="scripts"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!-- 계획서 5.1절: adminlte-react sidebar.tsx와 동일한 마크업 구조 + 재귀 메뉴 렌더링. -->
+<aside xmlns:th="http://www.thymeleaf.org" th:fragment="sidebar(menu)"
+       class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+  <div class="sidebar-brand">
+    <a href="/dashboard" class="brand-link">
+      <span class="brand-text fw-light">securance</span>
+    </a>
+  </div>
+  <div class="sidebar-wrapper">
+    <nav class="mt-2">
+      <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" data-accordion="false" id="navigation">
+        <li th:each="node : ${menu}" th:insert="~{this :: menuNode(${node}, ${currentPath})}"></li>
+      </ul>
+    </nav>
+  </div>
+</aside>
+
+<!--/* 재귀 메뉴 노드 — MenuNode.Header/Item/Group 세 종류를 판별해 렌더링한다(계획서 5.1절). */-->
+<th:block th:fragment="menuNode(node, currentPath)" xmlns:th="http://www.thymeleaf.org">
+  <li th:if="${node instanceof T(kr.co.securance.secuhub.web.menu.MenuNode.Header)}"
+      class="nav-header" th:text="${node.text}">헤더</li>
+
+  <li th:if="${node instanceof T(kr.co.securance.secuhub.web.menu.MenuNode.Item)}"
+      class="nav-item">
+    <a th:href="${node.href}"
+       th:classappend="${currentPath != null and currentPath.startsWith(node.href)} ? 'active' : ''"
+       class="nav-link">
+      <i th:if="${node.icon}" th:class="'nav-icon bi ' + ${node.icon}"></i>
+      <p th:text="${node.text}">메뉴</p>
+    </a>
+  </li>
+
+  <li th:if="${node instanceof T(kr.co.securance.secuhub.web.menu.MenuNode.Group)}" class="nav-item">
+    <a href="#" class="nav-link">
+      <i th:if="${node.icon}" th:class="'nav-icon bi ' + ${node.icon}"></i>
+      <p th:text="${node.text}">
+        그룹
+        <i class="nav-arrow bi bi-chevron-right"></i>
+      </p>
+    </a>
+    <ul class="nav nav-treeview">
+      <li th:each="child : ${node.children}" th:insert="~{this :: menuNode(${child}, ${currentPath})}"></li>
+    </ul>
+  </li>
+</th:block>

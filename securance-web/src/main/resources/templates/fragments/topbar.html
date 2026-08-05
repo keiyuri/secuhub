@@ -1,0 +1,26 @@
+<!-- 계획서 5.1절: adminlte-react topbar.tsx와 동일한 마크업 구조(순정 AdminLTE4/Bootstrap5.3). -->
+<nav xmlns:th="http://www.thymeleaf.org" th:fragment="topbar" class="app-header navbar navbar-expand bg-body">
+  <div class="container-fluid">
+    <ul class="navbar-nav">
+      <li class="nav-item">
+        <a class="nav-link" data-lte-toggle="sidebar" href="#" role="button">
+          <i class="bi bi-list"></i>
+        </a>
+      </li>
+    </ul>
+    <ul class="navbar-nav ms-auto">
+      <li class="nav-item dropdown user-menu">
+        <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown">
+          <span class="d-none d-md-inline" th:text="${#authentication?.name ?: '게스트'}">사용자</span>
+        </a>
+        <ul class="dropdown-menu dropdown-menu-lg dropdown-menu-end">
+          <li class="user-footer d-flex justify-content-between p-2">
+            <form th:action="@{/logout}" method="post">
+              <button type="submit" class="btn btn-default btn-sm">로그아웃</button>
+            </form>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</nav>

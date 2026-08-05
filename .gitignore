@@ -1,0 +1,35 @@
+.gradle/
+build/
+out/
+*.iml
+.idea/
+.vscode/
+*.log
+/Logs/
+HELP.md
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# Windows service packaging
+scripts/winsw/*.exe
+scripts/winsw/*.log
+scripts/winsw/*.wrapper.log
+scripts/winsw/*.err.log
+scripts/winsw/*.out.log
+
+# local profile overrides (may contain credentials)
+application-local.yml
+application-local.yaml
+
+# User Add ignore files and directories
+/*20??????/
+/*Tests/
+*복사본*
+*[Zz]ip*
+*err*.[Tt]xt
+*log*.[Tt]xt
+*20??????*.[Tt]xt
+*chunk*.[Tt]xt
+*.[Zz]ip
+*.*[Tt]xt

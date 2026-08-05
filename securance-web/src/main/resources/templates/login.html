@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!--/* 계획서 5.4절: adminlte-react AuthLayout(login-page)과 동일한 body 클래스 관례. */-->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8"/>
+  <title>로그인 · securance</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" th:href="@{/vendor/adminlte/css/adminlte.min.css}"/>
+</head>
+<body class="login-page bg-body-secondary">
+  <div class="login-box">
+    <div class="card card-outline card-primary">
+      <div class="card-header text-center">
+        <span class="h1"><b>securance</b></span>
+      </div>
+      <div class="card-body">
+        <p class="login-box-msg">계정으로 로그인하세요</p>
+        <form th:action="@{/login}" method="post">
+          <div class="mb-3">
+            <input type="text" name="username" class="form-control" placeholder="아이디" required autofocus/>
+          </div>
+          <div class="mb-3">
+            <input type="password" name="password" class="form-control" placeholder="비밀번호" required/>
+          </div>
+          <button type="submit" class="btn btn-primary d-block w-100">로그인</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <script th:src="@{/vendor/bootstrap/js/bootstrap.bundle.min.js}"></script>
+</body>
+</html>

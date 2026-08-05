@@ -1,0 +1,51 @@
+package kr.co.securance.secuhub.server.config
+
+import org.springframework.boot.context.properties.ConfigurationProperties
+
+/** 백엔드↔게이트 TCP 연결 방향(계획서 3.1절). 어느 쪽이 소켓을 여는지를 결정하며, [DispatchMode]와는 독립적인 축이다. */
+enum class GatewayMode {
+    /** backend ← gate: 게이트가 백엔드로 접속해 들어온다. */
+    SERVER,
+
+    /** backend → gate: 백엔드가 게이트로 접속해 나간다. */
+    CLIENT,
+}
+
+/**
+ * `securance.server.*` 설정 프로퍼티(계획서 3.1/3.7절).
+ *
+ * 연결 방향(SERVER/CLIENT)과 확장성 관련 튜닝 값을 담는다. 제어 명령 전송 방식(QUEUED/DIRECT)은
+ * 이 클래스가 아니라 별도의 `securance.control.dispatch-mode` 설정(5.5절, 완전히 독립된 축)이다.
+ */
+@ConfigurationProperties(prefix = "securance.server")
+data class ServerModeConfig(
+    /** SERVER | CLIENT — 계획서 3.1절. */
+    val mode: GatewayMode = GatewayMode.SERVER,
+
+    /** SERVER 모드에서 바인딩할 주소. */
+    val host: String = "0.0.0.0",
+
+    /** SERVER 모드에서 바인딩할 포트. */
+    val port: Int = 9000,
+
+    /** CLIENT 모드에서 게이트에 접속할 때 사용할 포트. */
+    val clientPort: Int = 9000,
+
+    /** CLIENT 모드에서 미연결 장비를 재확인하는 주기(초). */
+    val clientReconnectIntervalSeconds: Long = 10,
+
+    /** SERVER 모드 accept backlog — 레거시 `Listen(2048)` 대응(계획서 3.7절). */
+    val acceptBacklog: Int = 2048,
+
+    /**
+     * 커넥션당 액터(3.3절)가 공유할 코루틴 디스패처의 병렬도.
+     * 기본값은 호출 시점의 CPU 코어 수 × 2 (계획서 3.7절).
+     */
+    val actorDispatcherParallelism: Int = Runtime.getRuntime().availableProcessors() * 2,
+
+    /** 커넥션당 액터의 처리 대기열 최대 길이 — 초과 시 [kr.co.securance.secuhub.common.exception.GateTaskRejectedException]. */
+    val actorQueueCapacity: Int = 2000,
+
+    /** DB 비동기 쓰기 파이프라인 샤드 수(계획서 3.5/3.7절). 1,000+ 디바이스 규모에서는 16~32 권장. */
+    val dbWriterShards: Int = 8,
+)

@@ -1,0 +1,11 @@
+# 운영 프로필 — WinSW로 Windows 서비스 등록 시 사용(계획서 7.1절).
+spring:
+  thymeleaf:
+    cache: true
+
+logging:
+  level:
+    root: WARN
+    kr.co.securance.secuhub: INFO
+  file:
+    name: Logs/securance-app.log

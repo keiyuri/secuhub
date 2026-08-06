@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<!--/* #11 SR_F_ViewUser — 사용자 계정 CRUD. */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>사용자 관리</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="alert alert-success py-2" th:if="${message}" th:text="${message}"></div>
+  <div class="alert alert-danger py-2" th:if="${error}" th:text="${error}"></div>
+
+  <div class="row">
+    <div class="col-lg-7">
+      <div class="card card-outline card-primary">
+        <div class="card-header"><h3 class="card-title">사용자 목록</h3></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped mb-0">
+            <thead><tr><th>아이디</th><th>이름</th><th>사용</th><th>조회</th><th>제어</th><th>관리</th><th></th></tr></thead>
+            <tbody>
+              <tr th:if="${#lists.isEmpty(users)}">
+                <td colspan="7" class="text-center text-muted">등록된 사용자가 없습니다.</td>
+              </tr>
+              <tr th:each="user : ${users}">
+                <td th:text="${user.userId}">아이디</td>
+                <td th:text="${user.userName}">이름</td>
+                <td th:text="${user.useYn} ? '사용' : '미사용'">사용</td>
+                <td th:text="${user.authView} ? 'Y' : 'N'">Y</td>
+                <td th:text="${user.authControl} ? 'Y' : 'N'">N</td>
+                <td th:text="${user.authAdmin} ? 'Y' : 'N'">N</td>
+                <td class="text-end text-nowrap">
+                  <a class="btn btn-sm btn-outline-secondary" th:href="@{/admin/users/{id}/edit(id=${user.userId})}">수정</a>
+                  <form th:action="@{/admin/users/{id}/delete(id=${user.userId})}" method="post" class="d-inline"
+                        onsubmit="return confirm('삭제하시겠습니까?');">
+                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                            th:disabled="${user.userId == #authentication.name}">삭제</button>
+                  </form>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card card-outline card-primary">
+        <div class="card-header">
+          <h3 class="card-title" th:text="${editingId} ? '사용자 수정' : '사용자 등록'">사용자 등록</h3>
+        </div>
+        <div class="card-body">
+          <form th:action="${editingId} ? @{/admin/users/{id}(id=${editingId})} : @{/admin/users}"
+                th:object="${form}" method="post">
+            <div class="mb-3">
+              <label class="form-label">아이디</label>
+              <input type="text" class="form-control" th:field="*{userId}" th:readonly="${editingId} != null"
+                     th:classappend="${#fields.hasErrors('userId')} ? 'is-invalid'"/>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('userId')}" th:errors="*{userId}"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">
+                비밀번호
+                <span class="text-muted" th:if="${editingId}">(변경 시에만 입력)</span>
+              </label>
+              <input type="password" class="form-control" th:field="*{password}" autocomplete="new-password"
+                     th:classappend="${#fields.hasErrors('password')} ? 'is-invalid'"/>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('password')}" th:errors="*{password}"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">이름</label>
+              <input type="text" class="form-control" th:field="*{userName}"
+                     th:classappend="${#fields.hasErrors('userName')} ? 'is-invalid'"/>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('userName')}" th:errors="*{userName}"></div>
+            </div>
+            <div class="form-check mb-2">
+              <input type="checkbox" class="form-check-input" th:field="*{useYn}"/>
+              <label class="form-check-label">사용</label>
+            </div>
+            <div class="form-check mb-2">
+              <input type="checkbox" class="form-check-input" th:field="*{authView}"/>
+              <label class="form-check-label">조회 권한(ROLE_VIEW)</label>
+            </div>
+            <div class="form-check mb-2">
+              <input type="checkbox" class="form-check-input" th:field="*{authControl}"/>
+              <label class="form-check-label">제어 권한(ROLE_CONTROL)</label>
+            </div>
+            <div class="form-check mb-3">
+              <input type="checkbox" class="form-check-input" th:field="*{authAdmin}"/>
+              <label class="form-check-label">관리자 권한(ROLE_ADMIN)</label>
+            </div>
+            <button type="submit" class="btn btn-primary" th:text="${editingId} ? '수정' : '등록'">등록</button>
+            <a th:if="${editingId}" class="btn btn-secondary" th:href="@{/admin/users}">취소</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

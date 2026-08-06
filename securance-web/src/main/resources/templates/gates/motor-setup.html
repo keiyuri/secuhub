@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<!--/*
+  #13 SR_P_GateSetupMotor — 개별 게이트 모터(메인/서브) 초기속도·초기카운트·오픈속도·오픈카운트·
+  클로즈속도·클로즈카운트 설정 팝업(계획서 Phase 4). 레거시는 "설정값 적용"/"초기값 적용" 버튼마다
+  별도 입력 필드 세트를 뒀지만, 바이트 레이아웃이 완전히 동일해(GateControlController 주석 참고)
+  이 화면은 입력 필드 하나를 두 버튼이 공유한다.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>게이트 모터 설정</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="card card-outline card-primary" style="max-width: 720px;">
+    <div class="card-header">
+      <h3 class="card-title">모터 설정 — <span th:text="${detail.dtlIp}">IP</span> / 레인 <span th:text="${detail.dtlLaneNo}">0</span></h3>
+    </div>
+    <div class="card-body">
+      <p class="text-muted" th:text="${detail.dtlName}">게이트 이름</p>
+
+      <form id="motorForm" th:action="@{/gates/details/{id}/motor(id=${detail.dtlId})}" th:object="${form}" method="post">
+        <input type="hidden" name="mode" id="motorMode" value="CHANGE"/>
+
+        <div class="row">
+          <div class="col-md-6">
+            <fieldset class="mb-3">
+              <legend class="fs-6 fw-bold">메인 모터</legend>
+              <div class="mb-2">
+                <label class="form-label">초기 속도</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{mInitSpeed}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">초기 카운트</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{mInitCount}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">오픈 속도</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{mOpenSpeed}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">오픈 카운트</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{mOpenCount}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">클로즈 속도</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{mCloseSpeed}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">클로즈 카운트</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{mCloseCount}"/>
+              </div>
+            </fieldset>
+          </div>
+
+          <div class="col-md-6">
+            <fieldset class="mb-3">
+              <legend class="fs-6 fw-bold">서브 모터</legend>
+              <div class="mb-2">
+                <label class="form-label">초기 속도</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{sInitSpeed}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">초기 카운트</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{sInitCount}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">오픈 속도</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{sOpenSpeed}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">오픈 카운트</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{sOpenCount}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">클로즈 속도</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{sCloseSpeed}"/>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">클로즈 카운트</label>
+                <input type="number" min="0" max="255" class="form-control form-control-sm" th:field="*{sCloseCount}"/>
+              </div>
+            </fieldset>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" onclick="document.getElementById('motorMode').value='CHANGE'">설정값 적용</button>
+        <button type="submit" class="btn btn-warning" onclick="document.getElementById('motorMode').value='INIT'">초기값 적용</button>
+        <a class="btn btn-secondary" th:href="@{/gates/details(grpId=${detail.group.grpId})}">취소</a>
+      </form>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

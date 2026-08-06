@@ -10,4 +10,7 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
 
     /** 대시보드 온라인/오프라인 게이트 수 위젯(계획서 5.2절)에 사용. */
     fun countByDtlState(dtlState: String): Long
+
+    /** #3 GateReset 검색 그리드 — 그룹 내 레인들의 현재 연결 상태를 한 번에 조회. */
+    fun findByIdGrpId(grpId: Long): List<NetState>
 }

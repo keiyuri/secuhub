@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<!--/* #10 SR_F_ViewLog — 통신/운영 로그 조회(LogReportController 주석 참고: tb_data_rcv_anal을
+     ViewEvent와 공유하되 정상(NOR) 통신까지 포함해 원시 로그로 보여주는 별도 화면). */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>통신/운영 로그 조회</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="alert alert-warning py-2" th:if="${error}" th:text="${error}"></div>
+
+  <div class="card card-outline card-secondary mb-3">
+    <div class="card-body py-2">
+      <form method="get" th:action="@{/reports/logs}" class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-0">위치</label>
+          <select name="locId" class="form-select form-select-sm">
+            <option value="">전체</option>
+            <option th:each="loc : ${allLocations}" th:value="${loc.locId}" th:text="${loc.locName}"
+                    th:selected="${loc.locId == selectedLocId}"></option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">그룹</label>
+          <select name="grpId" class="form-select form-select-sm">
+            <option value="">전체</option>
+            <option th:each="grp : ${allGroups}" th:value="${grp.grpId}" th:text="${grp.grpName}"
+                    th:selected="${grp.grpId == selectedGrpId}"></option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">게이트 IP</label>
+          <input type="text" name="dtlIp" class="form-control form-control-sm" th:value="${dtlIp}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">유형</label>
+          <select name="analType" class="form-select form-select-sm">
+            <option value="">전체</option>
+            <option value="NOR" th:selected="${analType == 'NOR'}">정상</option>
+            <option value="EVT" th:selected="${analType == 'EVT'}">이벤트</option>
+            <option value="PLM" th:selected="${analType == 'PLM'}">문제</option>
+            <option value="STA" th:selected="${analType == 'STA'}">상태</option>
+            <option value="ERR" th:selected="${analType == 'ERR'}">파싱오류</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">시작일</label>
+          <input type="date" name="fromDate" class="form-control form-control-sm" th:value="${fromDate}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">종료일</label>
+          <input type="date" name="toDate" class="form-control form-control-sm" th:value="${toDate}"/>
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-primary">조회</button>
+          <a class="btn btn-sm btn-outline-success"
+             th:href="@{/reports/logs/excel(locId=${selectedLocId},grpId=${selectedGrpId},dtlIp=${dtlIp},analType=${analType},fromDate=${fromDate},toDate=${toDate})}">
+            엑셀 다운로드
+          </a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card card-outline card-primary">
+    <div class="card-header">
+      <h3 class="card-title">
+        조회 결과
+        <span class="badge text-bg-secondary" th:text="${result.totalElements} + '건'">0건</span>
+      </h3>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0">
+        <thead><tr><th>발생일시</th><th>유형</th><th>IP</th><th>레인</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr th:if="${result.empty}">
+            <td colspan="5" class="text-center text-muted">조회된 로그가 없습니다.</td>
+          </tr>
+          <tr th:each="row : ${result.content}">
+            <td th:text="${row.analDate}">일시</td>
+            <td th:text="${row.analType}">유형</td>
+            <td th:text="${row.dtlIp}">IP</td>
+            <td th:text="${row.dtlLaneNo}">0</td>
+            <td th:text="${row.description}">-</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer" th:if="${result.totalPages > 1}">
+      <nav>
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" th:each="p : ${#numbers.sequence(0, result.totalPages - 1)}"
+              th:classappend="${p == result.number} ? 'active'">
+            <a class="page-link"
+               th:href="@{/reports/logs(locId=${selectedLocId},grpId=${selectedGrpId},dtlIp=${dtlIp},analType=${analType},fromDate=${fromDate},toDate=${toDate},page=${p})}"
+               th:text="${p + 1}">1</a>
+          </li>
+        </ul>
+      </nav>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

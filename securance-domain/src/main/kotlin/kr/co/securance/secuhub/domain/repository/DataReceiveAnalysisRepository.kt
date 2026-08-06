@@ -3,6 +3,7 @@ package kr.co.securance.secuhub.domain.repository
 import kr.co.securance.secuhub.domain.entity.DataReceiveAnalysis
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.transaction.annotation.Transactional
@@ -15,7 +16,12 @@ import java.time.LocalDateTime
  * (계획서 4.4절: 1차 스캐폴드에서는 이 조회 1개만 구현해 "DB 뷰 대신 서비스 계층" 패턴을 증명한다.
  * 나머지 uvw_anlz_event/uvw_anlz_problem/uvw_snd_control/uvw_user_cnt는 동일 방식으로 후속 추가).
  */
-interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Long> {
+/**
+ * [JpaSpecificationExecutor] 추가 — #9 SR_F_ViewEvent(계획서 4절)가 위치/그룹/게이트/이벤트유형/
+ * 해결여부/기간 등 9종 필터를 임의 조합으로 조회해야 해서, 조합마다 `@Query` 메서드를 만드는 대신
+ * 동적 조건 조립이 필요하다.
+ */
+interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Long>, JpaSpecificationExecutor<DataReceiveAnalysis> {
 
     /**
      * `resolveYn = 'N'`(미해결) 조건 포함(적대적 리뷰 지적) — 이 조건이 없으면 운영자가 오류를

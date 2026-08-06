@@ -48,6 +48,14 @@ class GateGroup(
     @Convert(converter = YnConverter::class)
     @Column(name = "use_yn", nullable = false)
     var useYn: Boolean = true,
+
+    /** #5 SetupLocation — 소속 [GateLocation]의 배치도 이미지 위 그룹 아이콘 좌표(원본 이미지
+     * 픽셀 기준, [GateLocation.locMapWidth]/[GateLocation.locMapHeight]로 환산). 미배치 시 null. */
+    @Column(name = "grp_x")
+    var grpX: Int? = null,
+
+    @Column(name = "grp_y")
+    var grpY: Int? = null,
 ) {
     /** 물리적 게이트(차단바) 유닛 수 = 레인 수 + 1 (계획서 3.2절 펜스포스트 규칙). */
     val physicalGateCount: Int

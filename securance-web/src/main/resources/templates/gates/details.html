@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<!--/* #4 SR_F_SetupGateGroup의 나머지 절반 — 그룹→레인(게이트 상세) CRUD. */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>게이트 상세(레인) 관리</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="alert alert-success py-2" th:if="${message}" th:text="${message}"></div>
+
+  <div class="card card-outline card-secondary mb-3">
+    <div class="card-body py-2">
+      <form method="get" th:action="@{/gates/details}" class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-0">그룹</label>
+          <select name="grpId" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">선택하세요</option>
+            <option th:each="grp : ${allGroups}" th:value="${grp.grpId}"
+                    th:text="${grp.location.locName} + ' / ' + ${grp.grpName}"
+                    th:selected="${grp.grpId == selectedGrpId}"></option>
+          </select>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-7">
+      <div class="card card-outline card-primary">
+        <div class="card-header"><h3 class="card-title">레인 목록</h3></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped mb-0">
+            <thead><tr><th>레인</th><th>IP</th><th>타입</th><th>이름</th><th>사용</th><th>분석</th><th></th></tr></thead>
+            <tbody>
+              <tr th:if="${selectedGrpId == null}">
+                <td colspan="7" class="text-center text-muted">위에서 그룹을 먼저 선택하세요.</td>
+              </tr>
+              <tr th:if="${selectedGrpId != null and #lists.isEmpty(details)}">
+                <td colspan="7" class="text-center text-muted">등록된 레인이 없습니다.</td>
+              </tr>
+              <tr th:each="dtl : ${details}">
+                <td th:text="${dtl.dtlLaneNo}">0</td>
+                <td th:text="${dtl.dtlIp}">IP</td>
+                <td th:text="${dtl.dtlType}">1</td>
+                <td th:text="${dtl.dtlName}">이름</td>
+                <td th:text="${dtl.useYn} ? '사용' : '미사용'">사용</td>
+                <td th:text="${dtl.analysisYn} ? 'Y' : 'N'">Y</td>
+                <td class="text-end text-nowrap">
+                  <!--/* #12/#13(계획서 Phase 4) — 개별 게이트 제어 팝업 진입점 */-->
+                  <a class="btn btn-sm btn-outline-primary" th:href="@{/gates/details/{id}/mode(id=${dtl.dtlId})}">모드변경</a>
+                  <a class="btn btn-sm btn-outline-warning" th:href="@{/gates/details/{id}/motor(id=${dtl.dtlId})}">모터설정</a>
+                  <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/details/{id}/edit(id=${dtl.dtlId})}">수정</a>
+                  <form th:action="@{/gates/details/{id}/delete(id=${dtl.dtlId})}" method="post" class="d-inline"
+                        onsubmit="return confirm('삭제하시겠습니까?');">
+                    <input type="hidden" name="grpId" th:value="${selectedGrpId}"/>
+                    <button type="submit" class="btn btn-sm btn-outline-danger">삭제</button>
+                  </form>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card card-outline card-primary" th:if="${selectedGrpId != null}">
+        <div class="card-header">
+          <h3 class="card-title" th:text="${editingId} ? '레인 수정' : '레인 등록'">레인 등록</h3>
+        </div>
+        <div class="card-body">
+          <form th:action="${editingId} ? @{/gates/details/{id}(id=${editingId})} : @{/gates/details}"
+                th:object="${form}" method="post">
+            <input type="hidden" th:field="*{grpId}"/>
+            <div class="mb-3">
+              <label class="form-label">레인 번호</label>
+              <input type="number" min="0" class="form-control" th:field="*{dtlLaneNo}"
+                     th:classappend="${#fields.hasErrors('dtlLaneNo')} ? 'is-invalid'"/>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('dtlLaneNo')}" th:errors="*{dtlLaneNo}"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">IP</label>
+              <input type="text" class="form-control" th:field="*{dtlIp}"
+                     th:classappend="${#fields.hasErrors('dtlIp')} ? 'is-invalid'"/>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('dtlIp')}" th:errors="*{dtlIp}"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">게이트 타입</label>
+              <select class="form-select" th:field="*{dtlType}"
+                      th:classappend="${#fields.hasErrors('dtlType')} ? 'is-invalid'">
+                <option value="">선택하세요</option>
+                <option th:each="code : ${gateTypes}" th:value="${code.id.codeValue}" th:text="${code.codeName}"></option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('dtlType')}" th:errors="*{dtlType}"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">연결 방식</label>
+              <select class="form-select" th:field="*{connectType}">
+                <option value="1">Net/Wifi</option>
+                <option value="4">BLE</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">이름(선택)</label>
+              <input type="text" class="form-control" th:field="*{dtlName}"/>
+            </div>
+            <div class="form-check mb-2">
+              <input type="checkbox" class="form-check-input" th:field="*{useYn}"/>
+              <label class="form-check-label">사용</label>
+            </div>
+            <div class="form-check mb-3">
+              <input type="checkbox" class="form-check-input" th:field="*{analysisYn}"/>
+              <!--/* 꺼두면 NetCheckJob/SendControlJob 등이 이 레인을 건너뛴다(GateDetail.analysisYn 주석 참고). */-->
+              <label class="form-check-label">분석/제어 대상</label>
+            </div>
+            <button type="submit" class="btn btn-primary" th:text="${editingId} ? '수정' : '등록'">등록</button>
+            <a class="btn btn-secondary" th:href="@{/gates/details(grpId=${selectedGrpId})}">취소</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

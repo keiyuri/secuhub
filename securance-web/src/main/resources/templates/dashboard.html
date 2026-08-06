@@ -1,5 +1,10 @@
 <!DOCTYPE html>
-<!--/* 계획서 5.2절: 위젯 추가/수정 가능한 관리자 대시보드 1차 화면. */-->
+<!--/*
+  계획서 5.2절: 위젯 추가/수정 가능한 관리자 대시보드.
+  Phase 3(계획서 4절 확정 결정: "WebSocket + 폴링")부터 SmallBox 4종 + 오류 테이블이
+  dashboard-realtime.js를 통해 실시간 갱신된다 — id="rt-*"는 그 스크립트가 갱신 대상을
+  찾는 훅이다(서버 최초 렌더값은 페이지 로드 직후 값, 이후 WebSocket push로 대체됨).
+*/-->
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/dashboard-layout}">
@@ -18,6 +23,16 @@
     <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
            ${summary.todayTrafficCount}, '오늘 통행량', 'bi-people', 'info', '/control/history', '자세히')}"></div>
   </div>
+
+  <!--/* small-box 프래그먼트가 <h3>를 직접 렌더링해 id를 못 붙이므로, 각 카드의 h3를 순서대로
+        rt-* id로 잡아준다(구조가 바뀌면 이 스크립트도 함께 수정 필요). */-->
+  <script>
+    (function () {
+      var boxes = document.querySelectorAll('.small-box .inner h3');
+      var ids = ['rt-online-count', 'rt-offline-count', 'rt-unresolved-count', 'rt-traffic-count'];
+      boxes.forEach(function (el, idx) { if (ids[idx]) el.id = ids[idx]; });
+    })();
+  </script>
 
   <!-- 2행: 위젯 카드 컬럼 — SortableJS 드래그 재배치(계획서 5.2절), 위젯 추가/삭제는 후속 작업 -->
   <div class="row">
@@ -64,6 +79,35 @@
     </div>
   </div>
 
+  <!-- #1 GateControl / #17 Warning 팝업. 리셋 실행 버튼은 /gates/reset과 동일한 이유로 아직 없다
+       (GateControlService 미구현, dashboard-realtime.js 주석 참고). -->
+  <div class="modal fade" id="rt-alert-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">알림</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <dl class="row mb-0">
+            <dt class="col-4">게이트 IP</dt><dd class="col-8 rt-alert-ip">-</dd>
+            <dt class="col-4">내용</dt><dd class="col-8 rt-alert-desc">-</dd>
+            <dt class="col-4">발생일시</dt><dd class="col-8 rt-alert-date">-</dd>
+          </dl>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">확인</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
+
+<!-- 레이아웃 기본 scripts 프래그먼트(dashboard-widgets.js)에 실시간 갱신 스크립트를 추가한다. -->
+<th:block layout:fragment="scripts">
+  <script th:src="@{/js/dashboard-widgets.js}"></script>
+  <script th:src="@{/js/dashboard-realtime.js}"></script>
+</th:block>
 </body>
 </html>

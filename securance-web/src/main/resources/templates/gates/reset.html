@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<!--/* #3 SR_F_GateReset — 검색 그리드 + 리셋 실행(GateResetController 주석 참고). */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>게이트 일괄 리셋</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="alert alert-success py-2" th:if="${message}" th:text="${message}"></div>
+  <div class="alert alert-danger py-2" th:if="${error}" th:text="${error}"></div>
+
+  <div class="card card-outline card-secondary mb-3">
+    <div class="card-body py-2">
+      <form method="get" th:action="@{/gates/reset}" class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-0">위치</label>
+          <select name="locId" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">선택하세요</option>
+            <option th:each="loc : ${allLocations}" th:value="${loc.locId}" th:text="${loc.locName}"
+                    th:selected="${loc.locId == selectedLocId}"></option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">그룹</label>
+          <select name="grpId" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">선택하세요</option>
+            <option th:each="grp : ${allGroups}" th:value="${grp.grpId}" th:text="${grp.grpName}"
+                    th:selected="${grp.grpId == selectedGrpId}"></option>
+          </select>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <form th:action="@{/gates/reset/execute}" method="post"
+        onsubmit="return confirm('선택한 게이트를 리셋하시겠습니까?');">
+    <input type="hidden" name="locId" th:value="${selectedLocId}"/>
+    <input type="hidden" name="grpId" th:value="${selectedGrpId}"/>
+
+    <div class="card card-outline card-primary">
+      <div class="card-header"><h3 class="card-title">레인 목록</h3></div>
+      <div class="table-responsive">
+        <table class="table table-sm table-striped mb-0">
+          <thead><tr><th style="width:2rem"><input type="checkbox" onclick="document.querySelectorAll('.reset-row').forEach(c => c.checked = this.checked)"/></th><th>레인</th><th>IP</th><th>이름</th><th>연결상태</th></tr></thead>
+          <tbody>
+            <tr th:if="${selectedGrpId == null}">
+              <td colspan="5" class="text-center text-muted">위에서 위치/그룹을 먼저 선택하세요.</td>
+            </tr>
+            <tr th:if="${selectedGrpId != null and #lists.isEmpty(rows)}">
+              <td colspan="5" class="text-center text-muted">레인이 없습니다.</td>
+            </tr>
+            <tr th:each="row : ${rows}">
+              <td><input type="checkbox" class="reset-row" name="dtlIds" th:value="${row.dtlId}"/></td>
+              <td th:text="${row.dtlLaneNo}">0</td>
+              <td th:text="${row.dtlIp}">IP</td>
+              <td th:text="${row.dtlName}">이름</td>
+              <td>
+                <span th:if="${row.online}" class="badge text-bg-success">온라인</span>
+                <span th:unless="${row.online}" class="badge text-bg-danger">오프라인</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer" th:if="${selectedGrpId != null and not #lists.isEmpty(rows)}">
+        <button type="submit" class="btn btn-danger btn-sm">
+          선택 리셋 실행
+        </button>
+      </div>
+    </div>
+  </form>
+
+</div>
+</body>
+</html>

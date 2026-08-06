@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<!--/* #4 SR_F_SetupGateGroup — 위치→그룹 2단 콤보 검색 + 그룹 CRUD. */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>게이트그룹 관리</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="alert alert-success py-2" th:if="${message}" th:text="${message}"></div>
+
+  <div class="card card-outline card-secondary mb-3">
+    <div class="card-body py-2">
+      <form method="get" th:action="@{/gates/groups}" class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-0">위치</label>
+          <select name="locId" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">전체</option>
+            <option th:each="loc : ${allLocations}" th:value="${loc.locId}" th:text="${loc.locName}"
+                    th:selected="${loc.locId == selectedLocId}"></option>
+          </select>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-7">
+      <div class="card card-outline card-primary">
+        <div class="card-header"><h3 class="card-title">게이트그룹 목록</h3></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped mb-0">
+            <thead><tr><th>위치</th><th>그룹명</th><th>레인수</th><th>게이트타입</th><th>사용</th><th></th></tr></thead>
+            <tbody>
+              <tr th:if="${#lists.isEmpty(groups)}">
+                <td colspan="6" class="text-center text-muted">등록된 게이트그룹이 없습니다.</td>
+              </tr>
+              <tr th:each="grp : ${groups}">
+                <td th:text="${grp.location.locName}">위치</td>
+                <td th:text="${grp.grpName}">그룹명</td>
+                <td th:text="${grp.laneCount}">1</td>
+                <td th:text="${grp.gateTypeCode}">1</td>
+                <td th:text="${grp.useYn} ? '사용' : '미사용'">사용</td>
+                <td class="text-end text-nowrap">
+                  <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/details(grpId=${grp.grpId})}">레인</a>
+                  <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/groups/{id}/edit(id=${grp.grpId})}">수정</a>
+                  <form th:action="@{/gates/groups/{id}/delete(id=${grp.grpId})}" method="post" class="d-inline"
+                        onsubmit="return confirm('삭제하시겠습니까? 하위 레인이 있으면 실패합니다.');">
+                    <input type="hidden" name="locId" th:value="${selectedLocId}"/>
+                    <button type="submit" class="btn btn-sm btn-outline-danger">삭제</button>
+                  </form>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card card-outline card-primary">
+        <div class="card-header">
+          <h3 class="card-title" th:text="${editingId} ? '게이트그룹 수정' : '게이트그룹 등록'">게이트그룹 등록</h3>
+        </div>
+        <div class="card-body">
+          <form th:action="${editingId} ? @{/gates/groups/{id}(id=${editingId})} : @{/gates/groups}"
+                th:object="${form}" method="post">
+            <div class="mb-3">
+              <label class="form-label">위치</label>
+              <select class="form-select" th:field="*{locId}"
+                      th:classappend="${#fields.hasErrors('locId')} ? 'is-invalid'">
+                <option value="">선택하세요</option>
+                <option th:each="loc : ${allLocations}" th:value="${loc.locId}" th:text="${loc.locName}"></option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('locId')}" th:errors="*{locId}"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">그룹명</label>
+              <input type="text" class="form-control" th:field="*{grpName}"
+                     th:classappend="${#fields.hasErrors('grpName')} ? 'is-invalid'"/>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('grpName')}" th:errors="*{grpName}"></div>
+            </div>
+            <div class="mb-3">
+              <!--/* 레인수+1 = 물리 게이트 수(펜스포스트 규칙, GateGroup.physicalGateCount 참고). */-->
+              <label class="form-label">레인 수</label>
+              <input type="number" min="1" class="form-control" th:field="*{laneCount}"
+                     th:classappend="${#fields.hasErrors('laneCount')} ? 'is-invalid'"/>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('laneCount')}" th:errors="*{laneCount}"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">게이트 타입</label>
+              <select class="form-select" th:field="*{gateTypeCode}"
+                      th:classappend="${#fields.hasErrors('gateTypeCode')} ? 'is-invalid'">
+                <option value="">선택하세요</option>
+                <option th:each="code : ${gateTypes}" th:value="${code.id.codeValue}" th:text="${code.codeName}"></option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('gateTypeCode')}" th:errors="*{gateTypeCode}"></div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">연결 방식</label>
+              <select class="form-select" th:field="*{linkType}">
+                <option value="1">1:1</option>
+                <option value="2">1:N</option>
+              </select>
+            </div>
+            <div class="form-check mb-3">
+              <input type="checkbox" class="form-check-input" th:field="*{useYn}"/>
+              <label class="form-check-label">사용</label>
+            </div>
+            <button type="submit" class="btn btn-primary" th:text="${editingId} ? '수정' : '등록'">등록</button>
+            <a class="btn btn-secondary" th:href="@{/gates/groups(locId=${selectedLocId})}">취소</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<!--/* #5 SR_F_SetupLocation — 배치도 이미지 업로드 + 그룹 아이콘 드래그 배치(LocationMapController 주석 참고).
+     레거시의 WinForms 네이티브 드래그앤드롭(DoDragDrop) 대신 Pointer Events로 동등한 UX를 구현한다. */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>위치 배치도</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="alert alert-success py-2" th:if="${message}" th:text="${message}"></div>
+  <div class="alert alert-danger py-2" th:if="${error}" th:text="${error}"></div>
+
+  <p class="mb-3">
+    <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/locations}">&laquo; 위치 목록으로</a>
+  </p>
+
+  <div class="row">
+    <div class="col-lg-4">
+      <div class="card card-outline card-primary mb-3">
+        <div class="card-header"><h3 class="card-title">배치도 이미지</h3></div>
+        <div class="card-body">
+          <form th:action="@{/gates/locations/{id}/map/upload(id=${location.locId})}" method="post"
+                enctype="multipart/form-data">
+            <div class="mb-2">
+              <input type="file" name="file" class="form-control form-control-sm" accept="image/*" required/>
+            </div>
+            <div class="form-text mb-2">10MB 이하 이미지만 업로드할 수 있습니다. 새로 업로드하면 기존 이미지를 대체합니다.</div>
+            <button type="submit" class="btn btn-primary btn-sm">업로드</button>
+          </form>
+          <p class="text-muted small mt-2 mb-0" th:if="${location.locMap != null}">
+            현재 이미지 크기: <span th:text="${location.locMapWidth}">0</span> x <span th:text="${location.locMapHeight}">0</span>px
+          </p>
+        </div>
+      </div>
+
+      <div class="card card-outline card-secondary">
+        <div class="card-header"><h3 class="card-title">소속 그룹</h3></div>
+        <ul class="list-group list-group-flush">
+          <li class="list-group-item text-muted" th:if="${#lists.isEmpty(groups)}">등록된 그룹이 없습니다.</li>
+          <li class="list-group-item d-flex justify-content-between align-items-center" th:each="grp : ${groups}">
+            <span th:text="${grp.grpName}">그룹명</span>
+            <span th:if="${grp.grpX == null}" class="badge text-bg-secondary">미배치</span>
+            <span th:unless="${grp.grpX == null}" class="badge text-bg-success">배치됨</span>
+          </li>
+        </ul>
+        <div class="card-body py-2 text-muted small">
+          지도 위 원형 마커를 드래그해 그룹 위치를 지정하세요. 놓는 즉시 저장됩니다.
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8">
+      <div class="card card-outline card-primary">
+        <div class="card-header"><h3 class="card-title" th:text="${location.locName}">위치명</h3></div>
+        <div class="card-body">
+          <div th:if="${location.locMap == null}" class="text-center text-muted py-5">
+            아직 배치도 이미지가 없습니다. 왼쪽에서 이미지를 업로드하세요.
+          </div>
+          <div th:if="${location.locMap != null}" id="mapContainer"
+               style="position:relative; width:100%; max-width:900px; user-select:none;">
+            <img id="mapImage" th:src="@{/loc-images/{f}(f=${location.locMap})}"
+                 style="width:100%; height:auto; display:block; border:1px solid #dee2e6;"
+                 draggable="false"/>
+            <div th:each="grp, iter : ${groups}"
+                 class="group-marker"
+                 th:attr="data-grp-id=${grp.grpId},data-grp-name=${grp.grpName}"
+                 th:styleappend="${grp.grpX != null} ? ('left:' + (grp.grpX * 100.0 / location.locMapWidth) + '%;top:' + (grp.grpY * 100.0 / location.locMapHeight) + '%;') : ('left:' + (5 + iter.index * 8) + '%;top:8%;')"
+                 style="position:absolute; width:32px; height:32px; margin-left:-16px; margin-top:-16px;
+                        border-radius:50%; background:#0d6efd; color:#fff; display:flex; align-items:center;
+                        justify-content:center; font-size:.7rem; cursor:grab; box-shadow:0 1px 3px rgba(0,0,0,.4);"
+                 th:text="${#strings.substring(grp.grpName, 0, T(java.lang.Math).min(2, #strings.length(grp.grpName)))}">그룹
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script th:if="${location.locMap != null}">
+  // #5 SetupLocation 그룹 아이콘 드래그 배치 — 레거시 AddGroupIconToMap의 scaleW/scaleH 환산과
+  // 동일한 원리로, 화면(퍼센트) 좌표를 배치도 원본 픽셀 좌표로 변환해 서버에 저장한다.
+  (function () {
+    const container = document.getElementById('mapContainer');
+    const locMapWidth = /*[[${location.locMapWidth}]]*/ 0;
+    const locMapHeight = /*[[${location.locMapHeight}]]*/ 0;
+    let dragging = null;
+
+    function clampPercent(v) { return Math.max(0, Math.min(100, v)); }
+
+    function toPercent(clientX, clientY) {
+      const rect = container.getBoundingClientRect();
+      return {
+        left: clampPercent(((clientX - rect.left) / rect.width) * 100),
+        top: clampPercent(((clientY - rect.top) / rect.height) * 100),
+      };
+    }
+
+    // CSRF 보호가 기본 켜져 있어(SecurityConfig 참고) AJAX 요청에는 토큰을 직접 헤더로 실어야 한다.
+    const csrfToken = document.querySelector('meta[name="_csrf"]')?.content;
+    const csrfHeader = document.querySelector('meta[name="_csrf_header"]')?.content;
+
+    function savePosition(marker, leftPercent, topPercent) {
+      const grpId = marker.dataset.grpId;
+      const x = Math.round((leftPercent / 100) * locMapWidth);
+      const y = Math.round((topPercent / 100) * locMapHeight);
+      const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      if (csrfToken && csrfHeader) headers[csrfHeader] = csrfToken;
+      fetch('/gates/groups/' + grpId + '/position', {
+        method: 'POST',
+        headers: headers,
+        body: 'x=' + x + '&y=' + y,
+      }).then(function (res) {
+        // fetch는 4xx/5xx여도 reject하지 않으므로 상태코드를 직접 확인해야 실패를 놓치지 않는다.
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      }).catch(function () {
+        alert('그룹 "' + marker.dataset.grpName + '" 위치 저장에 실패했습니다. 다시 시도해 주세요.');
+      });
+    }
+
+    container.querySelectorAll('.group-marker').forEach(function (marker) {
+      marker.addEventListener('pointerdown', function (e) {
+        dragging = marker;
+        marker.setPointerCapture(e.pointerId);
+        marker.style.cursor = 'grabbing';
+      });
+    });
+
+    container.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      const pos = toPercent(e.clientX, e.clientY);
+      dragging.style.left = pos.left + '%';
+      dragging.style.top = pos.top + '%';
+    });
+
+    function endDrag(e) {
+      if (!dragging) return;
+      const pos = toPercent(e.clientX, e.clientY);
+      savePosition(dragging, pos.left, pos.top);
+      dragging.style.cursor = 'grab';
+      dragging = null;
+    }
+
+    container.addEventListener('pointerup', endDrag);
+    container.addEventListener('pointercancel', endDrag);
+  })();
+</script>
+</body>
+</html>

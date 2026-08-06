@@ -11,6 +11,11 @@
   <meta charset="UTF-8"/>
   <title layout:title-pattern="$CONTENT_TITLE · securance">securance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <!-- Thymeleaf <form> 태그는 thymeleaf-extras-springsecurity6가 CSRF hidden input을 자동으로 넣어주지만,
+       fetch()로 보내는 AJAX 요청은 그 대상이 아니라서 직접 헤더에 실어야 한다(SecurityConfig에 csrf 비활성화
+       설정이 없으므로 기본적으로 보호가 켜져 있다). 화면 스크립트는 이 meta 값을 읽어 X-CSRF-TOKEN으로 보낸다. -->
+  <meta name="_csrf" th:content="${_csrf.token}"/>
+  <meta name="_csrf_header" th:content="${_csrf.headerName}"/>
   <link rel="stylesheet" th:href="@{/vendor/adminlte/css/adminlte.min.css}"/>
   <script>
     // FOUC 방지를 위해 head에서 즉시 적용 — adminlte-react와 동일한 localStorage 키(lte-theme) 사용.

@@ -48,6 +48,13 @@ spring:
   thymeleaf:
     cache: false # 운영 프로필(application-prod.yml)에서 true로 재정의.
 
+  servlet:
+    multipart:
+      # #5 SetupLocation 배치도 이미지 업로드 — 레거시도 10MB 초과 파일을 거부한다(SR_F_SetupLocation
+      # pbImgSel_MouseClick의 FileInfo.Length > 10485760 체크와 동일 상한).
+      max-file-size: 10MB
+      max-request-size: 10MB
+
   # RabbitMQ/Redis는 항상 오토컨피규레이션 대상이며, 실제 연결 시도는 아래 securance.* 플래그로
   # on/off 제어한다(계획서 6절 — 재배포 없이 설정 변경만으로 전환).
   rabbitmq:
@@ -93,6 +100,7 @@ securance:
   location:
     place-cd: ""                # 레거시 [LOCATION] PLACE_CD
     group-cd: ""                # 레거시 [LOCATION] GROUP_CD
+    image-dir: ${SECURANCE_LOC_IMAGE_DIR:./data/loc-images} # #5 SetupLocation 배치도 이미지 저장 경로(WebConfig가 /loc-images/**로 서빙)
 
   cloud:
     addr: ""                    # 레거시 [CLOUD] CLOUD_ADDR

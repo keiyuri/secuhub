@@ -6,6 +6,7 @@ kotlinx-coroutines = "1.11.0"
 mariadb-jdbc = "3.5.10"
 thymeleaf-layout-dialect = "4.0.1"
 winsw = "2.12.0"
+apache-poi = "5.4.1"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -14,6 +15,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 mariadb-java-client = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "mariadb-jdbc" }
 flyway-mysql = { module = "org.flywaydb:flyway-mysql" }
 thymeleaf-layout-dialect = { module = "nz.net.ultraq.thymeleaf:thymeleaf-layout-dialect", version.ref = "thymeleaf-layout-dialect" }
+poi-ooxml = { module = "org.apache.poi:poi-ooxml", version.ref = "apache-poi" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

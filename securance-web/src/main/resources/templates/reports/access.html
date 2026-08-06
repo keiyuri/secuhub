@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<!--/* #8 SR_F_ViewAccess — 위치/그룹/기간별 통행량 조회. */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>이용자 통계 조회</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="card card-outline card-secondary mb-3">
+    <div class="card-body py-2">
+      <form method="get" th:action="@{/reports/access}" class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-0">위치</label>
+          <select name="locId" class="form-select form-select-sm">
+            <option value="">선택하세요</option>
+            <option th:each="loc : ${allLocations}" th:value="${loc.locId}" th:text="${loc.locName}"
+                    th:selected="${loc.locId == selectedLocId}"></option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">그룹</label>
+          <select name="grpId" class="form-select form-select-sm">
+            <option value="">선택하세요</option>
+            <option th:each="grp : ${allGroups}" th:value="${grp.grpId}" th:text="${grp.grpName}"
+                    th:selected="${grp.grpId == selectedGrpId}"></option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">시작일</label>
+          <input type="date" name="fromDate" class="form-control form-control-sm" th:value="${fromDate}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">종료일</label>
+          <input type="date" name="toDate" class="form-control form-control-sm" th:value="${toDate}"/>
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-primary">조회</button>
+          <a class="btn btn-sm btn-outline-success" th:if="${result != null}"
+             th:href="@{/reports/access/excel(locId=${selectedLocId},grpId=${selectedGrpId},fromDate=${fromDate},toDate=${toDate})}">
+            엑셀 다운로드
+          </a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="row" th:if="${result != null}">
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(${result.totalIn}, '입', 'bi-arrow-down-circle', 'primary', null, null)}"></div>
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(${result.totalOut}, '출', 'bi-arrow-up-circle', 'secondary', null, null)}"></div>
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(${result.totalDoor}, '도어', 'bi-door-open', 'info', null, null)}"></div>
+  </div>
+
+  <div class="card card-outline card-primary" th:if="${result != null}">
+    <div class="card-header"><h3 class="card-title">상세 내역</h3></div>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0">
+        <thead><tr><th>일시</th><th>레인</th><th>총 통행</th><th>입</th><th>출</th><th>도어</th></tr></thead>
+        <tbody>
+          <tr th:if="${#lists.isEmpty(result.rows)}">
+            <td colspan="6" class="text-center text-muted">조회된 데이터가 없습니다.</td>
+          </tr>
+          <tr th:each="row : ${result.rows}">
+            <td th:text="${row.id.oprDate}">일시</td>
+            <td th:text="${row.id.dtlLaneNo}">0</td>
+            <td th:text="${row.totalCount}">0</td>
+            <td th:text="${row.inTotal}">0</td>
+            <td th:text="${row.outTotal}">0</td>
+            <td th:text="${row.doorTotal}">0</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="alert alert-light border" th:if="${result == null}">위치와 그룹을 선택하고 조회하세요.</div>
+
+</div>
+</body>
+</html>

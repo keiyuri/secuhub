@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<!--/*
+  #6 SR_F_SetupSchedule + #7 SR_F_Schedule 통합 / #15 SR_P_Timezone (계획서 Phase 5).
+  좌측: 타임존 등록 + 목록 + 전체 동기화(#7/#15). 우측: 위치/그룹/게이트 단위 예약 모드 일괄 적용(#6).
+*/-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>스케줄/타임존 관리</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="alert alert-success py-2" th:if="${message}" th:text="${message}"></div>
+  <div class="alert alert-danger py-2" th:if="${errorMessage}" th:text="${errorMessage}"></div>
+
+  <div class="row">
+    <!-- ── #7/#15: 타임존 등록 + 목록 + 동기화 ───────────────────────────── -->
+    <div class="col-lg-6">
+      <div class="card card-outline card-primary mb-3">
+        <div class="card-header">
+          <h3 class="card-title">타임존 등록</h3>
+        </div>
+        <div class="card-body">
+          <form th:action="@{/schedule/timezones}" th:object="${timezoneForm}" method="post">
+            <div class="row g-2 mb-3">
+              <div class="col-md-6">
+                <label class="form-label">명칭</label>
+                <input type="text" class="form-control form-control-sm" th:field="*{timezoneName}"/>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">설명</label>
+                <input type="text" class="form-control form-control-sm" th:field="*{timezoneDesc}"/>
+              </div>
+            </div>
+
+            <!--/* 4개 슬롯을 명시적으로 반복한다 — Thymeleaf th:field는 동적 프로퍼티 경로보다
+                 정적 경로가 훨씬 안전하다(레거시도 슬롯 4개가 고정이라 반복 자체가 자연스럽다). */-->
+            <div class="border rounded p-2 mb-2">
+              <div class="fw-bold small mb-1">타임존 1</div>
+              <div class="row g-1 align-items-center mb-1">
+                <div class="col-auto">
+                  <input type="number" min="0" max="23" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot1.fromHour}" placeholder="시"/>
+                  :
+                  <input type="number" min="0" max="59" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot1.fromMinute}" placeholder="분"/>
+                  ~
+                  <input type="number" min="0" max="23" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot1.toHour}" placeholder="시"/>
+                  :
+                  <input type="number" min="0" max="59" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot1.toMinute}" placeholder="분"/>
+                </div>
+              </div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot1.sunday}"/><label class="form-check-label">일</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot1.monday}"/><label class="form-check-label">월</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot1.tuesday}"/><label class="form-check-label">화</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot1.wednesday}"/><label class="form-check-label">수</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot1.thursday}"/><label class="form-check-label">목</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot1.friday}"/><label class="form-check-label">금</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot1.saturday}"/><label class="form-check-label">토</label></div>
+            </div>
+
+            <div class="border rounded p-2 mb-2">
+              <div class="fw-bold small mb-1">타임존 2</div>
+              <div class="row g-1 align-items-center mb-1">
+                <div class="col-auto">
+                  <input type="number" min="0" max="23" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot2.fromHour}" placeholder="시"/>
+                  :
+                  <input type="number" min="0" max="59" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot2.fromMinute}" placeholder="분"/>
+                  ~
+                  <input type="number" min="0" max="23" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot2.toHour}" placeholder="시"/>
+                  :
+                  <input type="number" min="0" max="59" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot2.toMinute}" placeholder="분"/>
+                </div>
+              </div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot2.sunday}"/><label class="form-check-label">일</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot2.monday}"/><label class="form-check-label">월</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot2.tuesday}"/><label class="form-check-label">화</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot2.wednesday}"/><label class="form-check-label">수</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot2.thursday}"/><label class="form-check-label">목</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot2.friday}"/><label class="form-check-label">금</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot2.saturday}"/><label class="form-check-label">토</label></div>
+            </div>
+
+            <div class="border rounded p-2 mb-2">
+              <div class="fw-bold small mb-1">타임존 3</div>
+              <div class="row g-1 align-items-center mb-1">
+                <div class="col-auto">
+                  <input type="number" min="0" max="23" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot3.fromHour}" placeholder="시"/>
+                  :
+                  <input type="number" min="0" max="59" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot3.fromMinute}" placeholder="분"/>
+                  ~
+                  <input type="number" min="0" max="23" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot3.toHour}" placeholder="시"/>
+                  :
+                  <input type="number" min="0" max="59" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot3.toMinute}" placeholder="분"/>
+                </div>
+              </div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot3.sunday}"/><label class="form-check-label">일</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot3.monday}"/><label class="form-check-label">월</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot3.tuesday}"/><label class="form-check-label">화</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot3.wednesday}"/><label class="form-check-label">수</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot3.thursday}"/><label class="form-check-label">목</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot3.friday}"/><label class="form-check-label">금</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot3.saturday}"/><label class="form-check-label">토</label></div>
+            </div>
+
+            <div class="border rounded p-2 mb-2">
+              <div class="fw-bold small mb-1">타임존 4</div>
+              <div class="row g-1 align-items-center mb-1">
+                <div class="col-auto">
+                  <input type="number" min="0" max="23" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot4.fromHour}" placeholder="시"/>
+                  :
+                  <input type="number" min="0" max="59" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot4.fromMinute}" placeholder="분"/>
+                  ~
+                  <input type="number" min="0" max="23" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot4.toHour}" placeholder="시"/>
+                  :
+                  <input type="number" min="0" max="59" style="width:4.5rem" class="form-control form-control-sm d-inline-block" th:field="*{slot4.toMinute}" placeholder="분"/>
+                </div>
+              </div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot4.sunday}"/><label class="form-check-label">일</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot4.monday}"/><label class="form-check-label">월</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot4.tuesday}"/><label class="form-check-label">화</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot4.wednesday}"/><label class="form-check-label">수</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot4.thursday}"/><label class="form-check-label">목</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot4.friday}"/><label class="form-check-label">금</label></div>
+              <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" th:field="*{slot4.saturday}"/><label class="form-check-label">토</label></div>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-sm">등록(전체 게이트 자동 전송)</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card card-outline card-secondary">
+        <div class="card-header">
+          <h3 class="card-title">등록된 타임존</h3>
+          <div class="card-tools">
+            <form th:action="@{/schedule/timezones/sync}" method="post" class="d-inline">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">전체 게이트 동기화</button>
+            </form>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped mb-0">
+            <thead><tr><th>ID</th><th>명칭</th><th>타임존1</th><th>타임존2</th><th>타임존3</th><th>타임존4</th></tr></thead>
+            <tbody>
+              <tr th:if="${#lists.isEmpty(timezones)}">
+                <td colspan="6" class="text-center text-muted">등록된 타임존이 없습니다.</td>
+              </tr>
+              <tr th:each="tz : ${timezones}">
+                <td th:text="${tz.timezoneId}">1</td>
+                <td th:text="${tz.timezoneName}">명칭</td>
+                <td th:text="${tz.timezoneFr1}"></td>
+                <td th:text="${tz.timezoneFr2}"></td>
+                <td th:text="${tz.timezoneFr3}"></td>
+                <td th:text="${tz.timezoneFr4}"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── #6: 예약 모드 일괄 적용 ────────────────────────────────────────── -->
+    <div class="col-lg-6">
+      <div class="card card-outline card-warning mb-3">
+        <div class="card-header"><h3 class="card-title">예약 모드 일괄 적용</h3></div>
+        <div class="card-body">
+          <form method="get" th:action="@{/schedule}" class="row g-2 align-items-end mb-3">
+            <div class="col-auto">
+              <label class="form-label mb-0">위치</label>
+              <select name="locId" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="">선택하세요</option>
+                <option th:each="loc : ${allLocations}" th:value="${loc.locId}" th:text="${loc.locName}"
+                        th:selected="${loc.locId == selectedLocId}"></option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <label class="form-label mb-0">그룹(선택)</label>
+              <select name="grpId" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <option th:each="grp : ${groupsForLoc}" th:value="${grp.grpId}" th:text="${grp.grpName}"
+                        th:selected="${grp.grpId == selectedGrpId}"></option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <label class="form-label mb-0">게이트(선택)</label>
+              <select name="dtlId" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <option th:each="dtl : ${detailsForGrp}" th:value="${dtl.dtlId}"
+                        th:text="'레인 ' + ${dtl.dtlLaneNo} + ' / ' + ${dtl.dtlIp}"
+                        th:selected="${dtl.dtlId == selectedDtlId}"></option>
+              </select>
+            </div>
+          </form>
+
+          <div class="alert alert-secondary py-2 small" th:if="${selectedLocId == null}">
+            위치를 먼저 선택하세요 — 그룹/게이트를 선택하지 않으면 위치(또는 그룹) 전체가 대상이 됩니다.
+          </div>
+
+          <form th:action="@{/schedule/apply}" th:object="${applyForm}" method="post" th:if="${selectedLocId != null}">
+            <input type="hidden" th:field="*{locId}"/>
+            <input type="hidden" th:field="*{grpId}"/>
+            <input type="hidden" th:field="*{dtlId}"/>
+
+            <div class="mb-2">
+              <label class="form-label mb-0">운영 모드</label>
+              <select class="form-select form-select-sm" th:field="*{userMode}">
+                <option value="CC">CC — 카드+카드</option>
+                <option value="CF">CF — 카드+프리</option>
+                <option value="FC">FC — 프리+카드</option>
+                <option value="FF">FF — 프리+프리</option>
+                <option value="OP">OP — 개방</option>
+                <option value="CL">CL — 폐쇄</option>
+                <option value="CD">CD — (레거시 결함: Normal로 동작)</option>
+                <option value="DC">DC — (레거시 결함: Normal로 동작)</option>
+                <option value="FD">FD — (레거시 결함: Normal로 동작)</option>
+                <option value="DF">DF — (레거시 결함: Normal로 동작)</option>
+              </select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label mb-0">보안 모드</label>
+              <select class="form-select form-select-sm" th:field="*{secuMode}">
+                <option value="NA">NA — 변함없음(기본)</option>
+                <option value="LM">LM — 낮음</option>
+                <option value="MM">MM — 보통</option>
+                <option value="HM">HM — 높음</option>
+              </select>
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-md-6">
+                <label class="form-label mb-0">운영모드 타임존(선택)</label>
+                <select class="form-select form-select-sm" th:field="*{userTimezoneId}">
+                  <option value="">미적용(즉시 반영)</option>
+                  <option th:each="tz : ${timezones}" th:value="${tz.timezoneId}" th:text="${tz.timezoneName}"></option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label mb-0">보안모드 타임존(선택)</label>
+                <select class="form-select form-select-sm" th:field="*{secuTimezoneId}">
+                  <option value="">미적용(즉시 반영)</option>
+                  <option th:each="tz : ${timezones}" th:value="${tz.timezoneId}" th:text="${tz.timezoneName}"></option>
+                </select>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-warning btn-sm">적용(전송 대기열 등록)</button>
+          </form>
+
+          <form th:action="@{/schedule/reset}" th:object="${applyForm}" method="post" class="mt-2" th:if="${selectedLocId != null}"
+                onsubmit="return confirm('예약을 초기화(해제)하시겠습니까?');">
+            <input type="hidden" th:field="*{locId}"/>
+            <input type="hidden" th:field="*{grpId}"/>
+            <input type="hidden" th:field="*{dtlId}"/>
+            <button type="submit" class="btn btn-outline-danger btn-sm">예약 초기화(해제)</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

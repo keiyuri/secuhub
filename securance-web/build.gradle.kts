@@ -12,10 +12,26 @@ dependencies {
 
     implementation(project(":securance-common"))
     implementation(project(":securance-domain"))
+    // Phase 4(#12 GateModeChange, #13 GateSetupMotor) — 제어 명령 패킷 빌더(GateControlCommandBuilder)
+    // 재사용을 위해 securance-protocol에 의존한다. 이 모듈은 Netty/Spring 의존이 없는 순수 Kotlin이라
+    // securance-web -> securance-server 의존을 만들지 않는다(계획서 4절, 모듈 경계 유지).
+    implementation(project(":securance-protocol"))
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("org.springframework.boot:spring-boot-starter-security")
+    // Phase 3 실시간 대시보드(계획서 4절 결정: WebSocket + 폴링 하이브리드) — 순정 WebSocket API만
+    // 쓰고 STOMP/SockJS는 도입하지 않는다(별도 클라이언트 JS 벤더링 없이 브라우저 내장 WebSocket으로
+    // 충분하기 때문 — vendor/ 디렉터리에 외부 JS 라이브러리를 추가로 받아오지 않아도 됨).
+    implementation("org.springframework.boot:spring-boot-starter-websocket")
+    // spring-boot-starter-web이 jackson-databind를 런타임에 끌고 오지만, DashboardPushService가
+    // ObjectMapper를 직접 컴파일 타임에 참조하므로 명시적으로 선언한다.
+    implementation("com.fasterxml.jackson.core:jackson-databind")
+    // #4/#11 화면의 폼 검증(jakarta.validation.constraints.*) — 이전까지는 화면에 폼이 없어 불필요했다.
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+    // #8/#9 조회 화면의 엑셀 내보내기 공용 컴포넌트(ExcelExportService, 계획서 5절) — 레거시
+    // `SR_C_Excel.DtToExcel` 대응.
+    implementation(libs.poi.ooxml)
     implementation("org.thymeleaf.extras:thymeleaf-extras-springsecurity6")
     implementation(libs.thymeleaf.layout.dialect)
 

@@ -57,20 +57,17 @@ class ReqStatusJob : QuartzJobBean() {
 
     private fun requestStatus(state: GateConnectionState) {
         try {
-            // sendToLane은 커넥션 단위(dtlIp)로 액터 큐에 enqueue하므로, 다중 레인 소켓이라도
-            // 대표 레인 하나만으로 충분하다 — 실제 패킷은 소켓(커넥션) 단위로 1회만 나간다.
-            val representativeLane = state.laneSnapshot().minOrNull() ?: 1
+            // 상태 조회 패킷은 특정 레인이 아니라 커넥션(장치) 전체를 대상으로 한다 — 임의로 고른
+            // "대표 레인"이 sendToLane의 소유권 검사(레인 집합이 authoritative하게 비어있는 특이
+            // 케이스 등)에 걸려 영구적으로 거부될 수 있으므로, 레인 소유권과 무관한
+            // sendToConnection을 쓴다.
             val packet = state.codec.buildStatusRequest()
-            val sent = registry.sendToLane(state.dtlIp, representativeLane, packet)
+            val sent = registry.sendToConnection(state.dtlIp, packet)
 
             if (sent) {
-                logger.debug("[ReqStatus] 상태 조회 전송: ip={}, lane={}", state.dtlIp, representativeLane)
+                logger.debug("[ReqStatus] 상태 조회 전송: ip={}", state.dtlIp)
             } else {
-                logger.warn(
-                    "[ReqStatus] 상태 조회 전송 실패(연결 없음/대기열 초과 등): ip={}, lane={}",
-                    state.dtlIp,
-                    representativeLane,
-                )
+                logger.warn("[ReqStatus] 상태 조회 전송 실패(연결 없음/대기열 초과 등): ip={}", state.dtlIp)
             }
         } catch (ex: Exception) {
             // 커넥션 하나의 처리 실패가 다른 커넥션의 상태 조회에 영향을 주지 않도록 여기서 흡수한다.

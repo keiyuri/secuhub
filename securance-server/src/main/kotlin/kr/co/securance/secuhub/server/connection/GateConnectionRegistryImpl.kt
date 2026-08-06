@@ -57,16 +57,24 @@ class GateConnectionRegistryImpl(
     override fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean {
         val state = connections[dtlIp] ?: return false
         if (!state.ownsLane(dtlLaneNo) && state.hasAuthoritativeLaneInfo) return false
-        return try {
+        return enqueueSend(state, packet, "lane=$dtlLaneNo")
+    }
+
+    override fun sendToConnection(dtlIp: String, packet: ByteArray): Boolean {
+        val state = connections[dtlIp] ?: return false
+        return enqueueSend(state, packet, "connection")
+    }
+
+    private fun enqueueSend(state: GateConnectionState, packet: ByteArray, logContext: String): Boolean =
+        try {
             state.actor.submit {
                 state.outbound.sendByteArray(Mono.just(packet)).then().awaitFirstOrNull()
             }
             true
         } catch (ex: GateTaskRejectedException) {
-            logger.warn("커넥션[{}] 전송 거부(대기열 초과): lane={}", dtlIp, dtlLaneNo, ex)
+            logger.warn("커넥션[{}] 전송 거부(대기열 초과): {}", state.dtlIp, logContext, ex)
             false
         }
-    }
 
     /** `tb_net_state` 갱신을 파티션 큐(3.5절)에 위임한다 — 디바이스 IP당 순서가 보장된다. */
     fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean) {

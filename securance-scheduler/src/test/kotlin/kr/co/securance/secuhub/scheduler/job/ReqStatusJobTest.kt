@@ -48,7 +48,7 @@ class ReqStatusJobTest {
     }
 
     @Test
-    fun `각 커넥션의 대표 레인으로 상태 조회 패킷을 전송한다`() {
+    fun `각 커넥션 단위로(레인 무관) 상태 조회 패킷을 전송한다`() {
         val registry = FakeGateConnectionRegistry(sendResult = true)
         registry.addConnection(buildState("192.168.0.10", lanes = setOf(3, 1, 2)))
         registry.addConnection(buildState("192.168.0.11", lanes = setOf(5)))
@@ -56,23 +56,27 @@ class ReqStatusJobTest {
         val job = buildJob(registry)
         job.execute(context)
 
-        assertEquals(2, registry.sentCalls.size)
-        val byIp = registry.sentCalls.associateBy { it.first }
-        assertEquals(1, byIp.getValue("192.168.0.10").second) // minOrNull() == 1
-        assertEquals(5, byIp.getValue("192.168.0.11").second)
+        assertEquals(2, registry.sentToConnectionCalls.size)
+        assertTrue(registry.sentCalls.isEmpty()) // 레인 단위 sendToLane은 쓰지 않는다.
+        val byIp = registry.sentToConnectionCalls.associate { it.first to it.second }
         // 상태 조회 패킷은 비어있지 않아야 한다.
-        assertTrue(byIp.getValue("192.168.0.10").third.isNotEmpty())
+        assertTrue(byIp.getValue("192.168.0.10").isNotEmpty())
+        assertTrue(byIp.getValue("192.168.0.11").isNotEmpty())
     }
 
     @Test
-    fun `레인 정보가 없으면 기본 레인 1로 전송한다`() {
+    fun `레인 집합이 authoritative하게 비어 있어도 레인 소유권과 무관하게 전송한다`() {
+        // 회귀 방지: 예전 구현은 "대표 레인"을 임의로 골라 sendToLane을 호출했는데, 레인 집합이
+        // authoritative하게 비어 있는 특이 케이스에서는 실제 GateConnectionRegistryImpl의 레인
+        // 소유권 검사에 걸려 영구적으로 전송이 거부될 수 있었다. sendToConnection은 레인 소유권을
+        // 보지 않으므로 이 케이스에서도 정상 전송되어야 한다.
         val registry = FakeGateConnectionRegistry(sendResult = true)
         registry.addConnection(buildState("192.168.0.20", lanes = emptySet()))
 
         val job = buildJob(registry)
         job.execute(context)
 
-        assertEquals(1, registry.sentCalls.single().second)
+        assertEquals("192.168.0.20", registry.sentToConnectionCalls.single().first)
     }
 
     @Test
@@ -84,6 +88,6 @@ class ReqStatusJobTest {
         val job = buildJob(registry)
         job.execute(context) // 예외 없이 완료되어야 한다.
 
-        assertEquals(2, registry.sentCalls.size)
+        assertEquals(2, registry.sentToConnectionCalls.size)
     }
 }

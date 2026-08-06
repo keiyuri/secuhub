@@ -114,8 +114,11 @@ class SendControlJob : QuartzJobBean() {
                 dataSendRepository.save(row)
                 recentSendAttempts.remove(sndId)
 
+                // [수정] 레거시는 `snd_data_tp.Split('_')[0] == "RESET"`처럼 첫 토큰 완전 일치로
+                // 판정한다. `startsWith`는 "RESETUP" 같은 향후 코드값도 오탐할 수 있어 첫 토큰
+                // 완전 일치로 좁힌다.
                 val typeCd = row.sndTypeCd
-                if (typeCd != null && typeCd.startsWith(RESET_TYPE_PREFIX)) {
+                if (typeCd != null && typeCd.split("_").firstOrNull() == RESET_TYPE_PREFIX) {
                     resolveGateErrors(row.dtlIp, row.sndUser)
                 }
 

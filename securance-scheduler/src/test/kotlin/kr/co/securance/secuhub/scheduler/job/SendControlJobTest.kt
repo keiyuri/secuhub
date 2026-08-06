@@ -179,4 +179,22 @@ class SendControlJobTest {
         verify(analRepo, times(0))
             .resolveUnresolvedErrors(eqMatcher(row.dtlIp), anyMatcher(), anyMatcher())
     }
+
+    @Test
+    fun `RESET으로 시작하지만 첫 토큰이 정확히 일치하지 않는 snd_type_cd는 resolve 처리하지 않는다`() {
+        // 레거시는 snd_data_tp.Split('_')[0] == "RESET" 완전 일치로 판정한다. "RESETUP"처럼
+        // RESET으로 시작만 하는 값을 startsWith로 오판하지 않는지 검증한다.
+        val row = buildRow(sndId = 6L, sndTypeCd = "RESETUP_MOTOR")
+        val registry = FakeGateConnectionRegistry(sendResult = true)
+        val repo = mock(DataSendRepository::class.java)
+        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        val analRepo = mock(DataReceiveAnalysisRepository::class.java)
+
+        val job = buildJob(registry, repo, analRepo)
+        job.execute(context)
+
+        assertEquals("Y", row.sndYn)
+        verify(analRepo, times(0))
+            .resolveUnresolvedErrors(eqMatcher(row.dtlIp), anyMatcher(), anyMatcher())
+    }
 }

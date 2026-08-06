@@ -20,6 +20,9 @@ class FakeGateConnectionRegistry(
     /** (dtlIp, dtlLaneNo, packet) 순서로 기록되는 전송 호출 이력 — 병렬 실행 테스트에서도 안전하게 기록. */
     val sentCalls = CopyOnWriteArrayList<Triple<String, Int, ByteArray>>()
 
+    /** [sendToConnection] 호출 이력(레인 무관 커넥션 단위 전송, `ReqStatusJob`용). */
+    val sentToConnectionCalls = CopyOnWriteArrayList<Pair<String, ByteArray>>()
+
     private val states = ConcurrentHashMap<String, GateConnectionState>()
 
     fun addConnection(state: GateConnectionState) {
@@ -36,6 +39,11 @@ class FakeGateConnectionRegistry(
 
     override fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean {
         sentCalls.add(Triple(dtlIp, dtlLaneNo, packet))
+        return sendResult
+    }
+
+    override fun sendToConnection(dtlIp: String, packet: ByteArray): Boolean {
+        sentToConnectionCalls.add(dtlIp to packet)
         return sendResult
     }
 }

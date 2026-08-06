@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kr.co.securance.secuhub.common.exception.GateTaskRejectedException
 import org.slf4j.LoggerFactory
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 커넥션 1개(디바이스 IP 1개)를 위한 직렬 처리 액터(계획서 3.3절).
@@ -30,6 +31,18 @@ class GateConnectionActor(
     private val scope = CoroutineScope(dispatcher + job)
 
     private val channel = Channel<suspend () -> Unit>(capacity = queueCapacity)
+
+    /**
+     * [submitAndAwait]가 대기 중인 완료 신호들을 추적한다.
+     *
+     * [Codex 적대적 리뷰 수정] 원래 `close()`는 채널을 닫고 `job.cancel()`만 호출했는데, 이미 큐에
+     * 들어가 실행을 기다리던(또는 취소로 인해 아예 실행되지 못한) 작업의 `CompletableDeferred`는
+     * 아무도 완료시키지 않았다 — 재연결로 옛 액터가 교체/close될 때 그 큐에 남아있던 전송 작업을
+     * 기다리던 `SendControlJob.processRow`의 `completion.await()`가 영원히 끝나지 않고,
+     * `@DisallowConcurrentExecution` 때문에 이후 잡 실행 전체가 막히는 치명적 결함이었다.
+     * 이제 `close()`가 아직 완료되지 않은 모든 항목을 예외로 완료시켜 대기자가 반드시 깨어나게 한다.
+     */
+    private val pendingCompletions = ConcurrentHashMap.newKeySet<CompletableDeferred<Unit>>()
 
     @Volatile
     private var closed = false
@@ -72,28 +85,45 @@ class GateConnectionActor(
      */
     suspend fun submitAndAwait(task: suspend () -> Unit): Boolean {
         val completion = CompletableDeferred<Unit>()
-        submit {
-            try {
-                task()
-                completion.complete(Unit)
-            } catch (ex: Exception) {
-                completion.completeExceptionally(ex)
-                throw ex // 액터 루프의 기존 예외 로그도 그대로 남긴다.
+        pendingCompletions += completion
+        try {
+            submit {
+                try {
+                    task()
+                    completion.complete(Unit)
+                } catch (ex: Exception) {
+                    completion.completeExceptionally(ex)
+                    throw ex // 액터 루프의 기존 예외 로그도 그대로 남긴다.
+                }
             }
+        } catch (ex: GateTaskRejectedException) {
+            // 큐에 등록조차 되지 못했으므로 close()가 이 항목을 처리할 일이 없다 — 직접 정리한다.
+            pendingCompletions -= completion
+            throw ex
         }
         return try {
             completion.await()
             true
         } catch (ex: Exception) {
             false
+        } finally {
+            pendingCompletions -= completion
         }
     }
 
-    /** 대기 중인 작업을 모두 버리고 액터를 종료한다. 이후 [submit]은 항상 거부된다. */
+    /**
+     * 대기 중인 작업을 모두 버리고 액터를 종료한다. 이후 [submit]은 항상 거부된다.
+     *
+     * [Codex 적대적 리뷰 수정] 아직 완료되지 않은 [pendingCompletions]를 전부 예외로 완료시켜,
+     * 큐에서 실행되지 못한/실행 도중 취소된 작업을 [submitAndAwait]로 기다리던 호출자가
+     * 무기한 멈추지 않도록 한다.
+     */
     fun close() {
         closed = true
         channel.close()
         job.cancel()
+        val closedCause = GateTaskRejectedException(connectionKey)
+        pendingCompletions.forEach { it.completeExceptionally(closedCause) }
     }
 
     val isClosed: Boolean get() = closed

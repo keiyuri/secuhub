@@ -147,21 +147,87 @@ class SendControlJobTest {
     }
 
     @Test
-    fun `RESET으로 시작하는 snd_type_cd 전송 성공 시 미해결 오류를 resolve 처리한다`() {
+    fun `RESET_MOTOR 전송 성공 시 모터 오류 resolve만 호출한다`() {
         val row = buildRow(sndId = 4L, sndTypeCd = "RESET_MOTOR", sndUser = "operator1")
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
         `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
-        `when`(analRepo.resolveUnresolvedErrors(eqMatcher(row.dtlIp), eqMatcher("operator1"), anyMatcher<LocalDateTime>()))
-            .thenReturn(2)
+        `when`(
+            analRepo.resolveMotorErrors(
+                eqMatcher(row.dtlIp), eqMatcher("operator1"), anyMatcher<LocalDateTime>(), anyMatcher(), anyMatcher(),
+            ),
+        ).thenReturn(2)
 
         val job = buildJob(registry, repo, analRepo)
         job.execute(context)
 
         assertEquals("Y", row.sndYn)
         verify(analRepo, times(1))
-            .resolveUnresolvedErrors(eqMatcher(row.dtlIp), eqMatcher("operator1"), anyMatcher())
+            .resolveMotorErrors(eqMatcher(row.dtlIp), eqMatcher("operator1"), anyMatcher(), anyMatcher(), anyMatcher())
+        verify(analRepo, times(0))
+            .resolveSensorErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
+        verify(analRepo, times(0))
+            .resolveGateErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
+    }
+
+    @Test
+    fun `RESET_OPER 전송 성공 시 센서 오류 resolve만 호출한다`() {
+        val row = buildRow(sndId = 41L, sndTypeCd = "RESET_OPER", sndUser = "operator1")
+        val registry = FakeGateConnectionRegistry(sendResult = true)
+        val repo = mock(DataSendRepository::class.java)
+        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        val analRepo = mock(DataReceiveAnalysisRepository::class.java)
+
+        val job = buildJob(registry, repo, analRepo)
+        job.execute(context)
+
+        assertEquals("Y", row.sndYn)
+        verify(analRepo, times(1))
+            .resolveSensorErrors(eqMatcher(row.dtlIp), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
+        verify(analRepo, times(0))
+            .resolveMotorErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
+    }
+
+    @Test
+    fun `RESET_GATE 전송 성공 시 게이트 오류 resolve만 호출한다`() {
+        val row = buildRow(sndId = 42L, sndTypeCd = "RESET_GATE", sndUser = "operator1")
+        val registry = FakeGateConnectionRegistry(sendResult = true)
+        val repo = mock(DataSendRepository::class.java)
+        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        val analRepo = mock(DataReceiveAnalysisRepository::class.java)
+
+        val job = buildJob(registry, repo, analRepo)
+        job.execute(context)
+
+        assertEquals("Y", row.sndYn)
+        verify(analRepo, times(1))
+            .resolveGateErrors(eqMatcher(row.dtlIp), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
+        verify(analRepo, times(0))
+            .resolveMotorErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
+    }
+
+    @Test
+    fun `인식할 수 없는 RESET 서브타입은 어떤 resolve도 호출하지 않는다`() {
+        // [Codex 적대적 리뷰 회귀 테스트] 서브타입을 판별할 수 없다고 해서 "전부 resolve"로
+        // 폭넓게 처리하면 무관한 오류까지 지워질 수 있다 — 레거시 switch문처럼 아무 것도 갱신하지
+        // 않는 안전한 기본값을 유지해야 한다.
+        val row = buildRow(sndId = 43L, sndTypeCd = "RESET_UNKNOWN")
+        val registry = FakeGateConnectionRegistry(sendResult = true)
+        val repo = mock(DataSendRepository::class.java)
+        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        val analRepo = mock(DataReceiveAnalysisRepository::class.java)
+
+        val job = buildJob(registry, repo, analRepo)
+        job.execute(context)
+
+        assertEquals("Y", row.sndYn)
+        verify(analRepo, times(0))
+            .resolveMotorErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
+        verify(analRepo, times(0))
+            .resolveSensorErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
+        verify(analRepo, times(0))
+            .resolveGateErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
     }
 
     @Test
@@ -177,7 +243,7 @@ class SendControlJobTest {
 
         assertEquals("Y", row.sndYn)
         verify(analRepo, times(0))
-            .resolveUnresolvedErrors(eqMatcher(row.dtlIp), anyMatcher(), anyMatcher())
+            .resolveMotorErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
     }
 
     @Test
@@ -195,6 +261,6 @@ class SendControlJobTest {
 
         assertEquals("Y", row.sndYn)
         verify(analRepo, times(0))
-            .resolveUnresolvedErrors(eqMatcher(row.dtlIp), anyMatcher(), anyMatcher())
+            .resolveMotorErrors(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())
     }
 }

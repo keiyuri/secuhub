@@ -19,7 +19,9 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.scheduling.quartz.QuartzJobBean
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -123,8 +125,9 @@ class SendControlJob : QuartzJobBean() {
                 // 판정한다. `startsWith`는 "RESETUP" 같은 향후 코드값도 오탐할 수 있어 첫 토큰
                 // 완전 일치로 좁힌다.
                 val typeCd = row.sndTypeCd
-                if (typeCd != null && typeCd.split("_").firstOrNull() == RESET_TYPE_PREFIX) {
-                    resolveGateErrors(row.dtlIp, row.sndUser)
+                val typeParts = typeCd?.split("_") ?: emptyList()
+                if (typeParts.firstOrNull() == RESET_TYPE_PREFIX) {
+                    resolveGateErrors(row.dtlIp, row.sndUser, subType = typeParts.getOrNull(1))
                 }
 
                 logger.debug("[SendJob] 전송 및 갱신 완료: snd_id={}, ip={}", sndId, row.dtlIp)
@@ -151,23 +154,46 @@ class SendControlJob : QuartzJobBean() {
     /**
      * 리셋 플래그 연동(레거시 `FinalizeSuccessfulSend`의 `UpdateResetFlagMotor/Sensor/Gate` 대응).
      *
-     * [스코프 제한] 레거시는 서브타입(MOTOR/OPER/GATE)별로 다른 컬럼을 갱신했으나, 정확한 서브타입-
-     * 컬럼 매핑을 원본 SQL 없이 추측하는 것은 위험하다고 판단해 이번 구현은 "해당 게이트(dtlIp)의
-     * 미해결 오류 전체를 resolve 처리"로 스코프를 좁혔다. 정확한 서브타입별 컬럼 매핑은 후속 작업으로
-     * 남긴다([DataReceiveAnalysisRepository.resolveUnresolvedErrors] 문서 참고).
+     * [Codex 적대적 리뷰 수정] 예전에는 서브타입을 구분하지 않고 `dtlIp`의 미해결 오류 전체를
+     * resolve 처리했다 — 모터 하나만 RESET해도 같은 IP의 무관한 활성 오류(예: 화재경보)까지 함께
+     * 사라지는 결함이었다. 레거시 SQL(`ClsMariaDB.UpdateResetFlagMotor/Sensor/UpdateResetFlag`)을
+     * 다시 확인해 서브타입(`snd_type_cd`의 두 번째 토큰: MOTOR/OPER/GATE)별로 정확히 대응하는
+     * 컬럼 조건의 리포지토리 메서드를 각각 호출한다. 인식할 수 없는 서브타입은 — 레거시도
+     * `switch`문에 없는 값이면 아무 것도 갱신하지 않았으므로 — 동일하게 아무 것도 resolve하지
+     * 않고 경고만 남긴다(예전처럼 안전 실패 대신 "전부 resolve"로 폭넓게 처리하지 않는다).
      */
-    private fun resolveGateErrors(dtlIp: String, sndUser: String?) {
+    private suspend fun resolveGateErrors(dtlIp: String, sndUser: String?, subType: String?) {
+        val resolveUser = sndUser ?: "system"
+        val now = LocalDateTime.now()
+        // 레거시 `UpdateResetFlagGeneric`과 동일하게 "어제 00:00 ~ 오늘 23:59"로 대상을 제한한다.
+        val today = LocalDate.now()
+        val sinceDate = today.minusDays(1).format(ANAL_DATE_PATTERN) + "0000"
+        val untilDate = today.format(ANAL_DATE_PATTERN) + "2359"
+
         try {
-            val resolvedCount = dataReceiveAnalysisRepository.resolveUnresolvedErrors(
-                dtlIp = dtlIp,
-                resolveUser = sndUser ?: "system",
-                resolveDate = LocalDateTime.now(),
-            )
+            val resolvedCount = when (subType) {
+                RESET_SUBTYPE_MOTOR -> dataReceiveAnalysisRepository.resolveMotorErrors(dtlIp, resolveUser, now, sinceDate, untilDate)
+                RESET_SUBTYPE_OPER -> dataReceiveAnalysisRepository.resolveSensorErrors(dtlIp, resolveUser, now, sinceDate, untilDate)
+                RESET_SUBTYPE_GATE -> dataReceiveAnalysisRepository.resolveGateErrors(dtlIp, resolveUser, now, sinceDate, untilDate)
+                else -> {
+                    logger.warn(
+                        "[SendJob] 인식할 수 없는 RESET 서브타입이라 오류 resolve를 건너뜁니다. snd_type_cd 서브타입={}, ip={}",
+                        subType,
+                        dtlIp,
+                    )
+                    0
+                }
+            }
             if (resolvedCount > 0) {
-                logger.debug("[SendJob] 리셋 명령 전송 성공 — 미해결 오류 {}건 resolve 처리: ip={}", resolvedCount, dtlIp)
+                logger.debug(
+                    "[SendJob] RESET_{} 명령 전송 성공 — 미해결 오류 {}건 resolve 처리: ip={}",
+                    subType,
+                    resolvedCount,
+                    dtlIp,
+                )
             }
         } catch (ex: Exception) {
-            logger.error("[SendJob] 리셋 플래그 갱신 중 오류: ip={}", dtlIp, ex)
+            logger.error("[SendJob] 리셋 플래그 갱신 중 오류: ip={}, 서브타입={}", dtlIp, subType, ex)
         }
     }
 
@@ -185,6 +211,14 @@ class SendControlJob : QuartzJobBean() {
         private const val PENDING_SND_YN = "N"
         private const val PENDING_CHK_YN = "N"
         private const val RESET_TYPE_PREFIX = "RESET"
+
+        // 레거시 `ClsConst.PROBLEM_MOTOR/OPER/GATE`(= snd_type_cd의 "RESET_" 다음 토큰) 대응.
+        private const val RESET_SUBTYPE_MOTOR = "MOTOR"
+        private const val RESET_SUBTYPE_OPER = "OPER"
+        private const val RESET_SUBTYPE_GATE = "GATE"
+
+        /** `anal_date`(yyyyMMddHHmm 문자열) 비교용 날짜 포맷 — 레거시 `DATE_FORMAT(...,'%Y%m%d')` 대응. */
+        private val ANAL_DATE_PATTERN: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
 
         /** 레거시 `RESEND_GUARD`(5초) 대응 — snd_id별 짧은 쿨다운으로 물리적 재전송을 억제한다. */
         private val RESEND_GUARD: Duration = Duration.ofSeconds(5)

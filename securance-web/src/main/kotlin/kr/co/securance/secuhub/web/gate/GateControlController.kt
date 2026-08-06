@@ -3,6 +3,7 @@ package kr.co.securance.secuhub.web.gate
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Pattern
 import kr.co.securance.secuhub.common.util.HexCodec
 import kr.co.securance.secuhub.domain.entity.DataSend
 import kr.co.securance.secuhub.domain.entity.GateDetail
@@ -109,10 +110,17 @@ class GateControlService(
     }
 }
 
+// Opus 전체 리뷰 지적: GateControlCommandBuilder.buildModeChangeCommand는 알 수 없는 controlType을
+// 예외 없이 조용히 NORMAL로 처리하기 때문에 패킷 조립 단계의 화이트리스트만으로는 저장되는
+// tb_data_snd.snd_type_cd(=사용자 입력 그대로인 "MODE_$combined")를 막지 못한다 — 여기서 폼 단계에
+// buildModeChangeCommand의 화이트리스트(주석 참고)와 동일한 값만 허용해 임의 문자열이 DB에 저장되는
+// 것을 원천 차단한다.
 data class ModeChangeForm(
     @field:NotBlank(message = "운영 모드를 선택하세요")
+    @field:Pattern(regexp = "CC|CF|FC|FF|OP|RP|CL|CS|CX|XC|FX|XF", message = "허용되지 않은 운영 모드입니다")
     var userMode: String = "CC",
     @field:NotBlank(message = "보안 모드를 선택하세요")
+    @field:Pattern(regexp = "LM|MM|HM", message = "허용되지 않은 보안 모드입니다")
     var secuMode: String = "LM",
 )
 

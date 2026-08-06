@@ -24,14 +24,17 @@ class GateResetGridService(
 ) {
     fun rowsFor(grpId: Long?): List<GateResetRow> {
         if (grpId == null) return emptyList()
-        val netStateByLane = netStateRepository.findByIdGrpId(grpId).associateBy { it.id.dtlLaneNo }
+        // Opus 전체 리뷰 지적: dtlLaneNo만으로 키를 만들면 같은 그룹 안에 IP가 다른 두 장비가
+        // 같은 레인 번호를 쓸 때 한쪽 상태가 다른 쪽에 덮어써진다. tb_net_state의 실제 복합키
+        // (dtlIp, dtlLaneNo, ...)와 동일하게 (dtlIp, dtlLaneNo) 조합으로 키를 만든다.
+        val netStateByKey = netStateRepository.findByIdGrpId(grpId).associateBy { it.id.dtlIp to it.id.dtlLaneNo }
         return detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(grpId).map { detail ->
             GateResetRow(
                 dtlId = requireNotNull(detail.dtlId),
                 dtlLaneNo = detail.dtlLaneNo,
                 dtlIp = detail.dtlIp,
                 dtlName = detail.dtlName,
-                online = netStateByLane[detail.dtlLaneNo]?.isOnline ?: false,
+                online = netStateByKey[detail.dtlIp to detail.dtlLaneNo]?.isOnline ?: false,
             )
         }
     }

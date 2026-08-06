@@ -84,8 +84,11 @@ class DashboardPushService(
         listOfNotNull(error.descFireAlarm, error.descMainMotorError, error.descSlaveMotorError)
             .firstOrNull() ?: "오류 상세 미확인"
 
-    /** [kr.co.securance.secuhub.web.dashboard.DashboardService]의 미해결 오류 조건과 동일
-     * (errType=3, hasErrorEvent=true, resolveYn='N') + analId 하한. */
+    /** [kr.co.securance.secuhub.web.dashboard.DashboardService]/[DataReceiveAnalysisRepository.findRecentUnresolvedErrors]
+     * 의 미해결 오류 조건과 동일(errType=3, hasErrorEvent=true, resolveYn='N', analType IN ('PLM','STA')) + analId 하한.
+     *
+     * Opus 전체 리뷰 지적: 예전에는 analType 조건이 빠져 있었다 — 대시보드 위젯(개수/목록)에는 절대
+     * 나타나지 않는 analType의 오류가 실시간 팝업으로는 튀어나오는 불일치가 있었다. */
     private fun newUnresolvedErrorsSpec(sinceExclusive: Long): Specification<DataReceiveAnalysis> =
         Specification { root, _, cb ->
             cb.and(
@@ -93,6 +96,7 @@ class DashboardPushService(
                 cb.equal(root.get<Int>("errType"), 3),
                 cb.equal(root.get<Boolean>("hasErrorEvent"), true),
                 cb.equal(root.get<String>("resolveYn"), "N"),
+                root.get<String>("analType").`in`("PLM", "STA"),
             )
         }
 

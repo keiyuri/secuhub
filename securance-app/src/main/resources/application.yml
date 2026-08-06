@@ -14,9 +14,9 @@ spring:
     web-application-type: servlet
 
   datasource:
-    url: ${SECURANCE_DB_URL:jdbc:mariadb://localhost:3306/securance_gate}
-    username: ${SECURANCE_DB_USER:securance}
-    password: ${SECURANCE_DB_PASSWORD:}
+    url: ${SECURANCE_DB_URL:jdbc:mariadb://192.168.0.91:28030/securance_gate}
+    username: ${SECURANCE_DB_USER:dba}
+    password: ${SECURANCE_DB_PASSWORD:securance}
     driver-class-name: org.mariadb.jdbc.Driver
     hikari:
       # 커넥션 풀에서 커넥션을 얻지 못할 때(풀 고갈/DB 응답 없음) 대기하는 상한.

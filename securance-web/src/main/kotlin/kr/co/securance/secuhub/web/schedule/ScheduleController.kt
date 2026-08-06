@@ -73,13 +73,18 @@ class TimeZoneService(
 
         entity.timezoneHexData = HexCodec.toHex(hexBytes)
         slotForms.forEachIndexed { index, slot ->
-            val period = if (slot.isBlank()) "" else "%02d:%02d ~ %02d:%02d".format(slot.fromHour, slot.fromMinute, slot.toHour, slot.toMinute)
+            // Opus 전체 리뷰 지적: "HH:mm ~ HH:mm" 형태로 합쳐서 timezone_fr*(VARCHAR(10)) 하나에
+            // 몰아넣으면 13자가 되어 strict 모드 MariaDB에서 저장 자체가 실패한다. 스키마에는
+            // 애초에 fr/to가 별도 컬럼(timezone_fr*/timezone_to*, 각 VARCHAR(10))으로 설계돼 있으므로
+            // "HH:mm"(5자)씩 나눠 그대로 사용한다 — 컬럼 폭도 지키고 엔티티 설계 의도에도 맞는다.
+            val from = if (slot.isBlank()) "" else "%02d:%02d".format(slot.fromHour, slot.fromMinute)
+            val to = if (slot.isBlank()) "" else "%02d:%02d".format(slot.toHour, slot.toMinute)
             val days = slot.dayLabels().joinToString(",")
             when (index) {
-                0 -> { entity.timezoneFr1 = period; entity.timezoneDay1 = days }
-                1 -> { entity.timezoneFr2 = period; entity.timezoneDay2 = days }
-                2 -> { entity.timezoneFr3 = period; entity.timezoneDay3 = days }
-                3 -> { entity.timezoneFr4 = period; entity.timezoneDay4 = days }
+                0 -> { entity.timezoneFr1 = from; entity.timezoneTo1 = to; entity.timezoneDay1 = days }
+                1 -> { entity.timezoneFr2 = from; entity.timezoneTo2 = to; entity.timezoneDay2 = days }
+                2 -> { entity.timezoneFr3 = from; entity.timezoneTo3 = to; entity.timezoneDay3 = days }
+                3 -> { entity.timezoneFr4 = from; entity.timezoneTo4 = to; entity.timezoneDay4 = days }
             }
         }
 

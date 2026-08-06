@@ -147,10 +147,11 @@
               <tr th:each="tz : ${timezones}">
                 <td th:text="${tz.timezoneId}">1</td>
                 <td th:text="${tz.timezoneName}">명칭</td>
-                <td th:text="${tz.timezoneFr1}"></td>
-                <td th:text="${tz.timezoneFr2}"></td>
-                <td th:text="${tz.timezoneFr3}"></td>
-                <td th:text="${tz.timezoneFr4}"></td>
+                <!-- fr/to가 별도 컬럼(각 VARCHAR(10))으로 저장되므로 화면에서만 " ~ "로 합쳐 보여준다 -->
+                <td th:text="${tz.timezoneFr1 != null and !#strings.isEmpty(tz.timezoneFr1)} ? ${tz.timezoneFr1 + ' ~ ' + tz.timezoneTo1} : ''"></td>
+                <td th:text="${tz.timezoneFr2 != null and !#strings.isEmpty(tz.timezoneFr2)} ? ${tz.timezoneFr2 + ' ~ ' + tz.timezoneTo2} : ''"></td>
+                <td th:text="${tz.timezoneFr3 != null and !#strings.isEmpty(tz.timezoneFr3)} ? ${tz.timezoneFr3 + ' ~ ' + tz.timezoneTo3} : ''"></td>
+                <td th:text="${tz.timezoneFr4 != null and !#strings.isEmpty(tz.timezoneFr4)} ? ${tz.timezoneFr4 + ' ~ ' + tz.timezoneTo4} : ''"></td>
               </tr>
             </tbody>
           </table>

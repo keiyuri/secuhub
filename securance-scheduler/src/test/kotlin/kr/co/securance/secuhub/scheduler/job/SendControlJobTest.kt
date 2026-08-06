@@ -72,7 +72,7 @@ class SendControlJobTest {
         val row = buildRow()
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
 
         val job = buildJob(registry, repo)
         job.execute(context)
@@ -91,7 +91,7 @@ class SendControlJobTest {
         val row = buildRow()
         val registry = FakeGateConnectionRegistry(sendResult = false)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
 
         val job = buildJob(registry, repo)
         job.execute(context)
@@ -106,7 +106,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 999L)
         val registry = FakeGateConnectionRegistry(sendResult = false)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
 
         val job1 = buildJob(registry, repo)
         job1.execute(context)
@@ -121,7 +121,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 2L, sndRaw = "ZZ")
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
 
         val job = buildJob(registry, repo)
         job.execute(context)
@@ -137,7 +137,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 3L, sndRaw = null)
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
 
         val job = buildJob(registry, repo)
         job.execute(context)
@@ -151,7 +151,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 4L, sndTypeCd = "RESET_MOTOR", sndUser = "operator1")
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
         `when`(
             analRepo.resolveMotorErrors(
@@ -176,7 +176,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 41L, sndTypeCd = "RESET_OPER", sndUser = "operator1")
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
         val job = buildJob(registry, repo, analRepo)
@@ -194,7 +194,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 42L, sndTypeCd = "RESET_GATE", sndUser = "operator1")
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
         val job = buildJob(registry, repo, analRepo)
@@ -215,7 +215,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 43L, sndTypeCd = "RESET_UNKNOWN")
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
         val job = buildJob(registry, repo, analRepo)
@@ -235,7 +235,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 5L, sndTypeCd = "OPEN")
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
         val job = buildJob(registry, repo, analRepo)
@@ -253,7 +253,7 @@ class SendControlJobTest {
         val row = buildRow(sndId = 6L, sndTypeCd = "RESETUP_MOTOR")
         val registry = FakeGateConnectionRegistry(sendResult = true)
         val repo = mock(DataSendRepository::class.java)
-        `when`(repo.findBySndYnAndChkYnOrderBySndId("N", "N")).thenReturn(listOf(row))
+        `when`(repo.findBySndYnAndChkYnOrderBySndId(eqMatcher("N"), eqMatcher("N"), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
         val job = buildJob(registry, repo, analRepo)

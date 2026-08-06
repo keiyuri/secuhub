@@ -2,6 +2,7 @@ package kr.co.securance.secuhub.web.security
 
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.invoke
 import org.springframework.security.config.http.SessionCreationPolicy
@@ -48,6 +49,18 @@ class SecurityConfig {
                 // 매칭되는 경로가 없지만, 추가될 때 이 규칙이 먼저 적용되도록 미리 선언해둔다.
                 authorize("/admin/**", hasRole("ADMIN"))
                 authorize("/control/**", hasRole("CONTROL"))
+                // Opus 전체 리뷰 지적: GateControlController/GateResetController/ScheduleController의
+                // 실제 게이트 제어(모터 설정, 리셋 실행, 스케줄 적용) 엔드포인트가 /control/**이 아니라
+                // /gates/**, /schedule/** 아래(뷰 페이지와 같은 경로 트리)에 있어, 위 두 규칙으로는
+                // 전혀 보호되지 않고 ROLE_VIEW만 있어도 제어 명령을 실행할 수 있었다. 상태를 변경하는
+                // HTTP 메서드(POST/PUT/DELETE)만 별도로 ROLE_CONTROL 이상을 요구하도록 경로보다 먼저
+                // 매칭시킨다 — GET(화면 조회)은 기존과 동일하게 ROLE_VIEW로 충분하다.
+                authorize(HttpMethod.POST, "/gates/**", hasAnyRole("CONTROL", "ADMIN"))
+                authorize(HttpMethod.PUT, "/gates/**", hasAnyRole("CONTROL", "ADMIN"))
+                authorize(HttpMethod.DELETE, "/gates/**", hasAnyRole("CONTROL", "ADMIN"))
+                authorize(HttpMethod.POST, "/schedule/**", hasAnyRole("CONTROL", "ADMIN"))
+                authorize(HttpMethod.PUT, "/schedule/**", hasAnyRole("CONTROL", "ADMIN"))
+                authorize(HttpMethod.DELETE, "/schedule/**", hasAnyRole("CONTROL", "ADMIN"))
                 // 적대적 리뷰 지적: anyRequest -> authenticated였다 — auth_view/ctrl/admin이 전부
                 // 'N'인(즉 어떤 권한도 없는) 계정도 use_yn='Y'이기만 하면 인증만으로 대시보드를 포함한
                 // 나머지 모든 경로에 접근할 수 있었다(3종 권한을 매핑해놓고 실제로는 admin/control

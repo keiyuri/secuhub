@@ -22,4 +22,12 @@ data class SchedulerProperties(
 
     /** `ReqStatusJob` 반복 주기(초) — 레거시 `INTERVAL_REQ_STATUS`(ini 기본값 5초) 대응. */
     val reqStatusIntervalSeconds: Long = 5,
+
+    /**
+     * `SendControlJob`이 한 번의 폴링에서 가져오는 미전송 행의 최대 개수(Opus 전체 리뷰 지적).
+     * 이 상한이 없으면 전송 큐가 밀렸을 때 매초 tb_data_snd 미전송 행 전체를 조건 없이 메모리로
+     * 읽어들여 폴링 자체가 점점 느려지는 악순환에 빠질 수 있다 — 큐가 이 값보다 많이 밀려 있어도
+     * 나머지는 다음 폴링(1초 뒤)에서 이어서 처리되므로 유실되지 않는다.
+     */
+    val sendControlBatchSize: Int = 500,
 )

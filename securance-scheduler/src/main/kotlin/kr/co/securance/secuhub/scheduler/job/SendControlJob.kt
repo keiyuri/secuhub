@@ -16,6 +16,7 @@ import org.quartz.DisallowConcurrentExecution
 import org.quartz.JobExecutionContext
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.quartz.QuartzJobBean
 import java.time.Duration
 import java.time.Instant
@@ -59,7 +60,14 @@ class SendControlJob : QuartzJobBean() {
     override fun executeInternal(context: JobExecutionContext) {
         cleanupStaleAttempts()
 
-        val pending = dataSendRepository.findBySndYnAndChkYnOrderBySndId(PENDING_SND_YN, PENDING_CHK_YN)
+        // Opus 전체 리뷰 지적: 조건 없이 전체를 읽으면 큐가 밀렸을 때 매초 대량 로딩으로 폴링 자체가
+        // 느려지는 악순환에 빠질 수 있어 배치 상한(Pageable)을 둔다 — 남은 행은 다음 폴링에서 이어진다.
+        val batchSize = properties.sendControlBatchSize.coerceAtLeast(1)
+        val pending = dataSendRepository.findBySndYnAndChkYnOrderBySndId(
+            PENDING_SND_YN,
+            PENDING_CHK_YN,
+            PageRequest.of(0, batchSize),
+        )
         if (pending.isEmpty()) return
 
         runBlocking(Dispatchers.IO) {

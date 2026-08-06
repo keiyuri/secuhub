@@ -4,11 +4,19 @@ import kr.co.securance.secuhub.domain.entity.GateDetail
 import kr.co.securance.secuhub.domain.entity.GateGroup
 import kr.co.securance.secuhub.domain.entity.GateLocation
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
 
 interface GateLocationRepository : JpaRepository<GateLocation, Long>
 
 interface GateGroupRepository : JpaRepository<GateGroup, Long> {
+    // Opus 전체 리뷰 지적: GateGroup.location은 LAZY고 open-in-view: false라, 단순 파생 쿼리로
+    // 가져온 뒤 컨트롤러 메서드(트랜잭션 범위) 밖인 뷰 렌더링 단계에서 grp.location.locName을
+    // 읽으면 LazyInitializationException이 난다. JOIN FETCH로 쿼리 시점에 함께 로딩한다.
+    @Query("select g from GateGroup g join fetch g.location where g.location.locId = :locId")
     fun findByLocation_LocId(locId: Long): List<GateGroup>
+
+    @Query("select g from GateGroup g join fetch g.location")
+    override fun findAll(): List<GateGroup>
 }
 
 interface GateDetailRepository : JpaRepository<GateDetail, Long> {

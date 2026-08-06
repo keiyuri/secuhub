@@ -1,6 +1,7 @@
 package kr.co.securance.secuhub.web.schedule
 
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Pattern
 import kr.co.securance.secuhub.common.util.HexCodec
 import kr.co.securance.secuhub.domain.entity.DataSend
 import kr.co.securance.secuhub.domain.entity.GateDetail
@@ -272,11 +273,16 @@ class ScheduleApplyService(
     }
 }
 
+// Codex 리뷰 지적: GateControlController.ModeChangeForm과 동일하게, 화면(schedule/index.html)이
+// 제공하는 선택지(USER_MODE_SLOTS/SECU_MODE_SLOTS의 키)와 정확히 일치하는 화이트리스트를 걸어
+// tb_data_snd.snd_type_cd(="MODE_$combined")에 임의 문자열이 저장되는 것을 막는다.
 data class ScheduleApplyForm(
     var locId: Long? = null,
     var grpId: Long? = null,
     var dtlId: Long? = null,
+    @field:Pattern(regexp = "CC|CF|FC|FF|OP|CL|CD|DC|FD|DF", message = "허용되지 않은 운영 모드입니다")
     var userMode: String = "CC",
+    @field:Pattern(regexp = "NA|LM|MM|HM", message = "허용되지 않은 보안 모드입니다")
     var secuMode: String = "NA",
     var userTimezoneId: Long? = null,
     var secuTimezoneId: Long? = null,
@@ -341,9 +347,14 @@ class ScheduleController(
 
     @PostMapping("/apply")
     fun apply(
-        @ModelAttribute("applyForm") form: ScheduleApplyForm,
+        @Validated @ModelAttribute("applyForm") form: ScheduleApplyForm,
+        binding: BindingResult,
         redirectAttributes: RedirectAttributes,
     ): String {
+        if (binding.hasErrors()) {
+            redirectAttributes.addFlashAttribute("errorMessage", "허용되지 않은 모드 값입니다.")
+            return redirectTo(form.locId, form.grpId, form.dtlId)
+        }
         val count = scheduleApplyService.applyMode(form, currentUsername())
         redirectAttributes.addFlashAttribute(
             "message",

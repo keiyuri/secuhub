@@ -1,5 +1,6 @@
 package kr.co.securance.secuhub.server.connection
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -53,6 +54,39 @@ class GateConnectionActor(
         if (closed) throw GateTaskRejectedException(connectionKey)
         val result = channel.trySend(task)
         if (result.isFailure) throw GateTaskRejectedException(connectionKey)
+    }
+
+    /**
+     * [submit]과 달리 작업이 액터 큐에서 실제로 실행 완료(성공/예외)될 때까지 대기한다.
+     *
+     * [Codex 리뷰 수정] `SendControlJob`이 `submit()`의 "큐잉 성공"만 보고 `sndYn='Y'`를 확정
+     * 저장하던 문제 — 큐잉 직후 연결이 끊기거나 `outbound.sendByteArray()`가 비동기로 실패해도
+     * 이미 "전송됨"으로 영구 확정되어 재조회 대상에서 빠지는 유실 버그였다. 여기서는 작업 자체가
+     * 실제 소켓 쓰기까지 끝난 뒤에야 결과를 반환하므로, 물리 전송 실패 시 호출자가 `sndYn`을
+     * 갱신하지 않고 다음 스케줄의 재시도 대상으로 남길 수 있다.
+     *
+     * 큐 등록 자체가 거부(대기열 초과/이미 닫힘)되면 [GateTaskRejectedException]을 그대로 던진다
+     * (기존 [submit] 계약과 동일 — 호출자가 "제출조차 안 됨"과 "제출 후 실패"를 구분할 필요는
+     * 없으므로 두 경우 모두 `false`로 수렴시켜도 되지만, 예외를 그대로 전파해 호출자가 로그 문맥을
+     * 구분할 수 있게 한다).
+     */
+    suspend fun submitAndAwait(task: suspend () -> Unit): Boolean {
+        val completion = CompletableDeferred<Unit>()
+        submit {
+            try {
+                task()
+                completion.complete(Unit)
+            } catch (ex: Exception) {
+                completion.completeExceptionally(ex)
+                throw ex // 액터 루프의 기존 예외 로그도 그대로 남긴다.
+            }
+        }
+        return try {
+            completion.await()
+            true
+        } catch (ex: Exception) {
+            false
+        }
     }
 
     /** 대기 중인 작업을 모두 버리고 액터를 종료한다. 이후 [submit]은 항상 거부된다. */

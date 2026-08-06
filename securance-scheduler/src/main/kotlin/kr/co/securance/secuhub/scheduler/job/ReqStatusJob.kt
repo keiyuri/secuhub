@@ -55,7 +55,7 @@ class ReqStatusJob : QuartzJobBean() {
         }
     }
 
-    private fun requestStatus(state: GateConnectionState) {
+    private suspend fun requestStatus(state: GateConnectionState) {
         try {
             // 상태 조회 패킷은 특정 레인이 아니라 커넥션(장치) 전체를 대상으로 한다 — 임의로 고른
             // "대표 레인"이 sendToLane의 소유권 검사(레인 집합이 authoritative하게 비어있는 특이

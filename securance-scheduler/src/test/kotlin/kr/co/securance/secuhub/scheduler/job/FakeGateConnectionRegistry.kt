@@ -37,12 +37,12 @@ class FakeGateConnectionRegistry(
         states.remove(dtlIp)
     }
 
-    override fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean {
+    override suspend fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean {
         sentCalls.add(Triple(dtlIp, dtlLaneNo, packet))
         return sendResult
     }
 
-    override fun sendToConnection(dtlIp: String, packet: ByteArray): Boolean {
+    override suspend fun sendToConnection(dtlIp: String, packet: ByteArray): Boolean {
         sentToConnectionCalls.add(dtlIp to packet)
         return sendResult
     }

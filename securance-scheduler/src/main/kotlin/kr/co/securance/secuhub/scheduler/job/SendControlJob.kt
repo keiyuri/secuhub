@@ -28,9 +28,14 @@ import java.util.concurrent.ConcurrentHashMap
  * [단순화] 레거시는 `EnqueueProcessing().GetAwaiter().GetResult()`가 클라이언트 체인에 실제로
  * enqueue된 뒤 "물리 전송이 완료될 때까지" 동기 대기하는 구조였다. 그래서 타임아웃 이후에도 체인에
  * 남아있는 in-flight 전송을 별도로 추적(`_inFlightSendIds`)해 중복 물리 전송을 막아야 했다.
- * 이 코드베이스의 [GateConnectionRegistry.sendToLane]은 액터 큐에 enqueue만 하고 즉시 반환하는
- * 구조라("전송 성공"의 의미가 "장치까지 도달 확인"이 아니라 "큐잉 성공") 레거시의 in-flight 추적/
- * 타임아웃 체인이 필요 없다 — 쿨다운(재전송 방지) 하나만으로 충분하다.
+ *
+ * [Codex 리뷰 수정] 이 코드베이스의 [GateConnectionRegistry.sendToLane]도 (`GateConnectionActor.
+ * submitAndAwait` 도입 이후) 레거시와 동일하게 "액터 큐에 실제로 소켓 쓰기가 완료될 때까지" suspend로
+ * 대기한 뒤 결과를 반환한다 — 큐잉 성공만 보고 `snd_yn='Y'`를 확정 저장하던 이전 구현은 큐잉 직후
+ * 연결이 끊기거나 비동기 전송이 실패해도 명령이 유실된 채 재시도 대상에서 영구히 빠지는 버그였다.
+ * 다만 레거시의 별도 in-flight 타임아웃 체인까지는 필요 없다 — `submitAndAwait`가 스스로 완료까지
+ * 대기하므로 "타임아웃 이후에도 체인에 남아있는 전송"이라는 상황 자체가 발생하지 않고, 쿨다운
+ * (재전송 방지)만으로 중복 전송을 막기에 충분하다.
  */
 @DisallowConcurrentExecution
 class SendControlJob : QuartzJobBean() {
@@ -67,7 +72,7 @@ class SendControlJob : QuartzJobBean() {
         }
     }
 
-    private fun processRow(row: DataSend) {
+    private suspend fun processRow(row: DataSend) {
         val sndId = row.sndId
         if (sndId == null) {
             logger.warn("[SendJob] snd_id가 없는 행을 건너뜁니다. dtl_ip={}", row.dtlIp)

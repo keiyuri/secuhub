@@ -423,6 +423,53 @@ class GateConnectionRegistryImplTest {
     }
 
     @Test
+    fun `그룹-위치가 재배정돼 NetStateId가 바뀌어도 시퀀스 순서 역전 가드는 계속 유지된다`() {
+        // 3차 리뷰 지적 회귀 테스트: 예전에는 시퀀스/락 키가 NetStateId(locId/grpId 포함) 전체였다 —
+        // 같은 물리 장치가 그룹을 재배정받아 grpId가 바뀌면 lastAppliedNetStateSeq가 새 키 기준으로
+        // 비어 있어 순서 역전 가드가 리셋됐다. 키를 (dtlIp, dtlLaneNo)로 정규화한 뒤에는 grpId가
+        // 바뀌어도 뒤늦게 도착한 과거 이벤트가 여전히 걸러져야 한다.
+        val locationA = GateLocation(locId = 7L, locName = "본관")
+        val groupA = GateGroup(grpId = 3L, location = locationA, grpName = "1층", gateTypeCode = 1)
+        val locationB = GateLocation(locId = 9L, locName = "별관")
+        val groupB = GateGroup(grpId = 5L, location = locationB, grpName = "2층", gateTypeCode = 1)
+
+        val gateDetailRepository = mock(GateDetailRepository::class.java)
+        // 첫 번째(OFFLINE, seq=1) 큐잉 시점에는 그룹A 소속이었지만, 실행 시점(뒤늦게 도착)에는
+        // 이미 그룹B로 재배정된 뒤라고 가정한다 — findByDtlIpAndDtlLaneNo는 항상 "현재" 소속을 반환한다.
+        `when`(gateDetailRepository.findByDtlIpAndDtlLaneNo("192.168.0.40", 1))
+            .thenReturn(groupA.let { GateDetail(dtlId = 1L, location = locationA, group = it, dtlIp = "192.168.0.40", dtlLaneNo = 1, dtlType = 1) })
+            .thenReturn(groupB.let { GateDetail(dtlId = 1L, location = locationB, group = it, dtlIp = "192.168.0.40", dtlLaneNo = 1, dtlType = 1) })
+
+        val savedStates = mutableListOf<String>()
+        val netStateRepository = mock(NetStateRepository::class.java)
+        `when`(netStateRepository.findById(anyKt())).thenReturn(Optional.empty())
+        doAnswer { invocation ->
+            savedStates.add((invocation.getArgument(0) as NetState).dtlState)
+            null
+        }.`when`(netStateRepository).save(anyKt())
+
+        val capturedTasks = mutableListOf<GateDbWriteTask>()
+        val dbWriteQueue = mock(GateDbWriteQueue::class.java)
+        doAnswer { invocation -> capturedTasks.add(invocation.getArgument(0)); null }
+            .`when`(dbWriteQueue).enqueue(anyKt())
+
+        val registry = newRegistry(
+            netStateRepository = netStateRepository,
+            dbWriteQueue = dbWriteQueue,
+            gateDetailRepository = gateDetailRepository,
+        )
+
+        registry.enqueueNetStateUpdate("192.168.0.40", 1, online = false) // seq=1, 실행 시 그룹A로 조회됨
+        registry.enqueueNetStateUpdate("192.168.0.40", 1, online = true) // seq=2, 실행 시 그룹B로 조회됨
+
+        // ONLINE(최신, seq=2, 그룹B)이 먼저 실행되어 반영되고, OFFLINE(과거, seq=1, 그룹A)이 뒤늦게 실행된다.
+        runBlocking { capturedTasks[1].execute() }
+        runBlocking { capturedTasks[0].execute() }
+
+        assertEquals(listOf("Y"), savedStates, "grpId가 바뀌었더라도 뒤늦게 도착한 과거 이벤트가 최신 상태를 덮어쓰면 안 된다")
+    }
+
+    @Test
     fun `enqueueNetStateUpdate는 tb_gate_dtl에 없는 레인이면 저장을 건너뛴다`() {
         val gateDetailRepository = mock(GateDetailRepository::class.java)
         `when`(gateDetailRepository.findByDtlIpAndDtlLaneNo("10.0.0.99", 1)).thenReturn(null)

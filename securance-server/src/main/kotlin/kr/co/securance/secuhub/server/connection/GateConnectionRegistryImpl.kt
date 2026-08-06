@@ -45,24 +45,41 @@ class GateConnectionRegistryImpl(
     // 먼저 클레임+저장을 끝내고, 그 다음 오래된 실행이 재개돼 181행에서 최신 값을 덮어쓰는 TOCTOU
     // 윈도우가 남는다. 시퀀스 값 자체를 DB 행에 저장해 조건부 UPDATE(`WHERE applied_seq < :seq`)를
     // 쓰는 것이 정석이지만 스키마 변경이 필요하다 — 대신 [netStateWriteLocks]로 "클레임+조회+저장"
-    // 전체를 같은 [NetStateId]에 대해 상호 배제해, 그 사이에 다른 실행이 끼어들 수 없게 한다.
+    // 전체를 같은 키에 대해 상호 배제해, 그 사이에 다른 실행이 끼어들 수 없게 한다.
     // (이 실행들은 이미 [GateDbWriteQueue]의 전용 블로킹 스레드풀에서 돌기 때문에, 여기서 블로킹
     // 락을 잡아도 다른 파티션/샤드의 처리량에는 영향이 없다.)
+    //
+    // **3차 리뷰 지적(캐시 무제한 증가)**: 예전에는 이 두 맵의 키가 [NetStateId](dtlIp, dtlLaneNo,
+    // locId, grpId) 전체였다 — 같은 물리 장치가 그룹/위치를 재배정받을 때마다(tb_gate_dtl.loc_id/
+    // grp_id 변경) NetStateId가 바뀌어 새 엔트리가 쌓이고, 옛 엔트리는 영원히 남는 단순 메모리
+    // 누수였을 뿐 아니라 **정합성 버그**이기도 했다: 재배정 직후 첫 쓰기는 새 NetStateId 기준
+    // lastAppliedNetStateSeq가 비어 있으니 무조건 통과되어, 재배정 전에 이미 적용된 더 최신 시퀀스를
+    // 무시하고 순서 역전 가드가 사실상 리셋되는 셈이었다. 시퀀스/락의 대상은 "이 물리 장치·레인에 대한
+    // 쓰기 순서"이지 tb_gate_dtl의 loc_id/grp_id 소속이 아니므로, 키를 (dtlIp, dtlLaneNo)로 정규화해
+    // 두 문제를 함께 해결한다 — 카디널리티도 이제 "지금까지 존재했던 물리 장치·레인 수"로 묶여
+    // NetStateId보다 훨씬 느리게 증가한다.
+    //
+    // 완전한 TTL/크기 상한 evict은 도입하지 않는다: [netStateWriteLocks]에서 사용 중인 락을 다른
+    // 스레드가 임의로 제거하면, 그 사이 새로 들어온 호출이 computeIfAbsent로 별도의 새 Lock 인스턴스를
+    // 얻어 같은 키에 대해 서로 다른 락 객체로 "동시에" 임계구역에 들어갈 수 있다 — 상호 배제 자체가
+    // 깨지는 레이스라 이번 라운드에서는 채택하지 않는다. 정석 해법(228행 주석 참고: DB에 applied_seq
+    // 컬럼을 두고 조건부 UPDATE)은 스키마 변경이 필요해 범위 밖으로 남겨둔다.
     private val netStateWriteSequence = AtomicLong(0)
-    private val lastAppliedNetStateSeq = ConcurrentHashMap<NetStateId, Long>()
-    private val netStateWriteLocks = ConcurrentHashMap<NetStateId, ReentrantLock>()
+    private val lastAppliedNetStateSeq = ConcurrentHashMap<Pair<String, Int>, Long>()
+    private val netStateWriteLocks = ConcurrentHashMap<Pair<String, Int>, ReentrantLock>()
 
-    private fun lockFor(id: NetStateId): ReentrantLock = netStateWriteLocks.computeIfAbsent(id) { ReentrantLock() }
+    private fun lockFor(key: Pair<String, Int>): ReentrantLock = netStateWriteLocks.computeIfAbsent(key) { ReentrantLock() }
 
     /**
-     * [id]에 대해 [seq]가 지금까지 적용된 시퀀스보다 새로울 때만(또는 같은 작업 자신의 재시도일 때만)
-     * 원자적으로 "적용됨"으로 표시한다. 실패하면 이미 더 최신(또는 동일 시점의 경쟁) 쓰기가 적용됐다는
-     * 뜻이므로 호출자는 실제 DB 쓰기를 건너뛰어야 한다. 반드시 [lockFor]로 해당 [id]를 잠근 상태에서만
-     * 호출해야 한다 — 클레임과 실제 저장이 같은 락 구간 안에 있어야 그 사이에 다른 실행이 끼어들지 못한다.
+     * [key](dtlIp, dtlLaneNo)에 대해 [seq]가 지금까지 적용된 시퀀스보다 새로울 때만(또는 같은 작업
+     * 자신의 재시도일 때만) 원자적으로 "적용됨"으로 표시한다. 실패하면 이미 더 최신(또는 동일 시점의
+     * 경쟁) 쓰기가 적용됐다는 뜻이므로 호출자는 실제 DB 쓰기를 건너뛰어야 한다. 반드시 [lockFor]로
+     * 해당 [key]를 잠근 상태에서만 호출해야 한다 — 클레임과 실제 저장이 같은 락 구간 안에 있어야
+     * 그 사이에 다른 실행이 끼어들지 못한다.
      */
-    private fun tryClaimNetStateSeq(id: NetStateId, seq: Long): Boolean {
+    private fun tryClaimNetStateSeq(key: Pair<String, Int>, seq: Long): Boolean {
         var claimed = false
-        lastAppliedNetStateSeq.compute(id) { _, current ->
+        lastAppliedNetStateSeq.compute(key) { _, current ->
             if (current == null || seq >= current) {
                 claimed = true
                 seq
@@ -191,17 +208,21 @@ class GateConnectionRegistryImpl(
                     locId = requireNotNull(gateDetail.location.locId),
                     grpId = requireNotNull(gateDetail.group.grpId),
                 )
-                // 클레임부터 실제 저장까지를 같은 [id]에 대해 통째로 상호 배제한다(2차 적대적 리뷰
-                // 지적) — 클레임만 원자적으로 하고 조회/저장은 락 밖에서 하면, 그 사이의 DB 지연
+                // 시퀀스/락 키는 (dtlIp, dtlLaneNo)로 정규화한다 — id(NetStateId) 전체를 키로 쓰면
+                // 같은 물리 장치가 그룹/위치를 재배정받아 locId/grpId가 바뀔 때마다 시퀀스 기준선이
+                // 리셋돼 순서 역전 가드가 무력화된다(클래스 상단 3차 리뷰 지적 주석 참고).
+                val writeKey = dtlIp to dtlLaneNo
+                // 클레임부터 실제 저장까지를 같은 [writeKey]에 대해 통째로 상호 배제한다(2차 적대적
+                // 리뷰 지적) — 클레임만 원자적으로 하고 조회/저장은 락 밖에서 하면, 그 사이의 DB 지연
                 // 동안 더 최신 실행이 끼어들어 먼저 끝낼 수 있고 이후 오래된 실행이 재개돼 최신
                 // 값을 덮어쓰는 순서 역전 창이 남는다.
-                val lock = lockFor(id)
+                val lock = lockFor(writeKey)
                 lock.lock()
                 try {
                     // 이미 더 최신(더 큰 seq) 쓰기가 적용된 뒤라면(예: 이 실행이 타임아웃 후
                     // 버려졌다가 뒤늦게 여기 도달한 경우) 쓰지 않고 건너뛴다. 같은 작업 자신의
                     // 재시도(seq 동일)는 정상적으로 다시 클레임된다.
-                    if (!tryClaimNetStateSeq(id, seq)) {
+                    if (!tryClaimNetStateSeq(writeKey, seq)) {
                         logger.warn(
                             "net_state 갱신을 건너뜁니다: 더 최신 갱신이 이미 적용되었습니다(dtlIp={}, lane={}, seq={})",
                             dtlIp, dtlLaneNo, seq,

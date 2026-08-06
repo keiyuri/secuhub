@@ -23,7 +23,7 @@
   <li th:if="${node instanceof T(kr.co.securance.secuhub.web.menu.MenuNode.Item)}"
       class="nav-item">
     <a th:href="${node.href}"
-       th:classappend="${currentPath != null and currentPath.startsWith(node.href)} ? 'active' : ''"
+       th:classappend="${currentPath != null and (currentPath == node.href or currentPath.startsWith(node.href + '/'))} ? 'active' : ''"
        class="nav-link">
       <i th:if="${node.icon}" th:class="'nav-icon bi ' + ${node.icon}"></i>
       <p th:text="${node.text}">메뉴</p>

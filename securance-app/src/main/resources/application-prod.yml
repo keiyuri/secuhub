@@ -1,7 +1,29 @@
 # 운영 프로필 — WinSW로 Windows 서비스 등록 시 사용(계획서 7.1절).
+#
+# 리버스 프록시 등으로 TLS를 앞단에 두게 되면 반드시 아래를 추가할 것(적대적 리뷰 지적 — 평문
+# HTTP 배포 전제라 기본 application.yml은 secure 쿠키를 강제하지 않는다):
+#   server.servlet.session.cookie.secure: true
 spring:
   thymeleaf:
     cache: true
+
+  # 기본 application.yml은 로컬 개발 편의를 위해 SECURANCE_DB_PASSWORD 빈 값을 기본값으로 허용한다.
+  # 운영 프로필에서는 그 기본값을 덮어써 fallback 없이 강제하여, 운영자가 환경변수 설정을 빠뜨리면
+  # 앱이 (조용히 빈 비밀번호로 뜨는 대신) 기동 시점에 바로 실패하게 한다.
+  # RabbitMQ의 guest:guest 기본값은 여기서 강제하지 않는다 — securance.messaging.rabbitmq.enabled가
+  # 기본 false라 아직 실제 연결을 시도하지 않는 배포도 있고, 스프링은 이 기동 플래그와 무관하게
+  # spring.rabbitmq.* 프로퍼티를 바인딩 시점에 해석하므로 여기서 강제하면 RabbitMQ 미사용 배포까지
+  # 기동이 막힌다. RabbitMQ를 실제로 켤 때는 반드시 SECURANCE_RABBITMQ_USER/PASSWORD를 명시할 것.
+  datasource:
+    password: ${SECURANCE_DB_PASSWORD}
+
+  # 기본 application.yml의 baseline-on-migrate=true는 로컬 개발 편의용이다(적대적 리뷰 지적) —
+  # 기존 데이터가 있는 DB에 그 값 그대로 붙으면 Flyway가 현재 상태를 조용히 baseline으로 찍고
+  # V1을 건너뛴 채 "성공"으로 기동해버릴 수 있다. 운영에서는 마이그레이션 이력이 없는 DB에 붙는
+  # 것 자체가 이례적인 상황이므로, 반드시 실패시켜 운영자가 무슨 일이 있었는지 확인하게 한다 —
+  # 신규 운영 DB를 처음 구축할 때는 이 값을 일시적으로 true로 켜고 기동한 뒤 다시 꺼둘 것.
+  flyway:
+    baseline-on-migrate: false
 
 logging:
   level:
@@ -9,3 +31,10 @@ logging:
     kr.co.securance.secuhub: INFO
   file:
     name: Logs/securance-app.log
+  logback:
+    rollingpolicy:
+      # 롤링 정책이 없으면 상시 구동되는 Windows 서비스(WinSW)에서 로그 파일이 무제한으로
+      # 커져 디스크를 고갈시킬 수 있다 — 일자별로 나누고 총 용량에 상한을 둔다.
+      max-file-size: 100MB
+      max-history: 30
+      total-size-cap: 3GB

@@ -5,11 +5,32 @@ spring:
   application:
     name: secuhub
 
+  main:
+    # securance-web(spring-boot-starter-web/MVC)과 securance-server(spring-boot-starter-webflux)가
+    # 둘 다 클래스패스에 있다(적대적 리뷰 지적) — Spring Boot가 SERVLET을 자동 선택해 지금은
+    # 정상 동작하지만, 그 선택이 코드 어디에도 명시돼 있지 않았다. 의도(대시보드는 서블릿 MVC,
+    # 게이트 TCP 서버는 WebFlux의 Reactor Netty만 재사용하고 WebFlux 서버 자체는 띄우지 않음)를
+    # 명시적으로 고정한다.
+    web-application-type: servlet
+
   datasource:
     url: ${SECURANCE_DB_URL:jdbc:mariadb://localhost:3306/securance_gate}
     username: ${SECURANCE_DB_USER:securance}
     password: ${SECURANCE_DB_PASSWORD:}
     driver-class-name: org.mariadb.jdbc.Driver
+    hikari:
+      # 커넥션 풀에서 커넥션을 얻지 못할 때(풀 고갈/DB 응답 없음) 대기하는 상한.
+      # 기본값(30초)은 GateDbWriteQueue 샤드 워커를 너무 오래 묶어둔다.
+      connection-timeout: 5000
+      validation-timeout: 3000
+      data-source-properties:
+        # 코루틴의 withTimeout()은 협조적 취소만 되는 suspend 코드에만 효과가 있고, JDBC 호출처럼
+        # 블로킹인 채로 소켓 read에 멈춰 있는 스레드는 취소 신호를 받아도 풀려나지 않는다
+        # (GateDbWriteQueue.kt 참고). 그래서 실제 "쿼리가 멈춰도 워커가 계속 진행한다"는 보장은
+        # 코루틴 레벨이 아니라 이 드라이버 소켓 타임아웃이 만들어준다 — 응답이 이 시간 안에 오지
+        # 않으면 드라이버가 SocketTimeoutException을 던져 블로킹 호출 자체를 끝내준다.
+        socketTimeout: 5000
+        connectTimeout: 3000
 
   jpa:
     hibernate:
@@ -75,6 +96,16 @@ securance:
 
 server:
   port: 8080
+  servlet:
+    session:
+      # 세션 쿠키 보안 속성(적대적 리뷰 지적) — 전부 미설정이었다. `secure`는 여기서 강제하지 않는다:
+      # 이 프로젝트는 현재 TLS 종료 지점(리버스 프록시 등) 없이 평문 HTTP로 배포되므로(README에
+      # HTTPS 안내 없음), secure=true를 강제하면 브라우저가 쿠키를 아예 보내지 않아 로그인 자체가
+      # 깨진다 — TLS를 앞단에 두게 되면 `server.servlet.session.cookie.secure=true`를 반드시 켤 것.
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax
 
 logging:
   level:

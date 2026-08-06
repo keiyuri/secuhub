@@ -38,8 +38,12 @@ object SpeedGateProtocolConstants {
     const val MIN_PACKET_LENGTH = HEADER_LENGTH + 0 + TAIL_LENGTH // 최소: 헤더+테일(31)
     const val MAX_PACKET_LENGTH = 65536
 
-    /** 프레임 재조립 누적 버퍼 하드 캡(레거시와 동일 — 초과 시 폐기 후 재동기화). */
-    const val MAX_REASSEMBLY_BUFFER_SIZE = 65536
+    /**
+     * 프레임 재조립 누적 버퍼 하드 캡 — 초과 시 재동기화(적대적 리뷰 지적).
+     * [MAX_PACKET_LENGTH]와 같은 값이면 최대 크기 패킷을 기다리는 도중 다음 청크의 앞부분이 함께
+     * 누적되는 경계 상황에서 여유가 전혀 없어진다 — 여유분을 두기 위해 [MAX_PACKET_LENGTH]의 2배로 둔다.
+     */
+    const val MAX_REASSEMBLY_BUFFER_SIZE = MAX_PACKET_LENGTH * 2
 
     // ── 헤더 내 필드 오프셋(0-based, 패킷 시작 기준) ───────────────────
     object HeaderOffset {

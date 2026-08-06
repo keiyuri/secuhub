@@ -5,9 +5,9 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.invoke
 import org.springframework.security.config.http.SessionCreationPolicy
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.web.session.HttpSessionEventPublisher
 
 /**
  * 폼 로그인 기반 인증(계획서 5.4절). 세션은 서버 기본(in-memory)으로 시작하고,
@@ -17,8 +17,21 @@ import org.springframework.security.web.SecurityFilterChain
 @Configuration
 class SecurityConfig {
 
+    // 레거시 평문 비밀번호(AppUser 주석 참고)와 BCrypt 해시가 tb_users.passwd에 섞여 있을 수 있어,
+    // 단순 BCryptPasswordEncoder를 쓰면 레거시 계정이 영구히 로그인 불가가 된다.
+    // LegacyAwarePasswordEncoder + SecurityUserDetailsService(UserDetailsPasswordService)가
+    // 로그인 성공 시 자동으로 BCrypt로 승격시킨다.
     @Bean
-    fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder()
+    fun passwordEncoder(): PasswordEncoder = LegacyAwarePasswordEncoder()
+
+    /**
+     * `sessionConcurrency`(동시 세션 제한)가 만료된 세션을 제때 인식하려면 세션 소멸 이벤트가
+     * `SessionRegistry`에 통지되어야 한다 — 이 리스너가 없으면 브라우저에서 로그아웃 없이 세션이
+     * 타임아웃으로만 사라진 경우 레지스트리에 죽은 세션이 계속 "사용 중"으로 남아, 결국 정상
+     * 사용자의 재로그인까지 막을 수 있다.
+     */
+    @Bean
+    fun httpSessionEventPublisher(): HttpSessionEventPublisher = HttpSessionEventPublisher()
 
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
@@ -28,7 +41,19 @@ class SecurityConfig {
                 authorize("/vendor/**", permitAll)
                 authorize("/js/**", permitAll)
                 authorize("/css/**", permitAll)
-                authorize(anyRequest, authenticated)
+                // 사용자별 auth_view/auth_ctrl/auth_admin(Y/N)이 ROLE_VIEW/ROLE_CONTROL/ROLE_ADMIN으로
+                // 매핑된다(SecurityUserDetailsService). 인증만으로는 부족하고, 경로별 권한 등급을
+                // 명시해야 한다 — 그렇지 않으면 ROLE_VIEW만 가진 사용자도 관리자/제어 화면에
+                // 접근할 수 있다. `/admin/**`, `/control/**` 컨트롤러는 아직 스캐폴드 단계라
+                // 매칭되는 경로가 없지만, 추가될 때 이 규칙이 먼저 적용되도록 미리 선언해둔다.
+                authorize("/admin/**", hasRole("ADMIN"))
+                authorize("/control/**", hasRole("CONTROL"))
+                // 적대적 리뷰 지적: anyRequest -> authenticated였다 — auth_view/ctrl/admin이 전부
+                // 'N'인(즉 어떤 권한도 없는) 계정도 use_yn='Y'이기만 하면 인증만으로 대시보드를 포함한
+                // 나머지 모든 경로에 접근할 수 있었다(3종 권한을 매핑해놓고 실제로는 admin/control
+                // 경로에만 강제하고 있어 사실상 나머지 화면에는 인가가 없는 셈이었다). ROLE_VIEW를
+                // 최소 요구 권한으로 승격한다.
+                authorize(anyRequest, hasRole("VIEW"))
             }
             formLogin {
                 loginPage = "/login"
@@ -40,6 +65,14 @@ class SecurityConfig {
             }
             sessionManagement {
                 sessionCreationPolicy = SessionCreationPolicy.IF_REQUIRED
+                // 동시 세션 제한(적대적 리뷰 지적) — 게이트 제어 권한을 가진 관리 콘솔이라, 세션이
+                // 탈취되면 정상 사용자 몰래 계속 살아있을 수 있다. 새 로그인이 기존 세션을 밀어내게
+                // 한다(세션 고정 공격 자체는 Spring Security 기본 전략인 changeSessionId()로 이미
+                // 방어된다 — 별도 설정 불필요).
+                sessionConcurrency {
+                    maximumSessions = 1
+                    maxSessionsPreventsLogin = false
+                }
             }
         }
         return http.build()

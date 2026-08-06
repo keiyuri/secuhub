@@ -94,12 +94,22 @@ object PacketDiffer {
     /**
      * 각 레인 상태 블록의 `GATE LANE NUMBER` 필드(블록 오프셋 0)를 읽어 실제 레인 번호 목록을 만든다.
      * `GateConnectionState.replaceLaneNumbers`(계획서 3.2절, `0x4D` 패킷의 authoritative 갱신)에 쓰인다.
+     *
+     * **경계/유효성 검증(적대적 리뷰 지적)**: 예전에는 `offset >= packet.size`만 확인해 블록의
+     * 첫 바이트만 packet 범위 안이면 통과시켰고, 읽은 레인 번호 값 자체도 검증하지 않았다. `LOCAL
+     * GATE LANE COUNT` 필드가 실제로 도착한 데이터보다 큰 값을 선언한 잘린/조작된 패킷이 오면
+     * 블록 전체가 아니라 일부만(혹은 다른 레인 블록과 겹쳐) 읽혀 쓰레기 레인 번호가 만들어질 수
+     * 있었고, 그 값이 그대로 [GateConnectionState.replaceLaneNumbers]로 들어가 레인 라우팅이 통째로
+     * 망가질 수 있었다. 이제는 블록 전체(74바이트)가 실제로 packet 안에 있는지, 그리고 읽은 값이
+     * 유효한 레인 번호 범위(1..MAX_LANE_COUNT) 안인지까지 확인한다.
      */
     fun laneNumbersOf(packet: ByteArray): List<Int> {
         val count = laneCountOf(packet)
         return (0 until count).mapNotNull { idx ->
             val offset = STATUS_BLOCK_START + idx * SpeedGateProtocolConstants.STATUS_DATA_LENGTH
-            if (offset >= packet.size) null else packet[offset].toInt() and 0xFF
+            if (offset + SpeedGateProtocolConstants.STATUS_DATA_LENGTH > packet.size) return@mapNotNull null
+            val lane = packet[offset].toInt() and 0xFF
+            if (lane !in 1..SpeedGateProtocolConstants.MAX_LANE_COUNT) null else lane
         }
     }
 

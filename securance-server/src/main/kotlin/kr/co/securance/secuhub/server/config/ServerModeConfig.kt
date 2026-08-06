@@ -38,6 +38,14 @@ data class ServerModeConfig(
     val acceptBacklog: Int = 2048,
 
     /**
+     * 이 시간(초) 동안 소켓에서 아무것도 못 읽으면 죽은 커넥션으로 간주해 닫는다(적대적 리뷰 지적).
+     * `SO_KEEPALIVE`만으로는 OS 기본 유휴시간(보통 2시간)이 지나야 감지되므로, half-open 커넥션
+     * (케이블 단절/전원 차단/NAT 타임아웃)을 더 빨리 정리하려면 애플리케이션 레벨 read timeout이
+     * 필요하다 — `GateTcpServer`가 [io.netty.handler.timeout.ReadTimeoutHandler]로 적용한다.
+     */
+    val idleTimeoutSeconds: Long = 90,
+
+    /**
      * 커넥션당 액터(3.3절)가 공유할 코루틴 디스패처의 병렬도.
      * 기본값은 호출 시점의 CPU 코어 수 × 2 (계획서 3.7절).
      */

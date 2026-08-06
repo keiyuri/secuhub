@@ -18,20 +18,28 @@ class DashboardService(
 ) {
     private val dateKeyFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmm")
 
-    fun summary(): DashboardSummary {
-        val errors = recentUnresolvedErrors()
-        return DashboardSummary(
+    /**
+     * 대시보드 화면 1회 렌더링에 필요한 요약 통계 + 최근 오류 목록을 한 번에 묶어 반환한다.
+     * (이전에는 컨트롤러가 summary()/recentUnresolvedErrors()를 각각 호출해 동일 조건의
+     * 미해결 오류 조회 쿼리가 페이지 로드마다 중복 실행되었다.)
+     */
+    fun loadDashboard(): DashboardView {
+        val sinceDate = LocalDateTime.now().minusDays(5).format(dateKeyFormatter)
+        val errors = recentUnresolvedErrors(sinceDate)
+        val summary = DashboardSummary(
             onlineGateCount = netStateRepository.countByDtlState("Y"),
             offlineGateCount = netStateRepository.countByDtlState("N"),
-            unresolvedErrorCount = errors.size.toLong(),
+            // 목록은 상위 8건만 보여주지만, 카운트는 별도의 COUNT 쿼리로 실제 총 건수를 센다
+            // (페이지 크기로 미해결 오류 개수가 8건에 잘려 보이는 버그 방지).
+            unresolvedErrorCount = dataReceiveAnalysisRepository.countRecentUnresolvedErrors(sinceDate),
             // 오늘 통행량(uvw_user_cnt 대응)은 loc/grp별 집계 화면과 함께 후속 작업으로 구현한다(계획서 5.2절).
             todayTrafficCount = 0,
         )
+        return DashboardView(summary = summary, recentErrors = errors)
     }
 
-    fun recentUnresolvedErrors(): List<GateErrorRow> {
-        val sinceDate = LocalDateTime.now().minusDays(5).format(dateKeyFormatter)
-        return dataReceiveAnalysisRepository
+    private fun recentUnresolvedErrors(sinceDate: String): List<GateErrorRow> =
+        dataReceiveAnalysisRepository
             .findRecentUnresolvedErrors(sinceDate, PageRequest.of(0, 8))
             .map { anal ->
                 val description = listOfNotNull(
@@ -44,5 +52,10 @@ class DashboardService(
                     resolveYn = anal.resolveYn,
                 )
             }
-    }
 }
+
+/** [DashboardController]가 한 번의 모델 조립으로 화면에 필요한 데이터를 모두 받도록 묶은 뷰 모델. */
+data class DashboardView(
+    val summary: DashboardSummary,
+    val recentErrors: List<GateErrorRow>,
+)

@@ -61,9 +61,21 @@ securance:
   scheduler:
     job-concurrency: 64        # Quartz 잡 팬아웃 동시성 상한(계획서 3.7절)
     net-check-interval-seconds: 5
+    send-control-interval-seconds: 1  # 레거시 INTERVAL_SEND_CONTROL(ini 기본값 1초) 대응 — SendControlJob 폴링 주기
+    req-status-interval-seconds: 5    # 레거시 INTERVAL_REQ_STATUS(ini 기본값 5초) 대응 — ReqStatusJob 폴링 주기
 
   control:
     dispatch-mode: QUEUED      # QUEUED | DIRECT — 프론트엔드 제어 명령 전송 방식(연결 방향과 독립, 계획서 5.5절)
+
+  # 레거시 ini [LOCATION]/[CLOUD] 섹션 대응 — 설정 스캐폴드만 추가한다. 실사용처는 레거시에서도
+  # 불분명했으므로 이번 작업에서는 로직을 구현하지 않는다(과도한 억측 금지).
+  location:
+    place-cd: ""                # 레거시 [LOCATION] PLACE_CD
+    group-cd: ""                # 레거시 [LOCATION] GROUP_CD
+
+  cloud:
+    addr: ""                    # 레거시 [CLOUD] CLOUD_ADDR
+    port: 0                     # 레거시 [CLOUD] CLOUD_PORT
 
   messaging:
     rabbitmq:

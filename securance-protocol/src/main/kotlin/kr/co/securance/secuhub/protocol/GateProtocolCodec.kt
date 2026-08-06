@@ -44,6 +44,18 @@ interface GateProtocolCodec {
     /** 상태 조회(+ 시간 동기화) 요청 패킷을 만든다. */
     fun buildStatusRequest(address: ByteArray, dateTime: LocalDateTime = LocalDateTime.now()): ByteArray
 
+    /**
+     * 주소 구성 없이 상태 조회 요청 패킷을 만드는 편의 메서드.
+     *
+     * `securance-scheduler`(`ReqStatusJob`)가 프로토콜의 주소 구성 디테일(comSlot/controller/
+     * deviceNumber)을 몰라도 되도록 기본 주소를 대신 조립해 준다. 기존 테스트 코드
+     * (`PacketDifferTest`, `SpeedGatePacketCodecTest`)의 관례대로 TCP 1:1 연결에서는
+     * `comSlot=1, controller=1, deviceNumber=1` 고정값을 쓴다. 다중 레인/컨트롤러 구성이 필요하면
+     * 이 기본 구현 대신 [buildStatusRequest]를 직접 호출한다.
+     */
+    fun buildStatusRequest(dateTime: LocalDateTime = LocalDateTime.now()): ByteArray =
+        buildStatusRequest(SpeedGatePacketCodec.buildAddress(1, 1, 1), dateTime)
+
     /** 커넥션 하나가 사용할 프레임 재조립기를 새로 만든다(커넥션당 상태 보유, 공유 금지). */
     fun newReassembler(): PacketReassembler
 }

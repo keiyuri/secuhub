@@ -16,4 +16,10 @@ data class SchedulerProperties(
 
     /** `NetCheckJob` 반복 주기(초). */
     val netCheckIntervalSeconds: Long = 5,
+
+    /** `SendControlJob` 반복 주기(초) — 레거시 `INTERVAL_SEND_CONTROL`(ini 기본값 1초) 대응. */
+    val sendControlIntervalSeconds: Long = 1,
+
+    /** `ReqStatusJob` 반복 주기(초) — 레거시 `INTERVAL_REQ_STATUS`(ini 기본값 5초) 대응. */
+    val reqStatusIntervalSeconds: Long = 5,
 )

@@ -60,6 +60,14 @@ class DataReceiveAnalysis(
     @Column(name = "resolve_yn", nullable = false, length = 1)
     var resolveYn: String = "N",
 
+    /** 오류를 resolve 처리한 사용자(또는 시스템 주체). 스키마에는 있었으나 엔티티 매핑이 누락되어 있었다. */
+    @Column(name = "resolve_user", length = 50)
+    var resolveUser: String? = null,
+
+    /** resolve 처리 시각. `SendControlJob`의 리셋 명령 전송 성공 시 `now()`로 채워진다. */
+    @Column(name = "resolve_date")
+    var resolveDate: LocalDateTime? = null,
+
     @Column(name = "has_status_event", insertable = false, updatable = false)
     val hasStatusEvent: Boolean = false,
 

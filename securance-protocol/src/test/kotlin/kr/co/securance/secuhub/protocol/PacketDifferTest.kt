@@ -64,4 +64,61 @@ class PacketDifferTest {
         assertTrue(result.laneChanges[1].sensorChanged) // lane 2
         assertFalse(result.laneChanges[2].anyChanged) // lane 3
     }
+
+    @Test
+    fun `레인 동작상태 블록의 모터 부하 바이트(70,71)만 바뀌면 변경으로 취급하지 않는다`() {
+        val previous = fakeStatusPacket(laneCount = 1) { 0x01 }
+        val current = previous.copyOf()
+
+        // STATUS_BLOCK_START(레인 블록 시작) + 70, +71 = 모터 부하값 2바이트.
+        // 레거시 ClsPacketAnalyzer.CheckStatusSubSections와 동일하게 비교 대상에서 제외되어야 한다.
+        val statusBlockStart = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH
+        current[statusBlockStart + 70] = (current[statusBlockStart + 70] + 1).toByte()
+        current[statusBlockStart + 71] = (current[statusBlockStart + 71] + 1).toByte()
+
+        val result = PacketDiffer.diff(previous, current)
+
+        assertFalse(result.anyChanged)
+        assertFalse(result.laneChanges[0].operationStatusChanged)
+    }
+
+    @Test
+    fun `레인 동작상태1 12바이트가 바뀌면 operationStatusChanged로 표시한다`() {
+        val previous = fakeStatusPacket(laneCount = 1) { 0x01 }
+        val current = previous.copyOf()
+
+        val statusBlockStart = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH
+        current[statusBlockStart + 58] = (current[statusBlockStart + 58] + 1).toByte()
+
+        val result = PacketDiffer.diff(previous, current)
+
+        assertTrue(result.laneChanges[0].operationStatusChanged)
+    }
+
+    @Test
+    fun `Tail의 체크섬 바이트(앞 2바이트)만 바뀌면 tailChanged로 취급하지 않는다`() {
+        val previous = fakeStatusPacket(laneCount = 1) { 0x01 }
+        val current = previous.copyOf()
+
+        // Tail 4바이트 중 앞 2바이트는 체크섬. 레거시와 동일하게 비교에서 제외되어야 한다.
+        val checksumOffset = current.size - SpeedGateProtocolConstants.TAIL_LENGTH
+        current[checksumOffset] = (current[checksumOffset] + 1).toByte()
+
+        val result = PacketDiffer.diff(previous, current)
+
+        assertFalse(result.tailChanged)
+    }
+
+    @Test
+    fun `Tail의 뒤 2바이트(고정 ETX)가 바뀌면 tailChanged로 표시한다`() {
+        val previous = fakeStatusPacket(laneCount = 1) { 0x01 }
+        val current = previous.copyOf()
+
+        val lastByteOffset = current.size - 1
+        current[lastByteOffset] = (current[lastByteOffset] + 1).toByte()
+
+        val result = PacketDiffer.diff(previous, current)
+
+        assertTrue(result.tailChanged)
+    }
 }

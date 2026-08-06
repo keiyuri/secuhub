@@ -75,11 +75,13 @@ object PacketDiffer {
             diffLane(previous, current, offset, laneNumber = idx + 1)
         }
 
+        // Tail 4바이트 중 앞 2바이트는 체크섬(페이로드에 종속된 파생값)이라 레거시
+        // `AnalyzePacketChanges`와 동일하게 비교 대상에서 제외하고, 뒤 2바이트(고정 ETX 값)만 비교한다.
         val tailChanged = !regionEquals(
             previous, current,
-            previous.size - SpeedGateProtocolConstants.TAIL_LENGTH,
-            SpeedGateProtocolConstants.TAIL_LENGTH,
-            currentOffset = current.size - SpeedGateProtocolConstants.TAIL_LENGTH,
+            previous.size - 2,
+            2,
+            currentOffset = current.size - 2,
         )
 
         return PacketChangeState(
@@ -119,7 +121,10 @@ object PacketDiffer {
             outputChanged = changed(42, 8),
             motorChanged = changed(50, 4),
             masterInChanged = changed(54, 4),
-            operationStatusChanged = changed(58, 16), // 게이트 동작상태1(12)+모터부하(2)+동작상태2(2)
+            // 게이트 동작상태1(12) + 동작상태2(2)만 비교한다. 모터 부하값(70..71)은 레거시
+            // `ClsPacketAnalyzer.CheckStatusSubSections`와 동일하게 의도적으로 제외 — 부하값은
+            // 실시간으로 자주 변동해 이를 포함하면 불필요한 DB 쓰기가 급증한다.
+            operationStatusChanged = changed(58, 12) || changed(72, 2),
         )
     }
 

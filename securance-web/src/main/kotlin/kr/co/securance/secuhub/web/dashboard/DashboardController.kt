@@ -13,10 +13,11 @@ class DashboardController(
 ) {
     @GetMapping("/", "/dashboard")
     fun dashboard(model: Model): String {
+        val view = dashboardService.loadDashboard()
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "대시보드")
-        model.addAttribute("summary", dashboardService.summary())
-        model.addAttribute("recentErrors", dashboardService.recentUnresolvedErrors())
+        model.addAttribute("summary", view.summary)
+        model.addAttribute("recentErrors", view.recentErrors)
         return "dashboard"
     }
 }

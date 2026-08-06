@@ -1,5 +1,6 @@
 package kr.co.securance.secuhub.server.connection
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -38,6 +39,9 @@ class GateConnectionActor(
             for (task in channel) {
                 try {
                     task()
+                } catch (ex: CancellationException) {
+                    // close()에 의한 정상적인 취소 — 에러가 아니므로 그대로 전파해 코루틴이 조용히 끝나게 한다.
+                    throw ex
                 } catch (ex: Exception) {
                     logger.error("커넥션[{}] 액터 작업 처리 중 예외 발생", connectionKey, ex)
                 }

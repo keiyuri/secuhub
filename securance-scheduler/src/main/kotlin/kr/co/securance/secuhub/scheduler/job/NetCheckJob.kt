@@ -46,11 +46,11 @@ class NetCheckJob : QuartzJobBean() {
                     semaphore.withPermit {
                         if (!state.isChannelActive) {
                             logger.info("커넥션[{}] 채널이 닫혀 있어 정리합니다.", state.dtlIp)
-                            // 재연결 레이스 가드(계획서 3.3절): registry가 이미 새 커넥션으로
-                            // 교체했다면 findConnection() 결과가 달라지므로 이중 정리를 피한다.
-                            if (registry.findConnection(state.dtlIp) === state) {
-                                registry.closeConnection(state.dtlIp, updateNetState = true)
-                            }
+                            // 재연결 레이스 가드(계획서 3.3절): registry가 이미 새 커넥션으로 교체했다면
+                            // closeConnectionIfCurrent가 조회+제거를 원자적으로 수행해 아무 것도 하지
+                            // 않는다 — findConnection()으로 먼저 확인하고 나중에 closeConnection()을
+                            // 호출하는 두 단계 방식은 그 사이에 재연결이 끼어드는 레이스가 있었다.
+                            registry.closeConnectionIfCurrent(state.dtlIp, state, updateNetState = true)
                         }
                     }
                 }

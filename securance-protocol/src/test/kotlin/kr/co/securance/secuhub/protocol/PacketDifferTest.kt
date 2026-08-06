@@ -64,4 +64,37 @@ class PacketDifferTest {
         assertTrue(result.laneChanges[1].sensorChanged) // lane 2
         assertFalse(result.laneChanges[2].anyChanged) // lane 3
     }
+
+    @Test
+    fun `laneNumbersOf는 정상 패킷에서 레인 번호를 순서대로 읽는다`() {
+        val packet = fakeStatusPacket(laneCount = 3) { 0x01 }
+
+        assertEquals(listOf(1, 2, 3), PacketDiffer.laneNumbersOf(packet))
+    }
+
+    @Test
+    fun `laneNumbersOf는 레인 블록이 중간에 잘린 패킷에서 잘린 블록 이후는 무시한다`() {
+        // 적대적 리뷰 지적 회귀 테스트: 예전에는 블록의 첫 바이트만 packet 범위 안이면 통과시켜,
+        // LOCAL GATE LANE COUNT가 실제 도착한 데이터보다 큰 잘린 패킷에서 블록 일부만 읽힌 쓰레기
+        // 레인 번호가 만들어질 수 있었다.
+        val fullPacket = fakeStatusPacket(laneCount = 3) { 0x01 }
+        // 마지막 레인 블록(74바이트)의 앞 10바이트만 남기고 나머지는 잘라낸다(실제로는 있을 수 없는,
+        // 조작/손상된 패킷을 흉내낸다).
+        val truncated = fullPacket.copyOfRange(0, fullPacket.size - SpeedGateProtocolConstants.STATUS_DATA_LENGTH + 10)
+
+        assertEquals(listOf(1, 2), PacketDiffer.laneNumbersOf(truncated))
+    }
+
+    @Test
+    fun `laneNumbersOf는 유효 범위(1부터 MAX_LANE_COUNT까지) 밖의 레인 번호를 걸러낸다`() {
+        // 손상/조작된 GATE LANE NUMBER 필드(예: 0 또는 33 이상)가 그대로 replaceLaneNumbers로
+        // 들어가면 레인 라우팅이 통째로 망가질 수 있다.
+        val packet = fakeStatusPacket(laneCount = 2) { 0x01 }
+        packet[SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH] = 0 // lane 1 자리 -> 0
+        val secondLaneOffset = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH +
+            SpeedGateProtocolConstants.STATUS_DATA_LENGTH
+        packet[secondLaneOffset] = (SpeedGateProtocolConstants.MAX_LANE_COUNT + 1).toByte() // lane 2 자리 -> 33
+
+        assertEquals(emptyList(), PacketDiffer.laneNumbersOf(packet))
+    }
 }

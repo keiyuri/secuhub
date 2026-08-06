@@ -23,7 +23,10 @@ class SpeedGatePacketReassembler(
     @Synchronized
     override fun append(chunk: ByteArray): List<ByteArray> {
         if (chunk.isEmpty() && buffer.isEmpty()) return emptyList()
-        buffer = if (buffer.isEmpty()) chunk else buffer + chunk
+        // 버퍼가 비어있을 때도 chunk를 복사 없이 그대로 참조하면 안 된다(적대적 리뷰 지적) — 지금의
+        // 유일한 호출부(asByteArray())는 매번 새 배열이라 우연히 안전하지만, 호출자가 풀링된/재사용되는
+        // 배열(예: Netty ByteBuf 기반 경로)을 넘기게 되면 계약 위반으로 조용히 데이터가 오염된다.
+        buffer = if (buffer.isEmpty()) chunk.copyOf() else buffer + chunk
 
         val packets = mutableListOf<ByteArray>()
         var cursor = 0
@@ -69,8 +72,14 @@ class SpeedGatePacketReassembler(
         buffer = if (cursor in 1..buffer.size) buffer.copyOfRange(cursor, buffer.size) else buffer
 
         if (buffer.size > maxBufferSize) {
-            // 하드 캡 초과 — 레거시와 동일하게 폐기 후 재동기화(무한정 누적 방지).
-            buffer = ByteArray(0)
+            // 하드 캡 초과(적대적 리뷰 지적): 예전에는 buffer 전체를 폐기했다 — 노이즈 바이트 하나가
+            // 우연히 "유효 범위 내" 길이 필드로 읽혀 대기 상태에 들어가면, 그 뒤에 이미 도착해있던
+            // 정상 패킷들까지 함께 날아갔다. 이제는 현재 버퍼의 첫 바이트(대기 중이던 STX 후보,
+            // 또는 STX가 아예 없는 잡음의 시작)만 포기하고 그 뒤에서 다음 STX를 찾아 그 지점부터
+            // 재동기화를 시도한다 — 다음 append() 호출 때 그 지점부터 다시 파싱되어 파묻혀 있던
+            // 정상 패킷을 살릴 수 있다. 재동기화할 STX가 전혀 없으면(순수 잡음) 그때는 전량 폐기한다.
+            val resyncIndex = findStx(1)
+            buffer = if (resyncIndex != null) buffer.copyOfRange(resyncIndex, buffer.size) else ByteArray(0)
         }
 
         return packets

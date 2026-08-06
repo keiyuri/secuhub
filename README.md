@@ -80,6 +80,20 @@ Copy-Item securance-app\src\main\resources\application-local.yml.example `
   로컬에서 `application-local.yml` 설정 후 `./scripts/run-local.ps1`로 직접 확인 필요.
 - 1,000+ 동시 연결 부하 테스트(계획서 3.7/8절)는 미실시 — 별도 목(mock) TCP 클라이언트 도구로 검증 필요.
 
+## 보안 전제 — 게이트 연결의 IP 기반 신뢰 모델
+
+`GateTcpServer`는 접속해온 소스 IP가 `tb_gate_dtl`에 등록돼 있는지만 확인하고 연결을 수락한다
+(토큰/인증서/공유키 등 애플리케이션 계층 인증 없음, [GateTcpServer.kt](securance-server/src/main/kotlin/kr/co/securance/secuhub/server/tcp/GateTcpServer.kt) 참고).
+이는 **의도적인 설계 결정**이다 — 게이트 하드웨어(임베디드 장비)가 자체적으로 인증서/토큰을 지원하지
+않는다는 전제 하에, IP 기반 신뢰 + 네트워크 계층 격리(방화벽/VLAN으로 게이트 세그먼트를 백엔드와
+분리)로 충분하다고 판단했다(2026-08-05 코드 리뷰에서 재확인).
+
+**따라서 배포 시 다음이 반드시 지켜져야 한다**:
+- 게이트가 연결되는 네트워크 세그먼트는 신뢰할 수 없는 네트워크(인터넷, 일반 사무 LAN)와 분리되어야
+  한다 — 그렇지 않으면 `tb_gate_dtl`에 등록된 IP를 스푸핑/탈취해 위조 패킷을 주입할 수 있다.
+- 향후 게이트 하드웨어가 인증서/토큰을 지원하게 되면, `GateTcpServer.handleConnection`의
+  게이트 조회 단계에 애플리케이션 계층 인증을 추가하는 것을 권장한다.
+
 ## 1차 스캐폴드 범위 밖 (후속 작업)
 
 계획서에서 명시적으로 1차 범위 밖으로 정한 항목들이다.

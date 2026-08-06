@@ -11,8 +11,19 @@ import kr.co.securance.secuhub.common.exception.UnsupportedGateTypeException
  */
 class GateProtocolCodecRegistry(codecs: List<GateProtocolCodec>) {
 
-    private val byGateType: Map<Int, GateProtocolCodec> =
-        codecs.flatMap { codec -> codec.supportedGateTypes.map { it to codec } }.toMap()
+    private val byGateType: Map<Int, GateProtocolCodec> = buildMap {
+        for (codec in codecs) {
+            for (gateType in codec.supportedGateTypes) {
+                // toMap()은 같은 key가 두 번 나오면 나중 값으로 조용히 덮어쓴다 — 두 코덱이 같은
+                // 게이트 타입을 등록하는 설정 실수를 숨기게 되므로, 여기서는 즉시 실패시킨다.
+                val existing = put(gateType, codec)
+                check(existing == null) {
+                    "게이트 타입[$gateType]이 두 개의 코덱에 중복 등록되었습니다: " +
+                        "${existing?.let { it::class.simpleName }}, ${codec::class.simpleName}"
+                }
+            }
+        }
+    }
 
     /** [dtlType]에 대응하는 코덱을 찾는다. 없으면 [UnsupportedGateTypeException]. */
     fun resolve(dtlType: Int): GateProtocolCodec =

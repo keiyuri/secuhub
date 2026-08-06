@@ -7,6 +7,7 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Lob
 import jakarta.persistence.Table
+import java.time.LocalDateTime
 
 /**
  * `tb_data_snd` — 제어 명령 발송 큐. 5.5절 QUEUED 경로에서 프론트엔드가 이 테이블에 INSERT하면
@@ -30,6 +31,14 @@ class DataSend(
     /** 서버가 전송을 확인했는지 여부(Y/N). */
     @Column(name = "chk_yn", nullable = false, length = 1)
     var chkYn: String = "N",
+
+    /**
+     * [Codex 적대적 리뷰 지적] 전송 실패 시 다음 재시도 가능 시각. null이면 즉시 재시도 대상이다.
+     * SendControlJob이 이 값을 조회 조건에 반영해, 계속 실패하는 큐 앞쪽 행이 뒤쪽 정상 행을
+     * 영구히 가리는 헤드 오브 라인 차단을 막는다.
+     */
+    @Column(name = "next_attempt_at")
+    var nextAttemptAt: LocalDateTime? = null,
 
     @Column(name = "dtl_ip", nullable = false, length = 20)
     var dtlIp: String,

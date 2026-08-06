@@ -19,11 +19,9 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.quartz.QuartzJobBean
 import java.time.Duration
-import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 게이트 제어 명령(OPEN/CLOSE/RESET 등) 전송 잡 — 레거시 `ClsQuartzJobSendControl`에 대응한다.
@@ -39,6 +37,13 @@ import java.util.concurrent.ConcurrentHashMap
  * 다만 레거시의 별도 in-flight 타임아웃 체인까지는 필요 없다 — `submitAndAwait`가 스스로 완료까지
  * 대기하므로 "타임아웃 이후에도 체인에 남아있는 전송"이라는 상황 자체가 발생하지 않고, 쿨다운
  * (재전송 방지)만으로 중복 전송을 막기에 충분하다.
+ *
+ * [Codex 적대적 리뷰 수정] 배치 조회가 항상 `snd_id` 오름차순 첫 페이지만 보던 구조라, 큐 앞쪽의
+ * 행이 계속 실패(오프라인 게이트 등)하면 매 폴링마다 같은 행만 다시 뽑혀 뒤쪽에 적재된 정상 게이트용
+ * 명령이 무기한 처리되지 못하는 헤드 오브 라인 차단이 있었다. 인메모리 쿨다운 맵(`recentSendAttempts`)
+ * 은 물리 재전송만 억제할 뿐 DB 조회 자체에서는 그 행을 배제하지 못해 배치 슬롯을 계속 점유했다.
+ * `DataSend.nextAttemptAt`을 실패 시 미래로 설정하고 조회 조건(`findEligiblePending`)에 반영해
+ * 해결한다 — 이 컬럼이 곧 재시도 쿨다운 상태 그 자체이므로 인메모리 맵은 더 이상 필요 없다.
  */
 @DisallowConcurrentExecution
 class SendControlJob : QuartzJobBean() {
@@ -58,14 +63,16 @@ class SendControlJob : QuartzJobBean() {
     private val logger = LoggerFactory.getLogger(SendControlJob::class.java)
 
     override fun executeInternal(context: JobExecutionContext) {
-        cleanupStaleAttempts()
-
         // Opus 전체 리뷰 지적: 조건 없이 전체를 읽으면 큐가 밀렸을 때 매초 대량 로딩으로 폴링 자체가
         // 느려지는 악순환에 빠질 수 있어 배치 상한(Pageable)을 둔다 — 남은 행은 다음 폴링에서 이어진다.
+        //
+        // [Codex 적대적 리뷰 수정] next_attempt_at이 아직 도래하지 않은(=재시도 쿨다운 중인) 행은
+        // 조회 자체에서 제외해, 계속 실패하는 앞쪽 행이 배치 슬롯을 영구히 점유하지 않게 한다.
         val batchSize = properties.sendControlBatchSize.coerceAtLeast(1)
-        val pending = dataSendRepository.findBySndYnAndChkYnOrderBySndId(
+        val pending = dataSendRepository.findEligiblePending(
             PENDING_SND_YN,
             PENDING_CHK_YN,
+            LocalDateTime.now(),
             PageRequest.of(0, batchSize),
         )
         if (pending.isEmpty()) return
@@ -102,7 +109,7 @@ class SendControlJob : QuartzJobBean() {
             } catch (ex: IllegalArgumentException) {
                 // 파싱 실패는 데이터 자체의 영구적 결함이라 재시도해도 결과가 달라지지 않는다.
                 // sndYn='N'인 채로 방치하면 매 스케줄마다 같은 실패가 반복 로그로 남으므로,
-                // chkYn='Y'로 표시해 findBySndYnAndChkYnOrderBySndId("N","N") 대상에서 제외한다
+                // chkYn='Y'로 표시해 findEligiblePending("N","N") 대상에서 제외한다
                 // (sndYn은 "게이트에 실제로 전송됨"의 의미를 지키기 위해 'N'으로 그대로 둔다 —
                 // "확인/종결됨"과 "전송됨"을 혼동하지 않도록 chkYn만 바꾼다).
                 logger.warn(
@@ -115,19 +122,11 @@ class SendControlJob : QuartzJobBean() {
                 return
             }
 
-            val now = Instant.now()
-            val lastAttempt = recentSendAttempts[sndId]
-            if (lastAttempt != null && Duration.between(lastAttempt, now) < RESEND_GUARD) {
-                // 쿨다운 이내 — 직전 스케줄에서 이미 전송을 시도했으므로 물리적 재전송을 건너뛴다.
-                return
-            }
-            recentSendAttempts[sndId] = now
-
             val sent = registry.sendToLane(row.dtlIp, row.dtlLaneNo, packet)
             if (sent) {
                 row.sndYn = "Y"
+                row.nextAttemptAt = null
                 dataSendRepository.save(row)
-                recentSendAttempts.remove(sndId)
 
                 // [수정] 레거시는 `snd_data_tp.Split('_')[0] == "RESET"`처럼 첫 토큰 완전 일치로
                 // 판정한다. `startsWith`는 "RESETUP" 같은 향후 코드값도 오탐할 수 있어 첫 토큰
@@ -140,7 +139,11 @@ class SendControlJob : QuartzJobBean() {
 
                 logger.debug("[SendJob] 전송 및 갱신 완료: snd_id={}, ip={}", sndId, row.dtlIp)
             } else {
-                // 커넥션 없음/대기열 초과 등 — DB는 그대로 두어 다음 스케줄(쿨다운 만료 후)에서 재시도한다.
+                // [Codex 적대적 리뷰 수정] sndYn/chkYn은 그대로 두어 재시도 대상으로 남기되,
+                // next_attempt_at을 미래로 밀어 다음 폴링의 조회 조건에서 이 행을 제외한다 —
+                // 그래야 이 행이 계속 실패해도 뒤쪽에 적재된 다른 정상 행이 배치 슬롯을 차지할 수 있다.
+                row.nextAttemptAt = LocalDateTime.now().plus(RESEND_GUARD)
+                dataSendRepository.save(row)
                 logger.warn(
                     "[SendJob] 전송 실패(연결 없음/대기열 초과 등) — 쿨다운({}s) 이후 재시도됩니다. snd_id={}, ip={}",
                     RESEND_GUARD.seconds,
@@ -205,16 +208,6 @@ class SendControlJob : QuartzJobBean() {
         }
     }
 
-    /**
-     * 쿨다운 맵의 오래된 항목을 정리한다(레거시 `CleanupStaleSendAttempts`/`STALE_ENTRY_TTL` 대응).
-     * 행 개수가 많지 않다는 전제하에 `NetCheckJob`처럼 매 실행마다 단순하게 전수 스캔한다 —
-     * 레거시처럼 별도 정리 주기(1분)를 두는 최적화는 이번 스코프에서는 생략한다.
-     */
-    private fun cleanupStaleAttempts() {
-        val now = Instant.now()
-        recentSendAttempts.entries.removeIf { (_, lastAttempt) -> Duration.between(lastAttempt, now) >= STALE_ENTRY_TTL }
-    }
-
     companion object {
         private const val PENDING_SND_YN = "N"
         private const val PENDING_CHK_YN = "N"
@@ -228,14 +221,11 @@ class SendControlJob : QuartzJobBean() {
         /** `anal_date`(yyyyMMddHHmm 문자열) 비교용 날짜 포맷 — 레거시 `DATE_FORMAT(...,'%Y%m%d')` 대응. */
         private val ANAL_DATE_PATTERN: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
 
-        /** 레거시 `RESEND_GUARD`(5초) 대응 — snd_id별 짧은 쿨다운으로 물리적 재전송을 억제한다. */
+        /**
+         * 레거시 `RESEND_GUARD`(5초) 대응 — 실패한 행의 짧은 재시도 쿨다운.
+         * [Codex 적대적 리뷰 수정] 이제 인메모리 맵이 아니라 `DataSend.nextAttemptAt`(DB 컬럼)에
+         * 반영되므로, JVM 재시작/다중 인스턴스에서도 동일하게 적용되고 조회 조건에도 반영된다.
+         */
         private val RESEND_GUARD: Duration = Duration.ofSeconds(5)
-
-        /** 레거시 `STALE_ENTRY_TTL`(5분) 대응 — 오래 방치된 쿨다운 항목을 정리한다. */
-        private val STALE_ENTRY_TTL: Duration = Duration.ofMinutes(5)
-
-        // Quartz 잡 인스턴스는 실행마다 새로 만들어질 수 있으므로, 레거시의 static
-        // ConcurrentDictionary와 동등하게 동작하도록 companion object(클래스당 1개, JVM 수명 공유)에 둔다.
-        private val recentSendAttempts = ConcurrentHashMap<Long, Instant>()
     }
 }

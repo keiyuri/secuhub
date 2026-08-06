@@ -37,3 +37,18 @@ CREATE TABLE tb_data_rcv_anal (
     has_error_event     BOOLEAN NOT NULL DEFAULT FALSE,
     reg_date            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- `DataSendRepositoryTest`(@DataJpaTest) 전용 최소 스키마. 운영 마이그레이션(V1 + V4 + V5)의
+-- 컬럼 중 이 리포지토리의 JPQL이 실제로 참조하는 컬럼만 재현한다.
+CREATE TABLE tb_data_snd (
+    snd_id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    snd_date        VARCHAR(20) NOT NULL,
+    snd_yn          VARCHAR(1)  NOT NULL DEFAULT 'N',
+    chk_yn          VARCHAR(1)  NOT NULL DEFAULT 'N',
+    next_attempt_at TIMESTAMP NULL,
+    dtl_ip          VARCHAR(20) NOT NULL,
+    dtl_lane_no     TINYINT     NOT NULL,
+    snd_user        VARCHAR(20) NULL,
+    snd_type_cd     VARCHAR(20) NULL,
+    snd_raw         CLOB NULL
+);

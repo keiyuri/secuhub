@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
 @Configuration
-@EnableConfigurationProperties(ServerModeConfig::class)
+@EnableConfigurationProperties(ServerModeConfig::class, LocationProperties::class, CloudProperties::class)
 class GateServerConfiguration {
 
     /**

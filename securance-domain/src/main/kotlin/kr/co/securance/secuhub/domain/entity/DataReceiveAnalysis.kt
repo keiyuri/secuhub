@@ -48,6 +48,49 @@ class DataReceiveAnalysis(
     @Column(name = "desc_gate_status07", length = 50)
     var descFireAlarm: String? = null,
 
+    // ── 센서/운영 오류(레거시 UpdateResetFlagSensor 조건) ─────────────────────
+    // [Codex 적대적 리뷰 수정] SendControlJob의 RESET_OPER 서브타입 resolve 대상을 정확히
+    // 판별하기 위해 추가. 레거시 `DbProvider.UpdateResetFlagSensor`의 조건절이 이 12개 컬럼 +
+    // desc_gate_status09가 비어있지 않은지로 판단한다(desc_operation01~08, desc_safety01~04).
+    @Column(name = "desc_operation01", length = 20)
+    var descOperation01: String? = null,
+
+    @Column(name = "desc_operation02", length = 20)
+    var descOperation02: String? = null,
+
+    @Column(name = "desc_operation03", length = 20)
+    var descOperation03: String? = null,
+
+    @Column(name = "desc_operation04", length = 20)
+    var descOperation04: String? = null,
+
+    @Column(name = "desc_operation05", length = 20)
+    var descOperation05: String? = null,
+
+    @Column(name = "desc_operation06", length = 20)
+    var descOperation06: String? = null,
+
+    @Column(name = "desc_operation07", length = 20)
+    var descOperation07: String? = null,
+
+    @Column(name = "desc_operation08", length = 20)
+    var descOperation08: String? = null,
+
+    @Column(name = "desc_safety01", length = 20)
+    var descSafety01: String? = null,
+
+    @Column(name = "desc_safety02", length = 20)
+    var descSafety02: String? = null,
+
+    @Column(name = "desc_safety03", length = 20)
+    var descSafety03: String? = null,
+
+    @Column(name = "desc_safety04", length = 20)
+    var descSafety04: String? = null,
+
+    @Column(name = "desc_gate_status09", length = 50)
+    var descGateStatus09: String? = null,
+
     @Column(name = "desc_gate_status10", length = 50)
     var descMainMotorError: String? = null,
 
@@ -59,6 +102,14 @@ class DataReceiveAnalysis(
 
     @Column(name = "resolve_yn", nullable = false, length = 1)
     var resolveYn: String = "N",
+
+    /** 오류를 resolve 처리한 사용자(또는 시스템 주체). 스키마에는 있었으나 엔티티 매핑이 누락되어 있었다. */
+    @Column(name = "resolve_user", length = 50)
+    var resolveUser: String? = null,
+
+    /** resolve 처리 시각. `SendControlJob`의 리셋 명령 전송 성공 시 `now()`로 채워진다. */
+    @Column(name = "resolve_date")
+    var resolveDate: LocalDateTime? = null,
 
     @Column(name = "has_status_event", insertable = false, updatable = false)
     val hasStatusEvent: Boolean = false,

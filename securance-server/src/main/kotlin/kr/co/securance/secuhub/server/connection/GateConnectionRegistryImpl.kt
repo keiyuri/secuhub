@@ -131,19 +131,31 @@ class GateConnectionRegistryImpl(
         }
     }
 
-    override fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean {
+    override suspend fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean {
         val state = connections[dtlIp] ?: return false
         if (!state.ownsLane(dtlLaneNo) && state.hasAuthoritativeLaneInfo) return false
-        return try {
-            state.actor.submit {
+        return enqueueSend(state, packet, "lane=$dtlLaneNo")
+    }
+
+    override suspend fun sendToConnection(dtlIp: String, packet: ByteArray): Boolean {
+        val state = connections[dtlIp] ?: return false
+        return enqueueSend(state, packet, "connection")
+    }
+
+    /**
+     * 액터 큐에 전송 작업을 넣고, 실제 소켓 쓰기가 완료(성공/실패)될 때까지 대기한 뒤 결과를
+     * 반환한다 — 큐잉 성공 여부만 보고 반환하던 예전 구현은 [GateConnectionRegistry.sendToLane]
+     * 문서의 Codex 리뷰 수정 사유를 참고.
+     */
+    private suspend fun enqueueSend(state: GateConnectionState, packet: ByteArray, logContext: String): Boolean =
+        try {
+            state.actor.submitAndAwait {
                 state.outbound.sendByteArray(Mono.just(packet)).then().awaitFirstOrNull()
             }
-            true
         } catch (ex: GateTaskRejectedException) {
-            logger.warn("커넥션[{}] 전송 거부(대기열 초과): lane={}", dtlIp, dtlLaneNo, ex)
+            logger.warn("커넥션[{}] 전송 거부(대기열 초과): {}", state.dtlIp, logContext, ex)
             false
         }
-    }
 
     /**
      * `tb_net_state` 갱신을 파티션 큐(3.5절)에 위임한다 — 디바이스 IP당 순서가 보장된다.

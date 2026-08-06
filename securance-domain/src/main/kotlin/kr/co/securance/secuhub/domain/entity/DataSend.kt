@@ -40,6 +40,14 @@ class DataSend(
     @Column(name = "snd_user", length = 20)
     var sndUser: String? = null,
 
+    /**
+     * 레거시 `snd_data_tp`(예: "RESET_MOTOR")에 대응하는 필드 — `_` 구분 서브타입 규칙까지는
+     * 이 엔티티에서 강제하지 않고 호출부(`SendControlJob`)가 필요 시 파싱한다.
+     * 스키마(`V1__init_schema.sql`)에는 있었으나 엔티티 매핑이 누락되어 있었다.
+     */
+    @Column(name = "snd_type_cd", length = 20)
+    var sndTypeCd: String? = null,
+
     @Lob
     @Column(name = "snd_raw")
     var sndRaw: String? = null,

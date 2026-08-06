@@ -223,7 +223,7 @@ class GateConnectionRegistryImplTest {
         state.replaceLaneNumbers(listOf(1, 2)) // authoritative 교체 — 레인 3은 이 커넥션 소유가 아님이 확정됨.
         registry.register(state)
 
-        val result = registry.sendToLane("192.168.0.15", 3, byteArrayOf(0x01))
+        val result = runBlocking { registry.sendToLane("192.168.0.15", 3, byteArrayOf(0x01)) }
 
         assertFalse(result)
     }
@@ -235,7 +235,7 @@ class GateConnectionRegistryImplTest {
         state.replaceLaneNumbers(listOf(1, 2))
         registry.register(state)
 
-        val result = registry.sendToLane("192.168.0.16", 1, byteArrayOf(0x01))
+        val result = runBlocking { registry.sendToLane("192.168.0.16", 1, byteArrayOf(0x01)) }
 
         assertTrue(result)
     }
@@ -244,7 +244,7 @@ class GateConnectionRegistryImplTest {
     fun `sendToLane은 등록되지 않은 IP면 false를 반환한다`() {
         val registry = newRegistry()
 
-        assertFalse(registry.sendToLane("10.0.0.1", 1, byteArrayOf()))
+        assertFalse(runBlocking { registry.sendToLane("10.0.0.1", 1, byteArrayOf()) })
     }
 
     @Test

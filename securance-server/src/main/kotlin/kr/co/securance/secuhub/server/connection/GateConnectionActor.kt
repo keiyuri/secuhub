@@ -1,6 +1,7 @@
 package kr.co.securance.secuhub.server.connection
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -8,6 +9,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kr.co.securance.secuhub.common.exception.GateTaskRejectedException
 import org.slf4j.LoggerFactory
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 커넥션 1개(디바이스 IP 1개)를 위한 직렬 처리 액터(계획서 3.3절).
@@ -30,6 +32,18 @@ class GateConnectionActor(
     private val scope = CoroutineScope(dispatcher + job)
 
     private val channel = Channel<suspend () -> Unit>(capacity = queueCapacity)
+
+    /**
+     * [submitAndAwait]가 대기 중인 완료 신호들을 추적한다.
+     *
+     * [Codex 적대적 리뷰 수정] 원래 `close()`는 채널을 닫고 `job.cancel()`만 호출했는데, 이미 큐에
+     * 들어가 실행을 기다리던(또는 취소로 인해 아예 실행되지 못한) 작업의 `CompletableDeferred`는
+     * 아무도 완료시키지 않았다 — 재연결로 옛 액터가 교체/close될 때 그 큐에 남아있던 전송 작업을
+     * 기다리던 `SendControlJob.processRow`의 `completion.await()`가 영원히 끝나지 않고,
+     * `@DisallowConcurrentExecution` 때문에 이후 잡 실행 전체가 막히는 치명적 결함이었다.
+     * 이제 `close()`가 아직 완료되지 않은 모든 항목을 예외로 완료시켜 대기자가 반드시 깨어나게 한다.
+     */
+    private val pendingCompletions = ConcurrentHashMap.newKeySet<CompletableDeferred<Unit>>()
 
     @Volatile
     private var closed = false
@@ -59,11 +73,61 @@ class GateConnectionActor(
         if (result.isFailure) throw GateTaskRejectedException(connectionKey)
     }
 
-    /** 대기 중인 작업을 모두 버리고 액터를 종료한다. 이후 [submit]은 항상 거부된다. */
+    /**
+     * [submit]과 달리 작업이 액터 큐에서 실제로 실행 완료(성공/예외)될 때까지 대기한다.
+     *
+     * [Codex 리뷰 수정] `SendControlJob`이 `submit()`의 "큐잉 성공"만 보고 `sndYn='Y'`를 확정
+     * 저장하던 문제 — 큐잉 직후 연결이 끊기거나 `outbound.sendByteArray()`가 비동기로 실패해도
+     * 이미 "전송됨"으로 영구 확정되어 재조회 대상에서 빠지는 유실 버그였다. 여기서는 작업 자체가
+     * 실제 소켓 쓰기까지 끝난 뒤에야 결과를 반환하므로, 물리 전송 실패 시 호출자가 `sndYn`을
+     * 갱신하지 않고 다음 스케줄의 재시도 대상으로 남길 수 있다.
+     *
+     * 큐 등록 자체가 거부(대기열 초과/이미 닫힘)되면 [GateTaskRejectedException]을 그대로 던진다
+     * (기존 [submit] 계약과 동일 — 호출자가 "제출조차 안 됨"과 "제출 후 실패"를 구분할 필요는
+     * 없으므로 두 경우 모두 `false`로 수렴시켜도 되지만, 예외를 그대로 전파해 호출자가 로그 문맥을
+     * 구분할 수 있게 한다).
+     */
+    suspend fun submitAndAwait(task: suspend () -> Unit): Boolean {
+        val completion = CompletableDeferred<Unit>()
+        pendingCompletions += completion
+        try {
+            submit {
+                try {
+                    task()
+                    completion.complete(Unit)
+                } catch (ex: Exception) {
+                    completion.completeExceptionally(ex)
+                    throw ex // 액터 루프의 기존 예외 로그도 그대로 남긴다.
+                }
+            }
+        } catch (ex: GateTaskRejectedException) {
+            // 큐에 등록조차 되지 못했으므로 close()가 이 항목을 처리할 일이 없다 — 직접 정리한다.
+            pendingCompletions -= completion
+            throw ex
+        }
+        return try {
+            completion.await()
+            true
+        } catch (ex: Exception) {
+            false
+        } finally {
+            pendingCompletions -= completion
+        }
+    }
+
+    /**
+     * 대기 중인 작업을 모두 버리고 액터를 종료한다. 이후 [submit]은 항상 거부된다.
+     *
+     * [Codex 적대적 리뷰 수정] 아직 완료되지 않은 [pendingCompletions]를 전부 예외로 완료시켜,
+     * 큐에서 실행되지 못한/실행 도중 취소된 작업을 [submitAndAwait]로 기다리던 호출자가
+     * 무기한 멈추지 않도록 한다.
+     */
     fun close() {
         closed = true
         channel.close()
         job.cancel()
+        val closedCause = GateTaskRejectedException(connectionKey)
+        pendingCompletions.forEach { it.completeExceptionally(closedCause) }
     }
 
     val isClosed: Boolean get() = closed

@@ -13,9 +13,16 @@ dependencies {
     implementation(project(":securance-common"))
     implementation(project(":securance-server"))
     implementation(project(":securance-domain"))
+    // GateConnectionState.codec의 타입(GateProtocolCodec)을 컴파일 타임에 인식하려면 필요하다
+    // (securance-server가 GateConnectionState.codec의 타입으로 이 인터페이스를 노출한다).
+    implementation(project(":securance-protocol"))
 
     implementation("org.springframework.boot:spring-boot-starter-quartz")
     implementation(libs.kotlinx.coroutines.core)
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // ReqStatusJobTest에서 GateConnectionState를 직접 생성하려면 reactor.netty.Connection/
+    // NettyOutbound 타입이 컴파일 클래스패스에 있어야 한다(securance-server는 이를 implementation
+    // 의존성으로만 노출하므로 테스트 전용으로 별도 선언).
+    testImplementation("org.springframework.boot:spring-boot-starter-webflux")
 }

@@ -14,8 +14,14 @@ enum class GatewayMode {
 /**
  * `securance.server.*` 설정 프로퍼티(계획서 3.1/3.7절).
  *
- * 연결 방향(SERVER/CLIENT)과 확장성 관련 튜닝 값을 담는다. 제어 명령 전송 방식(QUEUED/DIRECT)은
- * 이 클래스가 아니라 별도의 `securance.control.dispatch-mode` 설정(5.5절, 완전히 독립된 축)이다.
+ * 연결 방향(SERVER/CLIENT)과 확장성 관련 튜닝 값을 담는다.
+ *
+ * Opus 전체 리뷰 지적: 예전 주석은 제어 명령 전송 방식(QUEUED/DIRECT)이 `securance.control.dispatch-mode`
+ * 설정으로 실제 토글 가능한 것처럼 적혀 있었지만, 그 설정을 바인딩하는 `@ConfigurationProperties`
+ * 클래스가 애초에 존재하지 않아 값을 아무리 바꿔도 아무 효과가 없었다(운영자가 DIRECT로 바꿔도
+ * 조용히 무시됨). 현재 실제 구현은 [kr.co.securance.secuhub.scheduler] 모듈의 `SendControlJob`
+ * 폴링(큐 적재 → 주기 조회 → 전송) 한 가지뿐이라, 그 죽은 설정 항목은 application.yml에서 제거했다
+ * (`docs/작업일지.md` 참고). DIRECT 경로가 실제로 필요해지면 그때 이 클래스에 새 프로퍼티를 추가한다.
  */
 @ConfigurationProperties(prefix = "securance.server")
 data class ServerModeConfig(

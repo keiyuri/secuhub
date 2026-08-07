@@ -42,6 +42,12 @@ class SecurityConfig {
                 authorize("/vendor/**", permitAll)
                 authorize("/js/**", permitAll)
                 authorize("/css/**", permitAll)
+                // Opus 전체 리뷰 지적: 전역 에러 페이지(templates/error.html) 신설과 함께 추가.
+                // AccessDeniedHandler/에러 디스패처가 예외 발생 시 "/error"로 내부 포워드하는데,
+                // 이 규칙이 없으면 그 포워드된 요청도 anyRequest 규칙(ROLE_VIEW 이상 필요)에 걸려
+                // 403 처리 중에 또 인가 예외가 발생하거나 비로그인 사용자는 /login으로 리다이렉트되어
+                // 정작 만들어둔 에러 페이지가 절대 보이지 않는다.
+                authorize("/error", permitAll)
                 // 사용자별 auth_view/auth_ctrl/auth_admin(Y/N)이 ROLE_VIEW/ROLE_CONTROL/ROLE_ADMIN으로
                 // 매핑된다(SecurityUserDetailsService). 인증만으로는 부족하고, 경로별 권한 등급을
                 // 명시해야 한다 — 그렇지 않으면 ROLE_VIEW만 가진 사용자도 관리자/제어 화면에

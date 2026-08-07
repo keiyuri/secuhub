@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--/*
+  Opus 전체 리뷰 지적: 전역 에러 페이지가 하나도 없어서 404/403/500 등은 전부 스프링 기본
+  Whitelabel Error Page(영문, 스택트레이스 없이도 어수선한 디버그용 화면)로 노출되고 있었다.
+  이 템플릿이 뷰 이름 "error"(DefaultErrorViewResolver의 최종 폴백)로 매칭되어 대체한다.
+
+  dashboard-layout으로 감싸지 않고 login.html과 같은 독립 카드 레이아웃을 쓴다 — 에러 페이지는
+  인증 여부와 무관하게(로그인 전 404, 세션 만료 후 403 등) 떠야 하는데, dashboard-layout은
+  sidebar/topbar 프래그먼트가 로그인 사용자 정보·메뉴 모델을 전제로 하므로 그 전제가 깨진 상태에서
+  또 렌더링 예외가 나면 에러 페이지 렌더링 자체가 실패하는 악순환에 빠질 수 있다.
+
+  status/error/message/path/timestamp는 스프링 기본 에러 속성(BasicErrorController)이며,
+  application.yml에 server.error.include-message 등을 켜지 않았으므로 message는 항상 빈 문자열로
+  내려온다(운영 환경에서 예외 메시지·스택트레이스 노출 방지 — 적대적 리뷰가 지적했던 정보 노출과
+  동일한 원칙). 그래서 화면에는 상태 코드만 보여주고 상세 메시지는 노출하지 않는다.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8"/>
+  <title th:text="${status} ? '오류 ' + ${status} + ' · securance' : '오류 · securance'">오류 · securance</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" th:href="@{/vendor/adminlte/css/adminlte.min.css}"/>
+</head>
+<body class="login-page bg-body-secondary">
+  <div class="login-box">
+    <div class="card card-outline card-danger">
+      <div class="card-header text-center">
+        <span class="h1"><b>securance</b></span>
+      </div>
+      <div class="card-body text-center">
+        <h2 class="mb-3" th:text="${status} ?: '오류'">오류</h2>
+        <p class="mb-1" th:switch="${status}">
+          <span th:case="404">요청하신 페이지를 찾을 수 없습니다.</span>
+          <span th:case="403">이 화면에 접근할 권한이 없습니다.</span>
+          <span th:case="*">처리 중 오류가 발생했습니다. 문제가 계속되면 관리자에게 문의하세요.</span>
+        </p>
+        <p class="text-muted small" th:if="${path}" th:text="${path}">/path</p>
+        <a class="btn btn-primary mt-3" href="/dashboard">대시보드로 돌아가기</a>
+      </div>
+    </div>
+  </div>
+  <script th:src="@{/vendor/bootstrap/js/bootstrap.bundle.min.js}"></script>
+</body>
+</html>

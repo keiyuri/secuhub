@@ -5,9 +5,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 /**
  * `securance.scheduler.*` 설정(계획서 3.6/3.7절).
  *
- * `securance.server.mode`(SERVER/CLIENT)나 `securance.control.dispatch-mode`(QUEUED/DIRECT)와는
+ * `securance.server.mode`(SERVER/CLIENT, [kr.co.securance.secuhub.server.config.ServerModeConfig] 참고)와는
  * 완전히 독립된 축이다 — 이 모듈은 오직 [kr.co.securance.secuhub.server.connection.GateConnectionRegistry]
- * 인터페이스만 보고 동작하며 연결 방향을 알지 못한다.
+ * 인터페이스만 보고 동작하며 연결 방향을 알지 못한다. (예전엔 여기서 `securance.control.dispatch-mode`도
+ * 함께 언급했지만, 그 설정을 바인딩하는 코드가 없어 죽은 설정이었다 — 제거했다. ServerModeConfig.kt 참고.)
  */
 @ConfigurationProperties(prefix = "securance.scheduler")
 data class SchedulerProperties(

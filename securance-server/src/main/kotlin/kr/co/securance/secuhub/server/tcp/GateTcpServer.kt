@@ -84,9 +84,16 @@ class GateTcpServer(
 
     @PostConstruct
     fun start() {
-        if (config.mode != GatewayMode.SERVER) {
-            logger.info("securance.server.mode={} — GateTcpServer(SERVER 모드)는 기동하지 않습니다.", config.mode)
-            return
+        // Opus 전체 리뷰 지적: CLIENT(backend→gate 아웃바운드 연결) 방향은 `GateTcpClient`가
+        // 아직 존재하지 않아 실제 구현이 전혀 없다(SR_Speed_Client_전환_계획.md 어디에도 CLIENT
+        // 구현 범위가 없다). 예전에는 여기서 INFO 로그만 남기고 조용히 리턴했는데, 그러면
+        // mode=CLIENT로 잘못 설정한 배포가 겉보기엔 "정상 기동"한 것처럼 보이면서 게이트 연결이
+        // 전혀 이뤄지지 않는 상태로 운영에 올라갈 수 있다. 침묵 실패 대신 기동 자체를 명시적으로
+        // 실패시켜 배포 단계에서 바로 드러나게 한다(onChunkReceived 등 기존 "침묵 실패 금지" 원칙,
+        // 계획서 3.4절과 동일한 태도).
+        check(config.mode == GatewayMode.SERVER) {
+            "securance.server.mode=${config.mode}는 아직 구현되어 있지 않습니다. " +
+                "현재는 SERVER 모드(backend ← gate)만 지원합니다."
         }
 
         disposableServer = TcpServer.create()

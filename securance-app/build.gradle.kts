@@ -24,6 +24,11 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // 컨텍스트 로드 스모크 테스트(Opus 리뷰 지적 — securance-app에 테스트가 전무했음)용 임베디드 DB.
+    // 운영 DB(MariaDB)를 대신해 H2로 전체 빈 조립을 검증한다(Flyway는 MariaDB 전용 문법을 쓰므로
+    // 비활성화하고 Hibernate ddl-auto=create-drop으로 엔티티에서 스키마를 생성한다).
+    testRuntimeOnly("com.h2database:h2")
+    testRuntimeOnly("org.jetbrains.kotlin:kotlin-reflect:${libs.versions.kotlin.get()}")
 }
 
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {

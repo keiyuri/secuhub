@@ -24,9 +24,10 @@ dependencies {
     // 쓰고 STOMP/SockJS는 도입하지 않는다(별도 클라이언트 JS 벤더링 없이 브라우저 내장 WebSocket으로
     // 충분하기 때문 — vendor/ 디렉터리에 외부 JS 라이브러리를 추가로 받아오지 않아도 됨).
     implementation("org.springframework.boot:spring-boot-starter-websocket")
-    // spring-boot-starter-web이 jackson-databind를 런타임에 끌고 오지만, DashboardPushService가
-    // ObjectMapper를 직접 컴파일 타임에 참조하므로 명시적으로 선언한다.
-    implementation("com.fasterxml.jackson.core:jackson-databind")
+    // spring-boot-starter-web이 Jackson 3(tools.jackson)를 런타임에 끌고 오지만, DashboardPushService가
+    // ObjectMapper(Jackson 3 타입 — Spring Boot 4.1의 기본 JacksonAutoConfiguration이 등록하는 빈이
+    // 바로 이 타입이다)를 직접 컴파일 타임에 참조하므로 명시적으로 선언한다.
+    implementation("tools.jackson.core:jackson-databind")
     // #4/#11 화면의 폼 검증(jakarta.validation.constraints.*) — 이전까지는 화면에 폼이 없어 불필요했다.
     implementation("org.springframework.boot:spring-boot-starter-validation")
     // #8/#9 조회 화면의 엑셀 내보내기 공용 컴포넌트(ExcelExportService, 계획서 5절) — 레거시

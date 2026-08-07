@@ -1,6 +1,6 @@
 package kr.co.securance.secuhub.web.realtime
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import tools.jackson.databind.ObjectMapper
 import kr.co.securance.secuhub.domain.entity.DataReceiveAnalysis
 import kr.co.securance.secuhub.domain.repository.DataReceiveAnalysisRepository
 import kr.co.securance.secuhub.web.dashboard.DashboardService
@@ -25,6 +25,10 @@ class DashboardPushService(
     private val dashboardService: DashboardService,
     private val analysisRepository: DataReceiveAnalysisRepository,
     private val webSocketHandler: DashboardWebSocketHandler,
+    // Spring Boot 4.1부터 기본 JacksonAutoConfiguration이 Jackson 3(`tools.jackson`)의
+    // JsonMapper/ObjectMapper만 빈으로 등록한다 — 이전에 Jackson 2(`com.fasterxml.jackson`)
+    // ObjectMapper로 선언했을 때는 해당 타입의 빈이 없어 컨텍스트 기동 자체가 실패했다
+    // (SecuranceApplicationTests가 잡아낸 문제, Opus 리뷰의 "컨텍스트 로드 테스트 부재" 지적).
     private val objectMapper: ObjectMapper,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)

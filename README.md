@@ -64,8 +64,7 @@ Copy-Item securance-app\src\main\resources\application-local.yml.example `
 
 | 키 | 설명 |
 |---|---|
-| `securance.server.mode` | `SERVER`(backend←gate) \| `CLIENT`(backend→gate) — 계획서 3.1절 |
-| `securance.control.dispatch-mode` | `QUEUED` \| `DIRECT` — 프론트엔드 제어 명령 전송 방식. **연결 방향과 완전히 독립적인 축**(계획서 5.5절) |
+| `securance.server.mode` | `SERVER`(backend←gate)만 구현되어 있음. `CLIENT`(backend→gate)로 설정하면 `GateTcpServer`가 기동 자체를 실패시킨다 — 아직 구현체(`GateTcpClient`)가 없음(계획서 3.1절) |
 | `securance.server.db-writer-shards` | DB 비동기 쓰기 파티션 수 (1,000+ 디바이스면 16~32 권장) |
 | `securance.scheduler.job-concurrency` | Quartz 잡 팬아웃 동시성 상한 |
 | `securance.messaging.rabbitmq.enabled` | RabbitMQ 활성화 여부 |

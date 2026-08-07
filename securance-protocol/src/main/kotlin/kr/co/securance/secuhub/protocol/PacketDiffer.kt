@@ -50,12 +50,12 @@ object PacketDiffer {
      */
     fun diff(previous: ByteArray?, current: ByteArray): PacketChangeState {
         if (previous == null) {
-            val laneCount = laneCountOf(current)
             return PacketChangeState(
                 isFirstPacket = true,
                 headerChanged = true,
                 infoChanged = true,
-                laneChanges = (1..laneCount).map { lane ->
+                // 레인 번호는 위치 인덱스가 아니라 실제 GATE LANE NUMBER 필드값을 사용한다.
+                laneChanges = laneNumbersOf(current).map { lane ->
                     LaneStatusChange(lane, true, true, true, true, true, true)
                 },
                 tailChanged = true,
@@ -69,10 +69,18 @@ object PacketDiffer {
             SpeedGateProtocolConstants.DATA_INFO_LENGTH,
         )
 
-        val laneCount = minOf(laneCountOf(previous), laneCountOf(current))
-        val laneChanges = (0 until laneCount).map { idx ->
-            val offset = STATUS_BLOCK_START + idx * SpeedGateProtocolConstants.STATUS_DATA_LENGTH
-            diffLane(previous, current, offset, laneNumber = idx + 1)
+        // 레인은 위치 인덱스가 아니라 실제 GATE LANE NUMBER 필드값으로 매칭한다 — 장비가 레인 순서를
+        // 바꿔 보내거나(드롭 후 재등장 등) 레인 개수가 달라지는 경우, 같은 오프셋이라도 서로 다른
+        // 물리 레인을 가리킬 수 있어 위치 기준 비교는 잘못된 변경 감지(오탐/누락)를 유발한다.
+        val previousLaneOffsets = laneOffsetsOf(previous)
+        val laneChanges = laneOffsetsOf(current).map { (laneNumber, currentOffset) ->
+            val previousOffset = previousLaneOffsets[laneNumber]
+            if (previousOffset == null) {
+                // 이전 패킷에 없던 레인(신규 등장) — 비교 대상이 없으므로 전체 변경으로 간주한다.
+                LaneStatusChange(laneNumber, true, true, true, true, true, true)
+            } else {
+                diffLane(previous, current, previousOffset, currentOffset, laneNumber)
+            }
         }
 
         // Tail 4바이트 중 앞 2바이트는 체크섬(페이로드에 종속된 파생값)이라 레거시
@@ -105,14 +113,20 @@ object PacketDiffer {
      * 망가질 수 있었다. 이제는 블록 전체(74바이트)가 실제로 packet 안에 있는지, 그리고 읽은 값이
      * 유효한 레인 번호 범위(1..MAX_LANE_COUNT) 안인지까지 확인한다.
      */
-    fun laneNumbersOf(packet: ByteArray): List<Int> {
+    fun laneNumbersOf(packet: ByteArray): List<Int> = laneOffsetsOf(packet).keys.toList()
+
+    /**
+     * 실제 GATE LANE NUMBER 필드값 -> 해당 레인 블록의 오프셋(순서 보존).
+     * [laneNumbersOf]와 `diff()`의 레인 매칭이 공유하는 단일 유효성 검증 기준이다.
+     */
+    private fun laneOffsetsOf(packet: ByteArray): Map<Int, Int> {
         val count = laneCountOf(packet)
         return (0 until count).mapNotNull { idx ->
             val offset = STATUS_BLOCK_START + idx * SpeedGateProtocolConstants.STATUS_DATA_LENGTH
             if (offset + SpeedGateProtocolConstants.STATUS_DATA_LENGTH > packet.size) return@mapNotNull null
             val lane = packet[offset].toInt() and 0xFF
-            if (lane !in 1..SpeedGateProtocolConstants.MAX_LANE_COUNT) null else lane
-        }
+            if (lane !in 1..SpeedGateProtocolConstants.MAX_LANE_COUNT) null else lane to offset
+        }.toMap()
     }
 
     /** DataInfo의 `LOCAL GATE LANE COUNT` 필드(오프셋 71, 즉 Header+DataInfo의 마지막 바이트)를 읽는다. */
@@ -121,8 +135,15 @@ object PacketDiffer {
         return (packet[LANE_COUNT_OFFSET].toInt() and 0xFF).coerceAtMost(SpeedGateProtocolConstants.MAX_LANE_COUNT)
     }
 
-    private fun diffLane(previous: ByteArray, current: ByteArray, offset: Int, laneNumber: Int): LaneStatusChange {
-        fun changed(start: Int, length: Int) = !regionEquals(previous, current, offset + start, length)
+    private fun diffLane(
+        previous: ByteArray,
+        current: ByteArray,
+        previousOffset: Int,
+        currentOffset: Int,
+        laneNumber: Int,
+    ): LaneStatusChange {
+        fun changed(start: Int, length: Int) =
+            !regionEquals(previous, current, previousOffset + start, length, currentOffset + start)
 
         return LaneStatusChange(
             laneNumber = laneNumber,

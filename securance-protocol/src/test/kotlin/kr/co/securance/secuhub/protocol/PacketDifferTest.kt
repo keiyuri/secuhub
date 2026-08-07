@@ -8,7 +8,11 @@ import kotlin.test.assertTrue
 class PacketDifferTest {
 
     /** DataInfo(45) + laneCount*Status(74)로 구성된 가상의 GATE_STATUS 응답 패킷을 만든다(Tail 포함). */
-    private fun fakeStatusPacket(laneCount: Int, sensorByteAt: (lane: Int) -> Byte): ByteArray {
+    private fun fakeStatusPacket(
+        laneCount: Int,
+        laneNumberAt: (lane: Int) -> Int = { it }, // 기본은 위치와 동일(1,2,3...); 실제 레인 번호를 다르게 주고 싶을 때 오버라이드
+        sensorByteAt: (lane: Int) -> Byte,
+    ): ByteArray {
         val address = SpeedGatePacketCodec.buildAddress(comSlot = 1, controller = 1, deviceNumber = 1)
         val dataInfo = ByteArray(SpeedGateProtocolConstants.DATA_INFO_LENGTH)
         dataInfo[dataInfo.size - 1] = laneCount.toByte() // LOCAL GATE LANE COUNT (DataInfo 마지막 바이트)
@@ -16,7 +20,7 @@ class PacketDifferTest {
         val laneBlocks = ByteArray(laneCount * SpeedGateProtocolConstants.STATUS_DATA_LENGTH)
         for (lane in 1..laneCount) {
             val offset = (lane - 1) * SpeedGateProtocolConstants.STATUS_DATA_LENGTH
-            laneBlocks[offset] = lane.toByte() // GATE LANE NUMBER
+            laneBlocks[offset] = laneNumberAt(lane).toByte() // GATE LANE NUMBER
             laneBlocks[offset + 10] = sensorByteAt(lane) // 센서 구간(오프셋 10부터) 첫 바이트
         }
 
@@ -63,6 +67,63 @@ class PacketDifferTest {
         assertFalse(result.laneChanges[0].anyChanged) // lane 1
         assertTrue(result.laneChanges[1].sensorChanged) // lane 2
         assertFalse(result.laneChanges[2].anyChanged) // lane 3
+    }
+
+    @Test
+    fun `레인 번호가 블록 위치와 다르면(예 2,4번 레인) 실제 GATE LANE NUMBER 필드값을 사용한다`() {
+        val actualLaneNumbers = listOf(2, 4)
+        val previous = fakeStatusPacket(laneCount = 2, sensorByteAt = { 0x01 }, laneNumberAt = { actualLaneNumbers[it - 1] })
+        val current = fakeStatusPacket(
+            laneCount = 2,
+            sensorByteAt = { pos -> if (pos == 2) 0x02 else 0x01 }, // 두 번째 블록(실제 레인 4)만 변경
+            laneNumberAt = { actualLaneNumbers[it - 1] },
+        )
+
+        val result = PacketDiffer.diff(previous, current)
+
+        assertEquals(listOf(2, 4), result.laneChanges.map { it.laneNumber })
+        assertFalse(result.laneChanges[0].anyChanged) // 실제 레인 2
+        assertTrue(result.laneChanges[1].sensorChanged) // 실제 레인 4
+    }
+
+    @Test
+    fun `최초 패킷도 위치 인덱스가 아닌 실제 GATE LANE NUMBER 필드값을 laneNumber로 사용한다`() {
+        val actualLaneNumbers = listOf(3, 1)
+        val current = fakeStatusPacket(laneCount = 2, sensorByteAt = { 0x01 }, laneNumberAt = { actualLaneNumbers[it - 1] })
+
+        val result = PacketDiffer.diff(previous = null, current = current)
+
+        assertEquals(listOf(3, 1), result.laneChanges.map { it.laneNumber })
+    }
+
+    @Test
+    fun `레인 순서가 이전 패킷과 다르게 와도 위치가 아닌 실제 레인 번호로 매칭해서 비교한다`() {
+        // previous: 위치1=레인4, 위치2=레인2   /   current: 위치1=레인2, 위치2=레인4(센서만 변경)
+        val previous = fakeStatusPacket(laneCount = 2, sensorByteAt = { 0x01 }, laneNumberAt = { pos -> listOf(4, 2)[pos - 1] })
+        val current = fakeStatusPacket(
+            laneCount = 2,
+            sensorByteAt = { pos -> if (pos == 2) 0x02 else 0x01 }, // 위치2(=레인4)만 실제로 값이 바뀜
+            laneNumberAt = { pos -> listOf(2, 4)[pos - 1] },
+        )
+
+        val result = PacketDiffer.diff(previous, current)
+        val byLane = result.laneChanges.associateBy { it.laneNumber }
+
+        // 위치 기준으로 비교했다면 위치1(레인2 vs 레인4)이 다른 것으로 오탐되었을 것이다.
+        assertFalse(byLane.getValue(2).anyChanged)
+        assertTrue(byLane.getValue(4).sensorChanged)
+    }
+
+    @Test
+    fun `이전 패킷에 없던 레인이 새로 나타나면 매칭 대상이 없으므로 전체 변경으로 간주한다`() {
+        val previous = fakeStatusPacket(laneCount = 1, sensorByteAt = { 0x01 }, laneNumberAt = { 1 })
+        val current = fakeStatusPacket(laneCount = 2, sensorByteAt = { 0x01 }, laneNumberAt = { it })
+
+        val result = PacketDiffer.diff(previous, current)
+        val byLane = result.laneChanges.associateBy { it.laneNumber }
+
+        assertFalse(byLane.getValue(1).anyChanged) // 기존 레인은 그대로
+        assertTrue(byLane.getValue(2).anyChanged) // 신규 레인은 전체 변경
     }
 
     @Test

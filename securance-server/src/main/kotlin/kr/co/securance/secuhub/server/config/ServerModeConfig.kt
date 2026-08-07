@@ -32,10 +32,10 @@ data class ServerModeConfig(
     val host: String = "0.0.0.0",
 
     /** SERVER 모드에서 바인딩할 포트. */
-    val port: Int = 9000,
+    val port: Int = 28010,
 
     /** CLIENT 모드에서 게이트에 접속할 때 사용할 포트. */
-    val clientPort: Int = 9000,
+    val clientPort: Int = 1005,
 
     /** CLIENT 모드에서 미연결 장비를 재확인하는 주기(초). */
     val clientReconnectIntervalSeconds: Long = 10,

@@ -156,6 +156,22 @@ class DefaultGatePacketHandlerTest {
     }
 
     @Test
+    fun `단일 레인 게이트도 센서 값이 0이면 온라인으로 큐잉하지 않는다`() = runBlocking {
+        // 재검토 지적: 레거시 SpeedServer.cs는 iLaneCntForNet(레인 수)이 1보다 클 때만 레인별
+        // IsNotConnected 검사를 net_state에 반영했고, 단일 레인 게이트는 이 검사를 건너뛰고
+        // ClsQuartzJobReqStatus의 TCP 소켓 생존 폴링에만 의존했다. 사용자 확인 결과, 현재 포트는
+        // 레인 수와 무관하게 항상 isLaneConnected를 적용하는 동작을 의도적으로 유지하기로 했다 —
+        // 이 결정을 회귀 테스트로 고정한다.
+        val registry = mock(GateConnectionRegistryImpl::class.java)
+        val handler = DefaultGatePacketHandler(registry)
+        val state = newState()
+
+        handler.handle(state, fakeStatusPacket(laneCount = 1) { 0x00 })
+
+        verify(registry, never()).enqueueNetStateUpdate("192.168.0.30", 1, true)
+    }
+
+    @Test
     fun `연결돼 있던 레인의 센서 값이 0으로 바뀌면 오프라인으로 큐잉한다`() = runBlocking {
         val registry = mock(GateConnectionRegistryImpl::class.java)
         val handler = DefaultGatePacketHandler(registry)

@@ -45,6 +45,14 @@ class DefaultGatePacketHandler(
                 // 어드버서리얼 리뷰 지적 — 레거시는 있었지만 신규 구현에서 누락돼 있었다). 게이트가
                 // 레인 슬롯을 계속 보고해도 물리 센서가 분리되면 나머지 바이트가 전부 0으로 오므로,
                 // 단순 존재 여부만 보면 실제로는 끊긴 레인이 대시보드에 계속 온라인으로 표시된다.
+                //
+                // [레거시와의 의도적 차이] 레거시 SpeedServer.cs(라인 1096~1141)는 이 검사를
+                // `iLaneCntForNet > 1`(다중 레인)일 때만 적용했다 — 단일 레인 게이트는 이 지점에서
+                // net_state를 아예 건드리지 않고, ClsQuartzJobReqStatus의 주기적 TCP 소켓 생존 폴링
+                // 결과만으로 온라인/오프라인을 판정했다(TCP 생존=레인 생존으로 취급). 재검토 시 이
+                // 차이를 발견해 사용자에게 확인했고, "레인 수와 무관하게 항상 isLaneConnected를
+                // 적용"하는 현재 동작을 그대로 유지하기로 결정했다 — 물리 센서 분리를 TCP 연결
+                // 생존 여부보다 더 빠르고 정확하게 감지할 수 있어 레거시보다 개선된 동작으로 판단.
                 val currentLaneSet = laneOffsets.filterValues { offset -> PacketDiffer.isLaneConnected(packet.raw, offset) }.keys
 
                 // 상태 전이(오프라인→온라인) 시에만 net_state를 큐잉한다(적대적 리뷰 지적) — 매 폴링마다

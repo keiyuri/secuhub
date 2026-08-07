@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<!--/* GATE_LOG(0x61) 원시 수신 로그 조회(GateLogReportController 주석 참고: tb_gate_log 원본,
+     /reports/logs(통신·운영 로그, tb_data_rcv_anal)와는 다른 원본 테이블을 쓰는 별도 화면). */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>수신 로그(GATE_LOG) 조회</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="card card-outline card-secondary mb-3">
+    <div class="card-body py-2">
+      <form method="get" th:action="@{/reports/gate-logs}" class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-0">게이트 IP</label>
+          <input type="text" name="dtlIp" class="form-control form-control-sm" th:value="${dtlIp}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">레인</label>
+          <input type="number" name="dtlLaneNo" class="form-control form-control-sm" style="width:5.5rem"
+                 th:value="${dtlLaneNo}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">이벤트유형</label>
+          <select name="eventType" class="form-select form-select-sm">
+            <option value="">전체</option>
+            <option th:each="opt : ${eventTypeOptions}" th:value="${opt.first}" th:text="${opt.second}"
+                    th:selected="${opt.first == eventType}"></option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">시작일</label>
+          <input type="date" name="fromDate" class="form-control form-control-sm" th:value="${fromDate}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">종료일</label>
+          <input type="date" name="toDate" class="form-control form-control-sm" th:value="${toDate}"/>
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-primary">조회</button>
+          <a class="btn btn-sm btn-outline-success"
+             th:href="@{/reports/gate-logs/excel(dtlIp=${dtlIp},dtlLaneNo=${dtlLaneNo},eventType=${eventType},fromDate=${fromDate},toDate=${toDate})}">
+            엑셀 다운로드
+          </a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card card-outline card-primary">
+    <div class="card-header">
+      <h3 class="card-title">
+        조회 결과
+        <span class="badge text-bg-secondary" th:text="${result.totalElements} + '건'">0건</span>
+      </h3>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0">
+        <thead>
+        <tr>
+          <th>발생일시(장치)</th><th>IP</th><th>레인</th><th>이벤트유형</th>
+          <th>Code</th><th>ErrCode</th><th>DoorStatus</th><th>FunctionCode</th>
+        </tr>
+        </thead>
+        <tbody>
+          <tr th:if="${result.empty}">
+            <td colspan="8" class="text-center text-muted">조회된 로그가 없습니다.</td>
+          </tr>
+          <tr th:each="row : ${result.content}">
+            <td th:text="${#temporals.format(row.eventTime, 'yyyy-MM-dd HH:mm:ss')}">일시</td>
+            <td th:text="${row.dtlIp}">IP</td>
+            <td th:text="${row.dtlLaneNo}">0</td>
+            <td th:text="${T(kr.co.securance.secuhub.web.report.GateLogEventTypeLabels).label(row.eventType)}">유형</td>
+            <td th:text="${row.code}">0</td>
+            <td th:text="${row.errCode}">0</td>
+            <td th:text="${row.doorStatus}">0</td>
+            <td th:text="${row.functionCode}">0</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer" th:if="${result.totalPages > 1}">
+      <nav>
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" th:each="p : ${#numbers.sequence(0, result.totalPages - 1)}"
+              th:classappend="${p == result.number} ? 'active'">
+            <a class="page-link"
+               th:href="@{/reports/gate-logs(dtlIp=${dtlIp},dtlLaneNo=${dtlLaneNo},eventType=${eventType},fromDate=${fromDate},toDate=${toDate},page=${p})}"
+               th:text="${p + 1}">1</a>
+          </li>
+        </ul>
+      </nav>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

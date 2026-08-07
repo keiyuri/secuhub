@@ -12,12 +12,14 @@ import org.springframework.stereotype.Component
  * 1차 스캐폴드 기본 패킷 핸들러.
  *
  * `GATE_STATUS`(0x4D) 패킷 수신 시 레인 집합을 authoritative하게 갱신하고 `tb_net_state`를
- * 온라인으로 기록한다. 그 외 객체 코드는 로그만 남긴다 — 상세 저장(tb_data_rcv 등)은
- * 계획서 3.5절 "DB 쓰기 파이프라인"의 나머지 부분으로 후속 작업이다(README 참고).
+ * 온라인으로 기록한다. `GATE_LOG`(0x61) 패킷은 [GateLogService]에 위임해 저장한다(계획서 3.8절,
+ * 신규 설계). 그 외 객체 코드는 로그만 남긴다 — 상세 저장(tb_data_rcv 등)은 계획서 3.5절
+ * "DB 쓰기 파이프라인"의 나머지 부분으로 후속 작업이다(README 참고).
  */
 @Component
 class DefaultGatePacketHandler(
     private val registry: GateConnectionRegistryImpl,
+    private val gateLogService: GateLogService,
 ) : GatePacketHandler {
 
     private val logger = LoggerFactory.getLogger(DefaultGatePacketHandler::class.java)
@@ -88,6 +90,8 @@ class DefaultGatePacketHandler(
                     state.dtlIp, lanes, changes.laneChanges.count { it.anyChanged },
                 )
             }
+        } else if (packet.objectCode == SpeedGateProtocolConstants.ObjectCode.GATE_LOG) {
+            gateLogService.handle(state.dtlIp, packet)
         } else {
             logger.debug("커넥션[{}] objectCode={} 패킷 수신(상세 저장은 후속 작업)", state.dtlIp, packet.objectCode)
         }

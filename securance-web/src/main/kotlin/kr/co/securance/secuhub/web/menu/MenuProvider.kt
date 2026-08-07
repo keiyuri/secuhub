@@ -24,6 +24,7 @@ class MenuProvider {
         MenuNode.Item("이용자 통계", "/reports/access", icon = "bi-graph-up"),
         MenuNode.Item("이벤트 이력", "/reports/events", icon = "bi-list-check"),
         MenuNode.Item("통신/운영 로그", "/reports/logs", icon = "bi-journal-text"),
+        MenuNode.Item("수신 로그(GATE_LOG)", "/reports/gate-logs", icon = "bi-file-earmark-binary"),
         MenuNode.Header("운영"),
         MenuNode.Item("제어 명령 이력", "/control/history", icon = "bi-terminal"),
         MenuNode.Item("사용자 관리", "/admin/users", icon = "bi-people"),

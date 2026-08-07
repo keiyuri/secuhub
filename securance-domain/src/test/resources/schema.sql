@@ -52,3 +52,26 @@ CREATE TABLE tb_data_snd (
     snd_type_cd     VARCHAR(20) NULL,
     snd_raw         CLOB NULL
 );
+
+-- `GateLogRepositoryTest`(@DataJpaTest) 전용 최소 스키마. 운영 마이그레이션(V7__add_gate_log.sql)의
+-- 컬럼을 그대로 재현한다(자연키 UNIQUE 제약 포함 — existsBy... 중복 판단 쿼리가 실제로 그 컬럼
+-- 조합을 대상으로 동작하는지 검증하려면 필요하다).
+CREATE TABLE tb_gate_log (
+    log_id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    dtl_ip          VARCHAR(20) NOT NULL,
+    dtl_lane_no     TINYINT     NOT NULL,
+    event_type      TINYINT     NOT NULL,
+    object_code     TINYINT     NOT NULL,
+    code            TINYINT     NOT NULL,
+    err_code        TINYINT     NOT NULL,
+    operation_mode  TINYINT     NOT NULL,
+    reader_type     TINYINT     NOT NULL,
+    reader_number   TINYINT     NOT NULL,
+    door_status     TINYINT     NOT NULL,
+    function_code   SMALLINT    NOT NULL,
+    event_time      TIMESTAMP   NOT NULL,
+    user_data1      VARCHAR(24) NULL,
+    user_data2      VARCHAR(16) NULL,
+    reg_date        TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_gate_log_natural UNIQUE (dtl_ip, dtl_lane_no, event_time, event_type, code, err_code, function_code)
+);

@@ -152,6 +152,53 @@ class GateLogServiceTest {
     }
 
     @Test
+    fun `handleEmbedded는 GATE_STATUS 패킷 끝에 이어붙은 로그 구간을 디코딩해 저장한다`() {
+        // 레거시 SpeedServer.cs 검증 결과를 반영한 실제 경로: Header(27)+DataInfo(45)+Status(laneCnt*74)+
+        // Log(logCnt*36)+Tail(4). laneCnt=1로 두고 로그 엔트리 1건을 Status 블록 뒤에 이어붙인다.
+        val repository = mock(GateLogRepository::class.java)
+        `when`(
+            repository.existsByDtlIpAndDtlLaneNoAndEventTimeAndEventTypeAndCodeAndErrCodeAndFunctionCode(
+                anyString(), anyInt(), anyKt(), anyInt(), anyInt(), anyInt(), anyInt(),
+            ),
+        ).thenReturn(false)
+
+        val dbWriteQueue = mock(GateDbWriteQueue::class.java)
+        var capturedTask: GateDbWriteTask? = null
+        doAnswer { invocation -> capturedTask = invocation.getArgument(0); null }
+            .`when`(dbWriteQueue).enqueue(anyKt())
+
+        val service = GateLogService(dbWriteQueue, repository)
+
+        val dataInfo = ByteArray(SpeedGateProtocolConstants.DATA_INFO_LENGTH).also { it[it.size - 1] = 1 } // laneCnt=1
+        val statusBlock = ByteArray(SpeedGateProtocolConstants.STATUS_DATA_LENGTH).also { it[0] = 1 } // 레인번호=1
+        val logEntry = HexCodec.fromHex(sampleEntryHex)
+        val payload = dataInfo + statusBlock + logEntry
+        val address = SpeedGatePacketCodec.buildAddress(comSlot = 1, controller = 1, deviceNumber = 1)
+        val raw = SpeedGatePacketCodec.buildPacket(
+            address = address,
+            command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+            command2 = SpeedGateProtocolConstants.Command2.READ,
+            objectCode = SpeedGateProtocolConstants.ObjectCode.GATE_STATUS,
+            dataInfoLength = SpeedGateProtocolConstants.DATA_INFO_LENGTH,
+            dataCount = 1,
+            dataLength = logEntry.size,
+            payload = payload,
+        )
+        val logStart = SpeedGateProtocolConstants.HEADER_LENGTH +
+            SpeedGateProtocolConstants.DATA_INFO_LENGTH +
+            1 * SpeedGateProtocolConstants.STATUS_DATA_LENGTH
+
+        service.handleEmbedded("192.168.0.50", raw, logStart, entryCount = 1)
+        runBlocking { capturedTask!!.execute() }
+
+        verify(repository).save(
+            org.mockito.ArgumentMatchers.argThat { saved: GateLog ->
+                saved.dtlIp == "192.168.0.50" && saved.functionCode == 255
+            },
+        )
+    }
+
+    @Test
     fun `데이터 영역이 로그 엔트리 1건보다 짧으면 아무 것도 하지 않는다`() {
         val repository = mock(GateLogRepository::class.java)
         val dbWriteQueue = mock(GateDbWriteQueue::class.java)

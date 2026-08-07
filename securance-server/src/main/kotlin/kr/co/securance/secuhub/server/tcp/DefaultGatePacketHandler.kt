@@ -12,9 +12,11 @@ import org.springframework.stereotype.Component
  * 1차 스캐폴드 기본 패킷 핸들러.
  *
  * `GATE_STATUS`(0x4D) 패킷 수신 시 레인 집합을 authoritative하게 갱신하고 `tb_net_state`를
- * 온라인으로 기록한다. `GATE_LOG`(0x61) 패킷은 [GateLogService]에 위임해 저장한다(계획서 3.8절,
- * 신규 설계). 그 외 객체 코드는 로그만 남긴다 — 상세 저장(tb_data_rcv 등)은 계획서 3.5절
- * "DB 쓰기 파이프라인"의 나머지 부분으로 후속 작업이다(README 참고).
+ * 온라인으로 기록한다. 같은 패킷 끝에 로그 엔트리가 이어 붙어 있으면(레거시 검증 결과 —
+ * [GateLogService] 클래스 KDoc "레이아웃 정정" 참고) [GateLogService.handleEmbedded]에 위임해
+ * 저장한다(계획서 3.8절, 신규 설계). 문서상 정의된 독립 `GATE_LOG`(0x61) ObjectCode도 하위 호환
+ * 경로로 계속 지원한다([GateLogService.handle]). 그 외 객체 코드는 로그만 남긴다 — 상세 저장
+ * (tb_data_rcv 등)은 계획서 3.5절 "DB 쓰기 파이프라인"의 나머지 부분으로 후속 작업이다(README 참고).
  */
 @Component
 class DefaultGatePacketHandler(
@@ -89,6 +91,18 @@ class DefaultGatePacketHandler(
                     "커넥션[{}] 상태 변경 감지: 레인={}, changedLanes={}",
                     state.dtlIp, lanes, changes.laneChanges.count { it.anyChanged },
                 )
+            }
+
+            // 로그 엔트리는 GATE_STATUS 패킷 끝에 이어 붙어 온다(레거시 SpeedServer.cs 검증 결과 —
+            // GateLogService 클래스 KDoc "레이아웃 정정" 참고). 헤더의 DATA_COUNT 필드가 곧 로그
+            // 건수이며, 상태 변경 여부(changes.anyChanged)와 무관하게 로그는 항상 확인한다 — 레거시도
+            // IsLogChanged를 상태 변경과 별개로 판단했다.
+            if (packet.dataCount > 0) {
+                val laneCount = PacketDiffer.laneCountOf(packet.raw)
+                val logStart = SpeedGateProtocolConstants.HEADER_LENGTH +
+                    SpeedGateProtocolConstants.DATA_INFO_LENGTH +
+                    laneCount * SpeedGateProtocolConstants.STATUS_DATA_LENGTH
+                gateLogService.handleEmbedded(state.dtlIp, packet.raw, logStart, packet.dataCount)
             }
         } else if (packet.objectCode == SpeedGateProtocolConstants.ObjectCode.GATE_LOG) {
             gateLogService.handle(state.dtlIp, packet)

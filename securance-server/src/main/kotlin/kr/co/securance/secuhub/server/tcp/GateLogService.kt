@@ -11,15 +11,27 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
 /**
- * `GATE_LOG`(ObjectCode `0x61`) 패킷 재조립 → DB 저장(계획서 3.8절, 레거시 미구현 기능이라 신규 설계).
+ * `GATE_LOG` 로그 엔트리(36바이트, [LogEventCodec]) 재조립 → DB 저장(계획서 3.8절, 레거시
+ * 미구현 기능이라 신규 설계).
  *
- * **패킷 레이아웃 가정(주의)**: 다른 오브젝트 코드(예: `GATE_STATUS`)와 달리 `GATE_LOG`는 문서상
- * DataInfo(45바이트) 구간이 없는 일반 프레임 구조("Header(27)+Data(N)+Tail(4)")를 그대로 따른다고
- * 가정한다 — Data 영역이 헤더 직후([SpeedGateProtocolConstants.HEADER_LENGTH])부터 시작하고,
- * [GatePacket.dataCount]개의 36바이트 로그 엔트리가 이어진다. 사용자가 제공한 실수신 샘플은
- * "로그 엔트리 36바이트 자체"만 검증됐고(`LogEventCodecTest` 참고), 그 엔트리를 감싼 **완전한
- * GATE_LOG 패킷(헤더 포함)**의 실물 샘플로는 아직 검증되지 않았다 — 실제 장비의 완전한 0x61 패킷을
- * 확보하는 대로 이 가정을 재검증해야 한다(`docs/작업일지.md` 참고).
+ * **레이아웃 정정(레거시 재검증 결과 — 2026.08.07)**: 최초 구현 시엔 `GATE_LOG`가 문서상
+ * ObjectCode `0x61`을 가진 *독립된* 패킷("Header(27)+Data(N)+Tail(4)", DataInfo 없음)으로
+ * 온다고 가정했으나(`handle`), 레거시 SR_Speed_Server(`SpeedServer.cs` 1011~1064행,
+ * `ClsPacketAnalyzer.cs`)를 재확인한 결과 실제로는 그렇지 않다:
+ * - 레거시는 `objCode`와 무관하게 매 수신 패킷에서 로그 유무를 판단한다 — 로그 엔트리는 실제로
+ *   `GATE_STATUS`(0x4D) 패킷 **끝에 이어 붙어** 온다: `Header(27)+DataInfo(45)+Status(laneCnt*74)+
+ *   Log(logCnt*36)+Tail(4)`.
+ * - `logCnt`는 헤더의 `DATA_COUNT` 필드(오프셋 23~24, [GatePacket.dataCount]와 동일)에서 읽고,
+ *   로그 시작 오프셋은 `Header+DataInfo+(laneCnt*Status블록길이)`다(`laneCnt`는 DataInfo 마지막
+ *   바이트, [PacketDiffer.laneCountOf] 참고) — Header 직후가 아니다.
+ * - `GateLog_protocol_20260728.docx`(레거시 저장소 최상위)는 로그 엔트리 36바이트 "자체"의
+ *   필드 구조만 정의할 뿐, 이를 감싼 패킷 프레이밍은 규정하지 않는다 — 프레이밍은 레거시
+ *   구현이 유일한 실물 근거다.
+ *
+ * 따라서 [handleEmbedded]를 `DefaultGatePacketHandler`의 `GATE_STATUS` 분기에서 호출해 위
+ * 레이아웃대로 로그를 추출한다. 문서상 정의된 독립 `GATE_LOG`(0x61) ObjectCode를 실제 장비가
+ * 보낼 가능성도 완전히 배제할 수 없어(신형 펌웨어 등) [handle]은 하위 호환/향후 대비용으로
+ * 남겨둔다 — 두 경로 모두 같은 저장 로직([saveIfAbsent])을 공유한다.
  *
  * **멱등성**: [GateDbWriteQueue]는 타임아웃 후 버려둔 실행이 뒤늦게 완료되면 같은 작업이 두 번
  * 실행될 수 있다고 명시한다(클래스 KDoc "주의(멱등성)"). 로그 저장은 NetState처럼 자연스러운
@@ -34,9 +46,28 @@ class GateLogService(
 ) {
     private val logger = LoggerFactory.getLogger(GateLogService::class.java)
 
-    /** `DefaultGatePacketHandler`가 `GATE_LOG` 패킷 수신 시 호출한다. */
+    /**
+     * `DefaultGatePacketHandler`가 문서상 독립 `GATE_LOG`(0x61) 패킷 수신 시 호출한다(하위 호환/
+     * 향후 대비 경로 — 클래스 KDoc "레이아웃 정정" 참고). Data 영역이 헤더 직후부터 시작한다고
+     * 가정한다.
+     */
     fun handle(dtlIp: String, packet: GatePacket) {
-        val entries = decodeEntries(dtlIp, packet)
+        handleEntries(dtlIp, packet.raw, SpeedGateProtocolConstants.HEADER_LENGTH, packet.dataCount, "GATE_LOG")
+    }
+
+    /**
+     * `DefaultGatePacketHandler`가 `GATE_STATUS`(0x4D) 패킷 끝에 이어 붙은 로그 구간을 발견했을 때
+     * 호출한다(클래스 KDoc "레이아웃 정정" 참고 — 레거시 검증된 실제 경로).
+     *
+     * @param dataStart 로그 엔트리가 시작하는 [raw] 내 오프셋(`Header+DataInfo+laneCnt*Status블록길이`).
+     * @param entryCount 로그 엔트리 개수(헤더 `DATA_COUNT` 필드, [GatePacket.dataCount]와 동일).
+     */
+    fun handleEmbedded(dtlIp: String, raw: ByteArray, dataStart: Int, entryCount: Int) {
+        handleEntries(dtlIp, raw, dataStart, entryCount, "GATE_STATUS 내장 로그")
+    }
+
+    private fun handleEntries(dtlIp: String, raw: ByteArray, dataStart: Int, entryCount: Int, sourceLabel: String) {
+        val entries = decodeEntries(dtlIp, raw, dataStart, entryCount, sourceLabel)
         if (entries.isEmpty()) return
 
         dbWriteQueue.enqueue(
@@ -49,32 +80,39 @@ class GateLogService(
         )
     }
 
-    private fun decodeEntries(dtlIp: String, packet: GatePacket): List<LogEventCodec.LogEvent> {
-        val dataStart = SpeedGateProtocolConstants.HEADER_LENGTH
-        val availableForData = packet.raw.size - dataStart - SpeedGateProtocolConstants.TAIL_LENGTH
+    private fun decodeEntries(
+        dtlIp: String,
+        raw: ByteArray,
+        dataStart: Int,
+        requestedEntryCount: Int,
+        sourceLabel: String,
+    ): List<LogEventCodec.LogEvent> {
+        if (requestedEntryCount <= 0 || dataStart < 0) return emptyList()
+
+        val availableForData = raw.size - dataStart - SpeedGateProtocolConstants.TAIL_LENGTH
         if (availableForData < SpeedGateProtocolConstants.LOG_ENTRY_LENGTH) {
-            logger.warn("커넥션[{}] GATE_LOG 패킷이 로그 엔트리 1건보다 짧습니다: size={}", dtlIp, packet.raw.size)
+            logger.warn("커넥션[{}] {} 로그 영역이 엔트리 1건보다 짧습니다: size={}, dataStart={}", dtlIp, sourceLabel, raw.size, dataStart)
             return emptyList()
         }
 
-        // dataCount가 실제 수신 바이트로 커버 가능한 엔트리 수보다 크면(손상/잘린 패킷), 안전하게
+        // 엔트리 수가 실제 수신 바이트로 커버 가능한 개수보다 크면(손상/잘린 패킷), 안전하게
         // 커버 가능한 만큼만 디코딩한다 — PacketDiffer.laneOffsetsOf가 GATE_STATUS에서 취하는 것과
         // 동일한 방어적 태도.
         val maxEntriesByLength = availableForData / SpeedGateProtocolConstants.LOG_ENTRY_LENGTH
-        val entryCount = packet.dataCount.coerceIn(0, maxEntriesByLength)
-        if (entryCount < packet.dataCount) {
+        val entryCount = requestedEntryCount.coerceIn(0, maxEntriesByLength)
+        if (entryCount < requestedEntryCount) {
             logger.warn(
-                "커넥션[{}] GATE_LOG dataCount({})가 실제 수신 바이트로 커버 가능한 엔트리 수({})보다 큽니다 — {}건만 디코딩합니다.",
-                dtlIp, packet.dataCount, maxEntriesByLength, entryCount,
+                "커넥션[{}] {} 엔트리 수({})가 실제 수신 바이트로 커버 가능한 개수({})보다 큽니다 — {}건만 디코딩합니다.",
+                dtlIp, sourceLabel, requestedEntryCount, maxEntriesByLength, entryCount,
             )
         }
         if (entryCount <= 0) return emptyList()
 
-        val data = packet.raw.copyOfRange(dataStart, dataStart + entryCount * SpeedGateProtocolConstants.LOG_ENTRY_LENGTH)
+        val data = raw.copyOfRange(dataStart, dataStart + entryCount * SpeedGateProtocolConstants.LOG_ENTRY_LENGTH)
         return try {
             LogEventCodec.decodeAll(data, entryCount)
         } catch (ex: IllegalArgumentException) {
-            logger.warn("커넥션[{}] GATE_LOG 엔트리 디코딩 실패", dtlIp, ex)
+            logger.warn("커넥션[{}] {} 엔트리 디코딩 실패", dtlIp, sourceLabel, ex)
             emptyList()
         }
     }

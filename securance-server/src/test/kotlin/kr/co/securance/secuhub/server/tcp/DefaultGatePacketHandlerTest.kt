@@ -209,6 +209,53 @@ class DefaultGatePacketHandlerTest {
         verify(gateLogService, times(1)).handle("192.168.0.30", packet)
         verify(registry, never()).enqueueNetStateUpdate(anyKtString(), anyKtInt(), org.mockito.ArgumentMatchers.anyBoolean())
     }
+
+    @Test
+    fun `GATE_STATUS 패킷 끝에 이어붙은 로그는 handleEmbedded로 위임하고 올바른 오프셋을 계산한다`() = runBlocking {
+        // 레거시 SpeedServer.cs 검증 결과(GateLogService 클래스 KDoc "레이아웃 정정" 참고) — 로그는
+        // Header+DataInfo+Status(laneCnt*74) 뒤에 이어 붙는다. laneCnt=2로 상태 패킷을 만들고 그
+        // 뒤에 DATA_COUNT=1인 로그 엔트리 1건을 이어붙여, handleEmbedded가 정확한 오프셋(Header(27)+
+        // DataInfo(45)+Status(2*74)=220)과 entryCount(1)로 호출되는지 검증한다.
+        val registry = mock(GateConnectionRegistryImpl::class.java)
+        val gateLogService = mock(GateLogService::class.java)
+        val handler = DefaultGatePacketHandler(registry, gateLogService)
+        val state = newState()
+
+        val address = SpeedGatePacketCodec.buildAddress(comSlot = 1, controller = 1, deviceNumber = 1)
+        val dataInfo = ByteArray(SpeedGateProtocolConstants.DATA_INFO_LENGTH)
+        dataInfo[dataInfo.size - 1] = 2 // laneCnt=2
+        val laneBlocks = ByteArray(2 * SpeedGateProtocolConstants.STATUS_DATA_LENGTH)
+        laneBlocks[0] = 1
+        laneBlocks[SpeedGateProtocolConstants.STATUS_DATA_LENGTH] = 2
+        val logEntry = ByteArray(SpeedGateProtocolConstants.LOG_ENTRY_LENGTH)
+
+        val raw = SpeedGatePacketCodec.buildPacket(
+            address = address,
+            command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+            command2 = SpeedGateProtocolConstants.Command2.READ,
+            objectCode = SpeedGateProtocolConstants.ObjectCode.GATE_STATUS,
+            dataInfoLength = SpeedGateProtocolConstants.DATA_INFO_LENGTH,
+            dataCount = 1, // 로그 1건(DATA_COUNT 필드는 laneCnt가 아니라 logCnt다)
+            dataLength = logEntry.size,
+            payload = dataInfo + laneBlocks + logEntry,
+        )
+        val packet = GatePacket(
+            command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+            command2 = SpeedGateProtocolConstants.Command2.READ,
+            objectCode = SpeedGateProtocolConstants.ObjectCode.GATE_STATUS,
+            dataInfoLength = SpeedGateProtocolConstants.DATA_INFO_LENGTH,
+            dataCount = 1,
+            dataLength = logEntry.size,
+            raw = raw,
+        )
+
+        handler.handle(state, packet)
+
+        val expectedLogStart = SpeedGateProtocolConstants.HEADER_LENGTH +
+            SpeedGateProtocolConstants.DATA_INFO_LENGTH +
+            2 * SpeedGateProtocolConstants.STATUS_DATA_LENGTH
+        verify(gateLogService, times(1)).handleEmbedded("192.168.0.30", raw, expectedLogStart, 1)
+    }
 }
 
 private fun anyKtString(): String {

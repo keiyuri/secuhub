@@ -44,6 +44,15 @@ import java.time.format.DateTimeFormatter
  * 은 물리 재전송만 억제할 뿐 DB 조회 자체에서는 그 행을 배제하지 못해 배치 슬롯을 계속 점유했다.
  * `DataSend.nextAttemptAt`을 실패 시 미래로 설정하고 조회 조건(`findEligiblePending`)에 반영해
  * 해결한다 — 이 컬럼이 곧 재시도 쿨다운 상태 그 자체이므로 인메모리 맵은 더 이상 필요 없다.
+ *
+ * [Codex 어드버서리얼 리뷰 수정] 이 프로젝트의 배포 단위는 WinSW로 등록한 단일 Windows 서비스이고
+ * Quartz도 RAMJobStore(다중 인스턴스 클러스터링은 명시적으로 후속 과제, `application.yml` 참고)라
+ * 정상 운영에서는 인스턴스가 하나뿐이다. 다만 롤링 재배포 중 신·구 프로세스가 잠깐 겹치거나 운영자가
+ * 실수로 서비스를 이중 기동하는 경우, `findEligiblePending`으로 같은 행을 두 프로세스가 동시에 읽어
+ * 같은 제어 명령(OPEN/CLOSE/RESET)을 게이트에 중복 물리 전송할 위험이 있었다 —
+ * `@DisallowConcurrentExecution`은 JVM 하나 안에서만 유효하다. 각 행을 처리하기 직전에
+ * [DataSendRepository.claim]로 원자적 조건부 UPDATE를 먼저 시도해, 다른 프로세스가 이미 선점한
+ * 행이면(영향받은 행 수 0) 조용히 건너뛴다.
  */
 @DisallowConcurrentExecution
 class SendControlJob : QuartzJobBean() {
@@ -93,6 +102,15 @@ class SendControlJob : QuartzJobBean() {
         val sndId = row.sndId
         if (sndId == null) {
             logger.warn("[SendJob] snd_id가 없는 행을 건너뜁니다. dtl_ip={}", row.dtlIp)
+            return
+        }
+
+        // 다른 프로세스(또는 이 프로세스의 겹치는 다음 폴링)가 이미 이 행을 선점했다면 여기서
+        // 원자적 UPDATE가 0행에 걸려 즉시 알 수 있다 — 중복 물리 전송 방지.
+        val now = LocalDateTime.now()
+        val claimed = dataSendRepository.claim(sndId, PENDING_SND_YN, PENDING_CHK_YN, now, now.plus(CLAIM_LEASE))
+        if (claimed == 0) {
+            logger.debug("[SendJob] 다른 프로세스가 이미 선점한 행이라 건너뜁니다. snd_id={}, ip={}", sndId, row.dtlIp)
             return
         }
 
@@ -227,5 +245,14 @@ class SendControlJob : QuartzJobBean() {
          * 반영되므로, JVM 재시작/다중 인스턴스에서도 동일하게 적용되고 조회 조건에도 반영된다.
          */
         private val RESEND_GUARD: Duration = Duration.ofSeconds(5)
+
+        /**
+         * [Codex 어드버서리얼 리뷰 수정] 행을 선점(claim)한 뒤 실제 처리가 끝나기 전까지 다른
+         * 프로세스가 같은 행을 다시 선점하지 못하게 막는 리스 기간. 처리가 정상 종료되면(성공/실패
+         * 모두) `nextAttemptAt`이 최종 값으로 다시 저장되어 이 리스는 즉시 실제 상태로 대체된다 —
+         * 이 값은 오직 "처리 도중 프로세스가 죽어 최종 저장까지 못 갔을 때" 행이 영구히 멈추지
+         * 않도록 하는 상한선이다.
+         */
+        private val CLAIM_LEASE: Duration = Duration.ofSeconds(30)
     }
 }

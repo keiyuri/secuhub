@@ -94,4 +94,48 @@ class DataSendRepositoryTest {
 
         assertEquals(listOf(earlier.sndId, later.sndId), result.map { it.sndId })
     }
+
+    /**
+     * [Codex 어드버서리얼 리뷰 회귀 테스트] `SendControlJob`의 목 기반 테스트는 `claim`의 실제
+     * JPQL 조건부 UPDATE가 DB 레벨에서 원자적으로 동작하는지는 검증하지 못한다 — 이 테스트가 그
+     * 공백을 메운다. 두 "프로세스"가 같은 행을 동시에 claim하려는 상황을 순차 호출로 흉내 낸다
+     * (실제 동시성 자체가 아니라, WHERE 절의 현재 상태 조건이 두 번째 호출을 정확히 막는지 검증).
+     */
+    @Test
+    fun `claim은 이미 선점된(next_attempt_at이 리스 중인) 행을 다시 선점하지 못한다`() {
+        val now = LocalDateTime.of(2026, 8, 7, 12, 0)
+        val saved = entityManager.persistAndFlush(row("192.168.0.30"))
+        entityManager.clear()
+        val leaseUntil = now.plusSeconds(30)
+
+        val firstClaim = repository.claim(saved.sndId, "N", "N", now, leaseUntil)
+        entityManager.clear()
+        val secondClaim = repository.claim(saved.sndId, "N", "N", now, leaseUntil)
+
+        assertEquals(1, firstClaim)
+        assertEquals(0, secondClaim)
+    }
+
+    @Test
+    fun `claim은 리스가 만료된 행을 다시 선점할 수 있다`() {
+        val now = LocalDateTime.of(2026, 8, 7, 12, 0)
+        val saved = entityManager.persistAndFlush(row("192.168.0.31", nextAttemptAt = now.minusSeconds(1)))
+        entityManager.clear()
+
+        val claimed = repository.claim(saved.sndId, "N", "N", now, now.plusSeconds(30))
+
+        assertEquals(1, claimed)
+    }
+
+    @Test
+    fun `claim은 이미 전송 완료(snd_yn=Y)된 행은 선점하지 않는다`() {
+        val now = LocalDateTime.of(2026, 8, 7, 12, 0)
+        val saved = row("192.168.0.32").apply { sndYn = "Y" }
+        val persisted = entityManager.persistAndFlush(saved)
+        entityManager.clear()
+
+        val claimed = repository.claim(persisted.sndId, "N", "N", now, now.plusSeconds(30))
+
+        assertEquals(0, claimed)
+    }
 }

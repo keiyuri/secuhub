@@ -32,6 +32,19 @@ private fun <T> eqMatcher(value: T): T {
 
 class SendControlJobTest {
 
+    /**
+     * [Codex 어드버서리얼 리뷰 회귀 테스트 지원] `SendControlJob.processRow`는 실제 물리 전송 전에
+     * `DataSendRepository.claim`으로 행을 선점해야 하므로, mock의 기본 반환값(0 — Mockito의 int
+     * 기본값)을 그대로 두면 모든 행이 "이미 선점됨"으로 오인돼 건너뛰어진다. 다른 목적을 검증하는
+     * 기존 테스트가 이 선점 로직 때문에 깨지지 않도록, 기본적으로 항상 선점에 성공(1)하는 mock을
+     * 만들어 쓴다. 선점 자체를 검증하는 테스트만 별도로 claim의 반환값을 직접 스텁한다.
+     */
+    private fun mockDataSendRepository(): DataSendRepository {
+        val repo = mock(DataSendRepository::class.java)
+        `when`(repo.claim(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())).thenReturn(1)
+        return repo
+    }
+
     private fun buildRow(
         sndId: Long = 1L,
         dtlIp: String = "192.168.0.10",
@@ -71,7 +84,7 @@ class SendControlJobTest {
     fun `정상 전송에 성공하면 sndYn을 Y로 갱신한다`() {
         val row = buildRow()
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
 
         val job = buildJob(registry, repo)
@@ -92,7 +105,7 @@ class SendControlJobTest {
         // findEligiblePending 조회에서 이 행이 계속 선택되어 뒤쪽 행을 영구히 가리게 된다.
         val row = buildRow()
         val registry = FakeGateConnectionRegistry(sendResult = false)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
         val before = LocalDateTime.now()
 
@@ -113,7 +126,7 @@ class SendControlJobTest {
         val stuckRow = buildRow(sndId = 10L, dtlIp = "192.168.0.20")
         val freshRow = buildRow(sndId = 11L, dtlIp = "192.168.0.21")
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher()))
             .thenReturn(listOf(stuckRow), listOf(freshRow))
 
@@ -128,10 +141,28 @@ class SendControlJobTest {
     }
 
     @Test
+    fun `다른 프로세스가 이미 선점한 행은 물리 전송을 건너뛴다`() {
+        // [Codex 어드버서리얼 리뷰 회귀 테스트] 롤링 재배포/이중 기동 등으로 다른 프로세스가 같은
+        // 행을 먼저 claim(원자적 조건부 UPDATE)했다면 영향받은 행 수가 0으로 돌아온다 — 이 경우
+        // 물리 전송을 시도하면 안 된다(중복 전송 방지).
+        val row = buildRow(sndId = 7L)
+        val registry = FakeGateConnectionRegistry(sendResult = true)
+        val repo = mock(DataSendRepository::class.java)
+        `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
+        `when`(repo.claim(anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher(), anyMatcher())).thenReturn(0)
+
+        val job = buildJob(registry, repo)
+        job.execute(context)
+
+        assertTrue(registry.sentCalls.isEmpty())
+        verify(repo, times(0)).save(anyMatcher())
+    }
+
+    @Test
     fun `snd_raw가 유효하지 않은 hex이면 chkYn을 Y로 표시하고 재시도 대상에서 제외한다`() {
         val row = buildRow(sndId = 2L, sndRaw = "ZZ")
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
 
         val job = buildJob(registry, repo)
@@ -147,7 +178,7 @@ class SendControlJobTest {
     fun `snd_raw가 비어 있으면 chkYn을 Y로 표시하고 스킵한다`() {
         val row = buildRow(sndId = 3L, sndRaw = null)
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
 
         val job = buildJob(registry, repo)
@@ -161,7 +192,7 @@ class SendControlJobTest {
     fun `RESET_MOTOR 전송 성공 시 모터 오류 resolve만 호출한다`() {
         val row = buildRow(sndId = 4L, sndTypeCd = "RESET_MOTOR", sndUser = "operator1")
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
         `when`(
@@ -186,7 +217,7 @@ class SendControlJobTest {
     fun `RESET_OPER 전송 성공 시 센서 오류 resolve만 호출한다`() {
         val row = buildRow(sndId = 41L, sndTypeCd = "RESET_OPER", sndUser = "operator1")
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
@@ -204,7 +235,7 @@ class SendControlJobTest {
     fun `RESET_GATE 전송 성공 시 게이트 오류 resolve만 호출한다`() {
         val row = buildRow(sndId = 42L, sndTypeCd = "RESET_GATE", sndUser = "operator1")
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
@@ -225,7 +256,7 @@ class SendControlJobTest {
         // 않는 안전한 기본값을 유지해야 한다.
         val row = buildRow(sndId = 43L, sndTypeCd = "RESET_UNKNOWN")
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
@@ -245,7 +276,7 @@ class SendControlJobTest {
     fun `RESET이 아닌 snd_type_cd는 resolve 처리를 호출하지 않는다`() {
         val row = buildRow(sndId = 5L, sndTypeCd = "OPEN")
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 
@@ -263,7 +294,7 @@ class SendControlJobTest {
         // RESET으로 시작만 하는 값을 startsWith로 오판하지 않는지 검증한다.
         val row = buildRow(sndId = 6L, sndTypeCd = "RESETUP_MOTOR")
         val registry = FakeGateConnectionRegistry(sendResult = true)
-        val repo = mock(DataSendRepository::class.java)
+        val repo = mockDataSendRepository()
         `when`(repo.findEligiblePending(eqMatcher("N"), eqMatcher("N"), anyMatcher(), anyMatcher())).thenReturn(listOf(row))
         val analRepo = mock(DataReceiveAnalysisRepository::class.java)
 

@@ -118,8 +118,10 @@ object PacketDiffer {
     /**
      * 실제 GATE LANE NUMBER 필드값 -> 해당 레인 블록의 오프셋(순서 보존).
      * [laneNumbersOf]와 `diff()`의 레인 매칭이 공유하는 단일 유효성 검증 기준이다.
+     * [DefaultGatePacketHandler]가 레인별 `net_state` 판단(레인이 실제로 이 패킷에 유효하게
+     * 보고됐는지)에도 재사용하므로 public이다.
      */
-    private fun laneOffsetsOf(packet: ByteArray): Map<Int, Int> {
+    fun laneOffsetsOf(packet: ByteArray): Map<Int, Int> {
         val count = laneCountOf(packet)
         return (0 until count).mapNotNull { idx ->
             val offset = STATUS_BLOCK_START + idx * SpeedGateProtocolConstants.STATUS_DATA_LENGTH
@@ -133,6 +135,48 @@ object PacketDiffer {
     fun laneCountOf(packet: ByteArray): Int {
         if (packet.size <= LANE_COUNT_OFFSET) return 0
         return (packet[LANE_COUNT_OFFSET].toInt() and 0xFF).coerceAtMost(SpeedGateProtocolConstants.MAX_LANE_COUNT)
+    }
+
+    /**
+     * 레인 상태 블록(74바이트) 안의 센서 값이 실제로 "연결"되어 있는지 판단한다.
+     *
+     * 레거시 `ClsPacketAnalyzer.IsNotConnected`에 대응하며, 부호만 뒤집었다(반환값이 "연결 여부"
+     * 자체를 뜻하도록). 게이트가 레인 슬롯을 계속 보고해도([laneOffsetsOf]에 잡혀도) 물리 센서가
+     * 분리되면 이 블록의 레인번호(byte 0)/에러코드(byte 41)를 제외한 나머지 72바이트가 전부 0으로
+     * 온다 — 단순히 "레인이 패킷에 보고됐는지"만으로는 이런 경우를 놓쳐 `net_state`(대시보드
+     * 온라인 여부)가 실제로는 끊긴 레인을 계속 온라인으로 표시하게 된다([DefaultGatePacketHandler] 참고).
+     *
+     * 판정 기준(레거시와 동일):
+     * - 나머지 72바이트 중 하나라도 0이 아니면 → 연결.
+     * - 나머지 72바이트가 모두 0이고 에러코드(byte 41)가 0이면 → 미연결.
+     * - 나머지 72바이트가 모두 0이고 에러코드가 3 이상이면 → 미연결.
+     * - 나머지 72바이트가 모두 0이고 에러코드가 1 또는 2면 → 연결(에러 상태만 있는 경우).
+     *
+     * 블록이 패킷 범위를 벗어나면(파싱 오류) 레거시와 동일하게 안전한 기본값인 "연결"을 반환한다
+     * — 파싱 오류만으로 레인을 섣불리 오프라인 처리하지 않기 위함.
+     */
+    fun isLaneConnected(packet: ByteArray, blockOffset: Int): Boolean {
+        if (blockOffset < 0 || blockOffset + SpeedGateProtocolConstants.STATUS_DATA_LENGTH > packet.size) return true
+
+        var restAllZero = true
+        for (i in 1..40) {
+            if (packet[blockOffset + i] != 0.toByte()) {
+                restAllZero = false
+                break
+            }
+        }
+        if (restAllZero) {
+            for (i in 42..73) {
+                if (packet[blockOffset + i] != 0.toByte()) {
+                    restAllZero = false
+                    break
+                }
+            }
+        }
+        if (!restAllZero) return true
+
+        val errorCode = packet[blockOffset + 41].toInt() and 0xFF
+        return errorCode in 1..2
     }
 
     private fun diffLane(

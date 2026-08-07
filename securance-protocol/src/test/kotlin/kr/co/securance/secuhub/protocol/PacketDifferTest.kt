@@ -204,6 +204,49 @@ class PacketDifferTest {
     }
 
     @Test
+    fun `레인 블록의 센서 관련 바이트가 하나라도 0이 아니면 연결로 판단한다`() {
+        val packet = fakeStatusPacket(laneCount = 1) { 0x01 } // offset 10에 0x01 세팅됨
+        val blockOffset = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH
+
+        assertTrue(PacketDiffer.isLaneConnected(packet, blockOffset))
+    }
+
+    @Test
+    fun `레인번호 에러코드를 제외한 나머지가 전부 0이고 에러코드도 0이면 미연결로 판단한다`() {
+        // 레거시 회귀 테스트 대응: ClsPacketAnalyzer.IsNotConnected — 물리 센서가 분리된 레인은
+        // 레인번호(byte 0)만 남고 나머지가 전부 0으로 온다.
+        val packet = fakeStatusPacket(laneCount = 1) { 0x00 }
+        val blockOffset = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH
+
+        assertFalse(PacketDiffer.isLaneConnected(packet, blockOffset))
+    }
+
+    @Test
+    fun `나머지가 전부 0이고 에러코드가 3 이상이면 미연결로 판단한다`() {
+        val packet = fakeStatusPacket(laneCount = 1) { 0x00 }
+        val blockOffset = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH
+        packet[blockOffset + 41] = 3
+
+        assertFalse(PacketDiffer.isLaneConnected(packet, blockOffset))
+    }
+
+    @Test
+    fun `나머지가 전부 0이고 에러코드가 1 또는 2면 연결로 판단한다`() {
+        val packet = fakeStatusPacket(laneCount = 1) { 0x00 }
+        val blockOffset = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH
+        packet[blockOffset + 41] = 2
+
+        assertTrue(PacketDiffer.isLaneConnected(packet, blockOffset))
+    }
+
+    @Test
+    fun `블록이 패킷 범위를 벗어나면 안전하게 연결로 간주한다`() {
+        val packet = fakeStatusPacket(laneCount = 1) { 0x01 }
+
+        assertTrue(PacketDiffer.isLaneConnected(packet, packet.size)) // 범위 밖 오프셋
+    }
+
+    @Test
     fun `Tail의 뒤 2바이트(고정 ETX)가 바뀌면 tailChanged로 표시한다`() {
         val previous = fakeStatusPacket(laneCount = 1) { 0x01 }
         val current = previous.copyOf()

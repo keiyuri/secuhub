@@ -138,4 +138,35 @@ class DefaultGatePacketHandlerTest {
         handler.handle(state, fakeStatusPacket(laneCount = 3))
         verify(registry, times(2)).enqueueNetStateUpdate("192.168.0.30", 3, true)
     }
+
+    @Test
+    fun `레인이 패킷에 계속 보고돼도 센서 값이 전부 0이면 온라인으로 큐잉하지 않는다`() = runBlocking {
+        // 어드버서리얼 리뷰 지적: 레거시 ClsPacketAnalyzer.IsNotConnected에 대응하는 로직이 신규
+        // 구현에는 없어, 물리 센서가 분리돼도(레인번호만 남고 나머지 바이트가 0) 레인이 패킷에
+        // 계속 보고되기만 하면 온라인으로 남는 문제가 있었다.
+        val registry = mock(GateConnectionRegistryImpl::class.java)
+        val handler = DefaultGatePacketHandler(registry)
+        val state = newState()
+
+        // 레인 2의 센서 바이트를 0으로 둬 "미연결" 상태로 만든다.
+        handler.handle(state, fakeStatusPacket(laneCount = 2) { lane -> if (lane == 2) 0x00 else 0x01 })
+
+        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 1, true)
+        verify(registry, never()).enqueueNetStateUpdate("192.168.0.30", 2, true)
+    }
+
+    @Test
+    fun `연결돼 있던 레인의 센서 값이 0으로 바뀌면 오프라인으로 큐잉한다`() = runBlocking {
+        val registry = mock(GateConnectionRegistryImpl::class.java)
+        val handler = DefaultGatePacketHandler(registry)
+        val state = newState()
+
+        handler.handle(state, fakeStatusPacket(laneCount = 2))
+        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 2, true)
+
+        // 레인 2의 센서 값이 이후 패킷에서 전부 0으로 바뀜(물리 센서 분리) — 레인 자체는 여전히
+        // 보고되므로 라우팅 대상에서는 빠지지 않지만, net_state는 오프라인으로 전이돼야 한다.
+        handler.handle(state, fakeStatusPacket(laneCount = 2) { lane -> if (lane == 2) 0x00 else 0x01 })
+        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 2, false)
+    }
 }

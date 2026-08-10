@@ -93,24 +93,35 @@ Copy-Item securance-app\src\main\resources\application-local.yml.example `
 - 향후 게이트 하드웨어가 인증서/토큰을 지원하게 되면, `GateTcpServer.handleConnection`의
   게이트 조회 단계에 애플리케이션 계층 인증을 추가하는 것을 권장한다.
 
+## 2차 스프린트 구현 범위
+
+- **`SendControlJob` + QUEUED 디스패치** — `GateControlDispatcher`가 `tb_data_snd`를 폴링해
+  전송하고, 장비 ACK(Object Code 0x4C)를 확인해 `chk_yn`을 확정한다. ACK 미수신 시
+  `ack-timeout-seconds` 후 재전송하고 `max-send-attempts` 초과 시 실패(`chk_yn='F'`)로 확정한다.
+- **`tb_data_rcv_anal` 적재** — `GateStatusAnalyzer`가 레인 상태 블록(74바이트)을 분석해
+  장애/이벤트로 분류하고 `GatePacketPersister`가 적재한다. 레거시 DB 트리거
+  `utrg_data_rcv_anlz`를 애플리케이션으로 끌어올린 것이며, 트리거가 1번 레인만 분석하던
+  한계를 해소해 **모든 레인**을 분석한다.
+- **리셋/장애 해제** — `GateFaultResolutionService`가 `resolve_yn`을 갱신한다.
+  운영자 리셋(장비 ACK 확인 후)과 장비 자동 복구(장애 비트 해제 시) 두 경로를 모두 지원한다.
+- **게이트 제어 화면** — `/gates/control`(Thymeleaf)에서 모드 변경/보안 등급/리셋을 실행한다.
+- **수신 로그(GATE_LOG) 처리** — `LogEventCodec`/`GateLogService`가 GATE_STATUS에 실려오는 로그
+  블록을 재조립해 저장하고, 수신 로그 조회 화면에서 확인할 수 있다.
+
 ## 1차 스캐폴드 범위 밖 (후속 작업)
 
 계획서에서 명시적으로 1차 범위 밖으로 정한 항목들이다.
 
-- **로그(Log) 처리 전체** — 레거시 `SR_Speed_Client`/`SR_Speed_Server` 모두 미구현 상태였으므로
-  "이식"이 아니라 신규 설계가 필요하다(계획서 3.8절). 프로토콜 문서의 36바이트 로그 구조를
-  기준으로 `LogEventCodec`(securance-protocol)과 `GateLogService`(securance-server)를 새로 만들 것.
+- ~~**로그(Log) 처리 전체**~~ — 레거시가 미구현이라 신규 설계가 필요했던 항목(계획서 3.8절).
+  `LogEventCodec`(securance-protocol)과 `GateLogService`(securance-server)로 구현 완료.
 - **Turn Gate / Fast Gate 프로토콜 코덱** — 규격 문서 미확보. `GateProtocolCodecRegistry`
   (securance-protocol)에 구현체만 추가하면 되는 확장 지점은 마련해 두었다.
-- **DB 쓰기 파이프라인의 나머지 부분** — 1차는 `tb_net_state` 갱신 패턴만 `GateDbWriteQueue`로
-  증명했다. `tb_data_rcv`/`tb_data_rcv_anal` 등 패킷 상세 저장은 동일 패턴으로 후속 추가.
-- **`SendControlJob`/`ReqStatusJob`** — `NetCheckJob` 하나로 Quartz 잡 패턴을 증명했다. 나머지 잡은
-  동일 구조(`GateConnectionRegistry`만 의존)로 추가.
 - **레거시 저장 프로시저 나머지**(holiday/timezone/motor push 등) — 핵심 흐름(수신→분석→집계)만 우선 이식.
 - **나머지 엔티티**(`tb_time`, `tb_calendar`, `tb_log`, `tb_data_rcv_motor/ctrl`, `tb_data_init` 등) —
   `V1__init_schema.sql`에 없음. `V2__...`로 동일 패턴 추가.
-- **`GateControlService`(QUEUED/DIRECT 두 구현)** — 계획서 5.5절에 설계는 정리되어 있으나
-  1차 스캐폴드 컨트롤러/서비스 구현은 아직 없음. 프론트엔드 제어 명령 API 작업 시 추가.
+- **스케줄/타임존/휴일/모터 설정 명령** — 제어 명령은 운영 모드 11종 + 리셋 5종 +
+  보안 등급/시간 데이터 인코딩까지 구현했다(2차 스프린트). Object Code 0x54(TimeZone)/
+  0x48(Holiday)/0x4B(Motor)를 쓰는 별도 설정 명령은 해당 화면 이식 시 추가.
 - **위젯 추가/삭제 UI, 순서 영속화 API**(`/api/dashboard/widgets/reorder`) — 현재는 정적 배치.
 - **React/Next.js 프론트엔드** — Thymeleaf 마크업은 adminlte-react와 동일 클래스 구조로 작성해
   이관 호환되게 해 두었다.

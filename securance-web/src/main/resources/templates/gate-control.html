@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!--/*
+  계획서 5.5절 / 2차 스프린트 5번 항목: 게이트 제어·리셋 화면.
+  레거시 SR_F_GateControl(모드 변경/개폐)과 SR_F_GateReset(시스템·센서·모터 리셋) 폼의 최소 이식.
+  명령 발행은 /api/gate-control/* REST 엔드포인트를 fetch로 호출한다 — 권한 검사가
+  URL 규칙 한 곳에만 존재하도록 유지하기 위함(SecurityConfig).
+*/-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>게이트 제어</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="row">
+    <div class="col-lg-7">
+      <div class="card card-outline card-primary">
+        <div class="card-header"><h3 class="card-title">운영 모드 / 개폐 제어</h3></div>
+        <div class="card-body">
+
+          <div th:if="${#lists.isEmpty(gates)}" class="alert alert-warning mb-0">
+            현재 접속 중인 게이트가 없습니다. 게이트가 접속되면 목록에 표시됩니다.
+          </div>
+
+          <form th:unless="${#lists.isEmpty(gates)}" id="controlForm" onsubmit="return false;">
+            <div class="mb-3">
+              <label class="form-label" for="gateSelect">대상 게이트 / 레인</label>
+              <select class="form-select" id="gateSelect">
+                <option th:each="gate : ${gates}"
+                        th:value="${gate.dtlIp} + '|' + ${gate.dtlLaneNo}"
+                        th:text="${gate.dtlIp} + ' · 레인 ' + ${gate.dtlLaneNo}
+                                 + (${gate.laneConfirmed} ? '' : ' (레인 미확인)')">게이트</option>
+              </select>
+              <div class="form-text">
+                '레인 미확인'은 아직 상태 패킷(0x4D)을 받지 못해 이 소켓이 담당하는 레인을
+                확정하지 못한 상태입니다. 명령이 거부될 수 있습니다.
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label" for="commandSelect">운영 모드</label>
+              <select class="form-select" id="commandSelect">
+                <option th:each="cmd : ${modeCommands}"
+                        th:value="${cmd.name()}"
+                        th:text="${cmd.name()} + ' (' + ${cmd.legacyCode} + ')'">명령</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label" for="securitySelect">보안 등급 (선택)</label>
+              <select class="form-select" id="securitySelect">
+                <option value="">변경하지 않음</option>
+                <option th:each="mode : ${securityModes}"
+                        th:value="${mode.name()}"
+                        th:text="${mode.description}">등급</option>
+              </select>
+            </div>
+
+            <button type="button" class="btn btn-primary" onclick="sendGateCommand('command')">
+              <i class="bi bi-send"></i> 명령 전송
+            </button>
+          </form>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card card-outline card-danger">
+        <div class="card-header"><h3 class="card-title">리셋 / 장애 해제</h3></div>
+        <div class="card-body">
+          <p class="text-muted small">
+            리셋 명령이 장비에서 확인되면 해당 레인의 미해결 장애(<code>tb_data_rcv_anal</code>)가
+            함께 해제됩니다.
+          </p>
+          <div class="mb-3">
+            <label class="form-label" for="resetSelect">리셋 종류</label>
+            <select class="form-select" id="resetSelect" th:disabled="${#lists.isEmpty(gates)}">
+              <option th:each="cmd : ${resetCommands}"
+                      th:value="${cmd.name()}"
+                      th:text="${cmd.name()} + ' (' + ${cmd.legacyCode} + ')'">리셋</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-danger"
+                  th:disabled="${#lists.isEmpty(gates)}"
+                  onclick="sendGateCommand('reset')">
+            <i class="bi bi-arrow-clockwise"></i> 리셋 실행
+          </button>
+        </div>
+      </div>
+
+      <div class="card card-outline card-secondary">
+        <div class="card-header"><h3 class="card-title">실행 결과</h3></div>
+        <div class="card-body">
+          <div id="resultBox" class="text-muted">아직 실행한 명령이 없습니다.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<th:block layout:fragment="scripts">
+  <script th:src="@{/vendor/bootstrap/js/bootstrap.bundle.min.js}"></script>
+  <script th:src="@{/vendor/adminlte/js/adminlte.min.js}"></script>
+  <script th:inline="javascript">
+    /*<![CDATA[*/
+    // Spring Security의 CSRF 토큰 — POST 요청에 반드시 실어야 한다.
+    const CSRF_TOKEN = /*[[${_csrf?.token}]]*/ '';
+    const CSRF_HEADER = /*[[${_csrf?.headerName}]]*/ 'X-CSRF-TOKEN';
+
+    function sendGateCommand(kind) {
+      const target = document.getElementById('gateSelect');
+      if (!target || !target.value) {
+        showResult('danger', '대상 게이트를 선택하세요.');
+        return;
+      }
+      const [dtlIp, dtlLaneNo] = target.value.split('|');
+      const command = kind === 'reset'
+        ? document.getElementById('resetSelect').value
+        : document.getElementById('commandSelect').value;
+
+      const params = new URLSearchParams({ dtlIp, dtlLaneNo, command });
+      if (kind === 'command') {
+        const security = document.getElementById('securitySelect').value;
+        if (security) params.append('securityMode', security);
+      }
+
+      const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      if (CSRF_TOKEN) headers[CSRF_HEADER] = CSRF_TOKEN;
+
+      showResult('secondary', '전송 중...');
+      fetch('/api/gate-control/' + kind, { method: 'POST', headers, body: params.toString() })
+        .then(res => res.json().then(body => ({ ok: res.ok, status: res.status, body })))
+        .then(({ ok, status, body }) => {
+          // 202(QUEUED)는 접수 성공이므로 ok=true다. 4xx/5xx만 경고로 표시한다.
+          showResult(ok ? 'success' : 'danger',
+            '[' + status + '] ' + (body.message || '') + ' (결과: ' + (body.result || '-') + ')');
+        })
+        .catch(err => showResult('danger', '요청 실패: ' + err));
+    }
+
+    function showResult(theme, message) {
+      const box = document.getElementById('resultBox');
+      box.className = 'alert alert-' + theme + ' mb-0';
+      box.textContent = message;
+    }
+    /*]]>*/
+  </script>
+</th:block>
+</body>
+</html>

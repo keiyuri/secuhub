@@ -46,7 +46,7 @@ class FakeGateConnectionRegistry(
         return removed
     }
 
-    override suspend fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean {
+    override fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray, trackForAck: Boolean): Boolean {
         sentCalls.add(Triple(dtlIp, dtlLaneNo, packet))
         return sendResult
     }

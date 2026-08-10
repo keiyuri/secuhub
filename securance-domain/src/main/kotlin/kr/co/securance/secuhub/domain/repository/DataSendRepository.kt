@@ -7,55 +7,83 @@ import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.transaction.annotation.Transactional
-import java.time.LocalDateTime
 
 /**
  * `tb_data_snd` 리포지토리. `SendControlJob`(계획서 3.6/5.5절, QUEUED 경로)이
- * 미전송 명령을 폴링할 때 사용한다.
+ * 미전송/미확인 명령을 폴링할 때 사용한다.
  */
 interface DataSendRepository : JpaRepository<DataSend, Long> {
-    // Opus 전체 리뷰 지적: 무제한 전체 조회 대신 Pageable로 배치 상한을 둔다
-    // (경로는 idx_data_snd_poll(snd_yn, chk_yn, snd_id) 인덱스를 그대로 탄다 — V4 마이그레이션).
-    //
-    // [Codex 적대적 리뷰 지적] 단순히 (snd_yn, chk_yn) ORDER BY snd_id LIMIT batchSize만으로는
-    // 계속 실패하는 큐 앞쪽 행이 매 폴링마다 다시 뽑혀 뒤쪽 정상 행을 영구히 가릴 수 있다
-    // (헤드 오브 라인 차단). next_attempt_at이 아직 도래하지 않은 행은 조회 대상에서 제외해,
-    // 실패한 행을 건너뛰고 다음 행을 처리할 수 있게 한다.
-    @Query(
-        "SELECT d FROM DataSend d WHERE d.sndYn = :sndYn AND d.chkYn = :chkYn " +
-            "AND (d.nextAttemptAt IS NULL OR d.nextAttemptAt <= :now) ORDER BY d.sndId",
-    )
-    fun findEligiblePending(
-        @Param("sndYn") sndYn: String,
-        @Param("chkYn") chkYn: String,
-        @Param("now") now: LocalDateTime,
-        pageable: Pageable,
-    ): List<DataSend>
 
     /**
-     * [Codex 어드버서리얼 리뷰 지적] `findEligiblePending`으로 뽑은 행을 그대로 처리하면, 같은 행을
-     * 두 스케줄러 인스턴스(또는 우발적 이중 기동)가 동시에 조회해 같은 제어 명령을 중복 물리 전송할
-     * 수 있다 — `@DisallowConcurrentExecution`은 JVM 하나 안에서만 유효하고, RAMJobStore는 여러
-     * JVM을 조정하지 못한다. 이 메서드는 `next_attempt_at`을 조건부 UPDATE(WHERE에 현재 상태를 명시)로
-     * 미래(리스 만료 시각)로 밀어 그 행을 원자적으로 "선점(claim)"한다 — UPDATE된 행 수(0 또는 1)로
-     * 선점 성공 여부를 판단할 수 있어, 두 인스턴스가 동시에 호출해도 DB 락이 한쪽만 통과시킨다.
-     * 처리가 끝나면 `SendControlJob`이 최종 상태(성공 시 null, 실패 시 재시도 쿨다운)로 다시 저장해
-     * 리스 값을 덮어쓴다.
+     * 전송 대기(`snd_yn='N' AND chk_yn='N'`) 명령을 오래된 순으로 읽는다.
+     *
+     * [Pageable]로 상한을 두는 이유: 장비가 장시간 끊겨 있어 대기열이 수만 건 쌓인 상태에서
+     * 전건을 한 번에 읽으면 폴링 주기(기본 1초)마다 대량 조회가 반복되어 DB가 먼저 무너진다.
+     * 레거시 `SelectSendDataServer`에는 상한이 없었다.
+     */
+    @Query(
+        """
+        SELECT s FROM DataSend s
+        WHERE s.sndYn = 'N' AND s.chkYn = 'N'
+        ORDER BY s.sndId ASC
+        """,
+    )
+    fun findPendingCommands(pageable: Pageable): List<DataSend>
+
+    /** 전송은 됐으나 장비 ACK를 아직 못 받은 명령(`snd_yn='Y' AND chk_yn='N'`). */
+    @Query(
+        """
+        SELECT s FROM DataSend s
+        WHERE s.sndYn = 'Y' AND s.chkYn = 'N'
+        ORDER BY s.sndId ASC
+        """,
+    )
+    fun findAwaitingAck(pageable: Pageable): List<DataSend>
+
+    /**
+     * 물리 전송 **전에** 이 인스턴스가 명령을 선점한다(Codex 리뷰 P1 — "DB에서 명령을 선점한
+     * 뒤 물리 전송하세요" 대응).
+     *
+     * 조회 시점의 [version]과 `snd_yn='N'`을 조건으로 건 원자적 UPDATE다. 두 인스턴스가 재접속
+     * 전환 시점에 같은 대기 행을 동시에 집어가도, DB가 이 UPDATE 자체를 직렬화하므로 단 한
+     * 인스턴스만 영향받은 행 수(1)를 돌려받는다 — 그 인스턴스만 물리 전송을 수행해야 한다.
+     * 이전 구조(먼저 [GateConnectionRegistryImpl.sendToLane]로 보내고 그 다음 낙관적 잠금으로
+     * 저장)는 두 인스턴스가 모두 전송까지 마친 뒤에야 경합이 드러나 중복 물리 전송을 막지
+     * 못했다.
+     *
+     * 같은 (`dtl_ip`, `dtl_lane_no`)에 이미 ACK 대기 중인 행(`snd_yn='Y' AND chk_yn='N'`)이
+     * 있으면 선점 자체를 실패시킨다(Codex 어드버서리얼 리뷰 대응 — "레인당 동시 in-flight 명령을
+     * 1건으로 제한하라"). ACK 프레임에 명령 식별자가 없어 [GateConnectionState]의 FIFO 추정으로
+     * 상관시키는 이상, 같은 레인에 2건 이상이 동시에 대기 중이면 ACK 1건이 아직 수행되지 않은
+     * 명령까지 확인 처리할 위험이 있다(예: OPEN 확정 후 대기 중이던 RESET까지 함께 확정되어
+     * 장애 기록이 잘못 해제됨) — 이를 애초에 발생 불가능하게 만드는 것이 유일한 안전한 방법이다.
+     * 이 조건은 인스턴스 로컬이 아니라 DB 레벨(`NOT EXISTS` 서브쿼리)이라 다중 인스턴스에서도
+     * 동일 레인에 대해 동시에 2건이 선점되지 않는다.
+     *
+     * @return 이번 호출이 선점에 성공했으면 1, 다른 인스턴스가 이미 처리했거나(버전 불일치)
+     *   이미 전송된 행이거나 같은 레인에 ACK 대기 중인 다른 행이 있으면 0.
      */
     @Modifying
     @Transactional
     @Query(
-        "UPDATE DataSend d SET d.nextAttemptAt = :leaseUntil WHERE d.sndId = :sndId " +
-            "AND d.sndYn = :sndYn AND d.chkYn = :chkYn " +
-            "AND (d.nextAttemptAt IS NULL OR d.nextAttemptAt <= :now)",
+        """
+        UPDATE DataSend s SET s.sndYn = 'Y', s.sndServer = :server, s.version = s.version + 1
+        WHERE s.sndId = :id AND s.version = :version AND s.sndYn = 'N'
+          AND NOT EXISTS (
+              SELECT 1 FROM DataSend o
+              WHERE o.dtlIp = s.dtlIp AND o.dtlLaneNo = s.dtlLaneNo
+                AND o.sndYn = 'Y' AND o.chkYn = 'N'
+          )
+        """,
     )
-    fun claim(
-        // 테스트에서 Mockito any() 매처(null 반환)로 스텁할 때 primitive long 언박싱 NPE를 피하기
-        // 위해 nullable로 둔다 — 실사용처(SendControlJob)는 항상 non-null 값만 넘긴다.
-        @Param("sndId") sndId: Long?,
-        @Param("sndYn") sndYn: String,
-        @Param("chkYn") chkYn: String,
-        @Param("now") now: LocalDateTime,
-        @Param("leaseUntil") leaseUntil: LocalDateTime,
-    ): Int
+    fun claimForSend(@Param("id") id: Long, @Param("version") version: Long, @Param("server") server: String): Int
+
+    /**
+     * [claimForSend]로 선점한 뒤 물리 전송이 실패(대기열 포화/레인 불일치 등)했을 때 대기 상태로
+     * 되돌린다 — 재접속/다음 폴링에서 자연히 재시도되게 한다.
+     */
+    @Modifying
+    @Transactional
+    @Query("UPDATE DataSend s SET s.sndYn = 'N', s.version = s.version + 1 WHERE s.sndId = :id")
+    fun releaseClaim(@Param("id") id: Long): Int
 }

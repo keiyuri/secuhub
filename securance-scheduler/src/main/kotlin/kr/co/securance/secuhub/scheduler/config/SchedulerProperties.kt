@@ -18,17 +18,13 @@ data class SchedulerProperties(
     /** `NetCheckJob` 반복 주기(초). */
     val netCheckIntervalSeconds: Long = 5,
 
-    /** `SendControlJob` 반복 주기(초) — 레거시 `INTERVAL_SEND_CONTROL`(ini 기본값 1초) 대응. */
-    val sendControlIntervalSeconds: Long = 1,
-
-    /** `ReqStatusJob` 반복 주기(초) — 레거시 `INTERVAL_REQ_STATUS`(ini 기본값 5초) 대응. */
-    val reqStatusIntervalSeconds: Long = 5,
-
     /**
-     * `SendControlJob`이 한 번의 폴링에서 가져오는 미전송 행의 최대 개수(Opus 전체 리뷰 지적).
-     * 이 상한이 없으면 전송 큐가 밀렸을 때 매초 tb_data_snd 미전송 행 전체를 조건 없이 메모리로
-     * 읽어들여 폴링 자체가 점점 느려지는 악순환에 빠질 수 있다 — 큐가 이 값보다 많이 밀려 있어도
-     * 나머지는 다음 폴링(1초 뒤)에서 이어서 처리되므로 유실되지 않는다.
+     * `ReqStatusJob`(상태 폴링) 반복 주기(초).
+     * 레거시 ini의 `REQ_STATUS_INTERVAL` 기본값과 동일한 10초로 시작한다.
+     *
+     * `SendControlJob`의 폴링 주기/배치 크기는 여기가 아니라 `securance.control.*`
+     * ([kr.co.securance.secuhub.server.control.ControlProperties])에서 관리한다 — 제어 명령
+     * 디스패치 설정(재전송 가드·ACK 타임아웃 등)과 한곳에 모아두기 위함이다.
      */
-    val sendControlBatchSize: Int = 500,
+    val reqStatusIntervalSeconds: Long = 10,
 )

@@ -5,14 +5,29 @@ import kr.co.securance.secuhub.protocol.SpeedGateProtocolConstants.HeaderOffset
 import java.time.LocalDateTime
 
 /**
- * Speed Gate(1)와 Flap Gate(2)가 공유하는 프로토콜 코덱(계획서 3.4절).
+ * Speed Gate(1)/Flap Gate(2)/Turn Gate(3)/Fast Gate(4)가 공유하는 프로토콜 코덱(계획서 3.4절).
  *
- * `SpeedGate Protocol Ver1_20250813_01.md` 문서를 기준으로 구현했다.
- * Turn Gate/Fast Gate는 별도 규격이므로 이 코덱을 쓰지 않는다 — [GateProtocolCodecRegistry] 참고.
+ * 1차 스캐폴드 때는 Turn/Fast Gate 규격 문서가 없어 "별도 구현 필요"로 남겨뒀으나(계획서 3.4절),
+ * `FastGate Protocol Ver1_2020102601_01.md`(= 상위 호환 "SmartGate Protocol") 확보 후 대조한 결과
+ * Header/Command/Tail 프레이밍과 `GATE_SETTING(0x4C)`/`GATE_STATUS(0x4D)`/`GATE_MOTOR(0x4B)` 객체는
+ * 네 게이트 타입이 완전히 동일한 봉투를 쓴다는 것을 확인했다 — Turn Gate는 상태 데이터의 GATE TYPE
+ * 필드 값(0x03)으로만 구분될 뿐 별도 객체/필드가 없고, Fast Gate도 이 코덱이 이미 다루는 범위
+ * (decode/ack/상태요청/제어명령)에서는 추가 분기가 필요 없다(제어모드 필드에 Pause/Slide 값이
+ * 늘어난 것뿐 — [SpeedGateControlCommand] 참고). 따라서 이 코덱 하나로 네 타입 모두 처리한다.
+ *
+ * Fast Gate 전용 확장인 `FAST_GATE_MOTOR(0x50)` Set/Request는 아직 구현하지 않았다
+ * ([SpeedGateProtocolConstants.ObjectCode.FAST_GATE_MOTOR] 참고).
  */
 class SpeedFlapGateProtocolCodec : GateProtocolCodec {
 
-    override val supportedGateTypes: Set<Int> = setOf(GateTypeCodes.SPEED_GATE, GateTypeCodes.FLAP_GATE)
+    override val supportedGateTypes: Set<Int> = setOf(
+        GateTypeCodes.SPEED_GATE,
+        GateTypeCodes.FLAP_GATE,
+        GateTypeCodes.TURN_GATE,
+        GateTypeCodes.FAST_GATE,
+    )
+
+    override val defaultAddress: ByteArray get() = SpeedGatePacketCodec.ZERO_ADDRESS
 
     override fun verifyChecksum(packet: ByteArray): Boolean = SpeedGatePacketCodec.verifyChecksum(packet)
 
@@ -35,6 +50,12 @@ class SpeedFlapGateProtocolCodec : GateProtocolCodec {
 
     override fun buildStatusRequest(address: ByteArray, dateTime: LocalDateTime): ByteArray =
         SpeedGatePacketCodec.buildStatusRequestWithTimeSync(address, dateTime)
+
+    override fun buildAck(objectCode: Byte, dateTime: LocalDateTime): ByteArray =
+        SpeedGatePacketCodec.buildAck(objectCode, dateTime)
+
+    override fun buildControlCommand(laneNo: Int, payload: SpeedGateControlPayload): ByteArray =
+        SpeedGatePacketCodec.buildControlCommand(laneNo, payload)
 
     override fun newReassembler(): PacketReassembler = SpeedGatePacketReassembler()
 }

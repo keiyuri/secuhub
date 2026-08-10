@@ -35,22 +35,19 @@ interface GateConnectionRegistry {
     suspend fun closeConnectionIfCurrent(dtlIp: String, expected: GateConnectionState, updateNetState: Boolean = true): Boolean
 
     /**
-     * 지정한 레인으로 패킷을 전송하고, 실제 소켓 쓰기가 완료될 때까지 대기한다. 커넥션이 없거나
-     * 대기열이 가득 차면(계획서 3.3절 [kr.co.securance.secuhub.common.exception.GateTaskRejectedException])
-     * 또는 큐잉 이후 전송 자체가 실패하면 false를 반환한다.
-     *
-     * [Codex 리뷰 수정] 예전에는 액터 큐에 enqueue만 확인하고 즉시 반환했다 — "성공"이 "장치까지
-     * 물리적으로 전송 시도됨"이 아니라 "큐잉됨"만 의미해, 큐잉 직후 연결이 끊기거나 비동기
-     * `outbound.sendByteArray()`가 실패해도 호출자(`SendControlJob`)가 이를 성공으로 오인해
-     * `snd_yn='Y'`을 확정 저장하고 재시도 기회를 영구히 잃을 수 있었다. 이제 액터 큐에서 작업이
-     * 실제로 실행 완료(성공/예외)될 때까지 suspend로 대기해, 반환값이 물리 전송 결과를 정확히
-     * 반영하도록 한다([GateConnectionActor.submitAndAwait] 참고).
+     * 지정한 레인으로 패킷을 전송한다(커넥션의 액터 체인에 enqueue). 커넥션이 없거나 대기열이
+     * 가득 차면(계획서 3.3절 [kr.co.securance.secuhub.common.exception.GateTaskRejectedException]) false를 반환한다.
      *
      * [레인 소유권 검사] `hasAuthoritativeLaneInfo`가 true인 커넥션에 대해 `dtlLaneNo`를 소유하지
      * 않으면 전송을 거부한다 — 제어 명령처럼 특정 레인을 대상으로 하는 전송에 쓴다. 패킷 내용이
      * 레인에 종속되지 않는 전체 커넥션 대상 요청(예: 상태 조회)에는 [sendToConnection]을 쓴다.
+     *
+     * @param trackForAck 전송한 레인을 ACK 상관관계 FIFO([GateConnectionState.recordSentLane])에
+     *   기록할지 여부(Codex 어드버서리얼 리뷰 대응). 장비 ACK를 기다려 상관시켜야 하는 **제어
+     *   명령** 전송만 `true`(기본값)를 쓴다. ACK 상관관계가 필요 없는 전송이 이 큐를 오염시키면,
+     *   뒤이어 도착한 제어 명령 ACK가 엉뚱한 레인으로 잘못 귀속될 수 있다 — `false`를 넘긴다.
      */
-    suspend fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean
+    fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray, trackForAck: Boolean = true): Boolean
 
     /**
      * 레인 소유권 검사 없이, 커넥션(디바이스 IP) 하나에 패킷을 전송하고 실제 소켓 쓰기가 완료될

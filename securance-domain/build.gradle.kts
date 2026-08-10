@@ -17,10 +17,20 @@ dependencies {
 
     api(project(":securance-common"))
 
+    // Spring Data JPA가 @Embeddable data class(복합키)를 리플렉션으로 다루려면 kotlin-reflect가
+    // 런타임에 있어야 한다. 없으면 NoClassDefFoundError(kotlin/reflect/full/KClasses)로 컨텍스트
+    // 기동이 실패한다(실 DB 연동 검증 중 발견) — api로 노출해 모든 소비 모듈 런타임에 전달한다.
+    api(kotlin("reflect"))
+
     // consumer 모듈(securance-server 등)이 JpaRepository/엔티티 타입을 직접 참조하므로 api로 노출한다.
     api("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.flywaydb:flyway-core")
     implementation(libs.flyway.mysql)
+    // Spring Boot 4는 autoconfigure를 기능별 모듈로 분리했다 — spring-boot-starter-data-jpa가
+    // spring-boot-hibernate/spring-boot-data-jpa는 끌어오지만 FlywayAutoConfiguration이 들어있는
+    // spring-boot-flyway는 별도 의존성이라 명시하지 않으면 Flyway가 조용히 스킵되고 Hibernate가
+    // ddl-auto: validate를 빈 스키마에 대고 실행해 기동이 실패한다(실 DB 연동 검증 중 발견).
+    implementation("org.springframework.boot:spring-boot-flyway")
     runtimeOnly(libs.mariadb.java.client)
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")

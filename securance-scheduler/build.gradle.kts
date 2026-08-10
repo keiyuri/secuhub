@@ -11,6 +11,8 @@ dependencies {
     testImplementation(platform("org.springframework.boot:spring-boot-dependencies:${libs.versions.spring.boot.get()}"))
 
     implementation(project(":securance-common"))
+    // ReqStatusJob이 커넥션의 코덱(GateProtocolCodec)으로 상태 요청 패킷을 만들기 위해 필요하다.
+    implementation(project(":securance-protocol"))
     implementation(project(":securance-server"))
     implementation(project(":securance-domain"))
     // GateConnectionState.codec의 타입(GateProtocolCodec)을 컴파일 타임에 인식하려면 필요하다

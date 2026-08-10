@@ -24,6 +24,7 @@ import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.connection.GateConnectionActor
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.connection.GateConnectionState
+import kr.co.securance.secuhub.server.db.GatePacketPersister
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Mono
@@ -55,6 +56,7 @@ class GateTcpServer(
     private val gateDetailRepository: GateDetailRepository,
     private val codecRegistry: GateProtocolCodecRegistry,
     private val packetHandler: GatePacketHandler,
+    private val packetPersister: GatePacketPersister,
 ) {
     private val logger = LoggerFactory.getLogger(GateTcpServer::class.java)
 
@@ -195,6 +197,12 @@ class GateTcpServer(
                 return@mono
             }
 
+            // 이 IP가 실어나르는 전체 레인의 loc_id/grp_id/dtl_id를 **연결 시 1회만** 조회해 캐시한다.
+            // 패킷마다 재조회하면 고빈도 수신 경로에서 N+1 조회가 된다(레거시 M-8 성능 버그).
+            val laneInfo = withContext(Dispatchers.IO) {
+                gateDetailRepository.findLaneInfoByDtlIp(remoteIp)
+            }
+
             val codec = try {
                 codecRegistry.resolve(gateDetail.dtlType)
             } catch (ex: UnsupportedGateTypeException) {
@@ -211,10 +219,11 @@ class GateTcpServer(
                 connection = connection,
                 outbound = outbound,
                 actor = actor,
+                laneInfo = laneInfo,
             )
             registry.register(state)
             registerDisposeGuard(connection, state)
-            logger.info("게이트[{}] 연결 수락 (dtlType={})", remoteIp, gateDetail.dtlType)
+            logger.info("게이트[{}] 연결 수락 (dtlType={}, 레인수={})", remoteIp, gateDetail.dtlType, laneInfo.size)
 
             inbound.receive().asByteArray().asFlow().collect { chunk -> onChunkReceived(state, chunk) }
         }.doOnError { ex ->
@@ -242,7 +251,10 @@ class GateTcpServer(
         for (raw in packets) {
             try {
                 if (!state.codec.verifyChecksum(raw)) {
-                    logger.warn("커넥션[{}] 체크섬 불일치 패킷을 폐기합니다.", state.dtlIp)
+                    // 폐기하되 원본은 tb_data_rcv_fail(Dead-letter)에 남긴다 — 통신선 노이즈/펌웨어
+                    // 이슈를 사후 추적하려면 로그만으로는 부족하다(레거시는 경고 로그만 남기고 버렸다).
+                    logger.warn("커넥션[{}] 체크섬 불일치 패킷을 폐기합니다(len={}).", state.dtlIp, raw.size)
+                    packetPersister.persistChecksumFailure(state.dtlIp, raw)
                     continue
                 }
                 val decoded = state.codec.decode(raw)

@@ -5,11 +5,14 @@ import kotlinx.coroutines.runBlocking
 import kr.co.securance.secuhub.protocol.GatePacket
 import kr.co.securance.secuhub.protocol.GateProtocolCodec
 import kr.co.securance.secuhub.protocol.PacketReassembler
+import kr.co.securance.secuhub.protocol.SpeedGateControlPayload
 import kr.co.securance.secuhub.protocol.SpeedGatePacketCodec
 import kr.co.securance.secuhub.protocol.SpeedGateProtocolConstants
 import kr.co.securance.secuhub.server.connection.GateConnectionActor
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.connection.GateConnectionState
+import kr.co.securance.secuhub.server.control.GateControlDispatcher
+import kr.co.securance.secuhub.server.db.GatePacketPersister
 import org.mockito.Mockito
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
@@ -22,9 +25,12 @@ import kotlin.test.Test
 
 private object FakeCodec : GateProtocolCodec {
     override val supportedGateTypes: Set<Int> = setOf(1)
+    override val defaultAddress: ByteArray = ByteArray(0)
     override fun verifyChecksum(packet: ByteArray): Boolean = true
     override fun decode(packet: ByteArray): GatePacket = throw UnsupportedOperationException()
     override fun buildStatusRequest(address: ByteArray, dateTime: LocalDateTime): ByteArray = ByteArray(0)
+    override fun buildAck(objectCode: Byte, dateTime: LocalDateTime): ByteArray = ByteArray(0)
+    override fun buildControlCommand(laneNo: Int, payload: SpeedGateControlPayload): ByteArray = ByteArray(0)
     override fun newReassembler(): PacketReassembler = object : PacketReassembler {
         override fun append(chunk: ByteArray): List<ByteArray> = emptyList()
     }
@@ -82,7 +88,7 @@ class DefaultGatePacketHandlerTest {
         // 폴링 주기마다 반복되므로 DB 쓰기 큐(샤드당 용량 1000)가 대수/레인 수가 많을 때 곧바로
         // 포화된다. 이제는 새로 온라인이 된 레인만 큐잉해야 한다.
         val registry = mock(GateConnectionRegistryImpl::class.java)
-        val handler = DefaultGatePacketHandler(registry, mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), mock(GateLogService::class.java))
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 3) { 0x01 })
@@ -101,7 +107,7 @@ class DefaultGatePacketHandlerTest {
     @Test
     fun `새로 나타난 레인만 온라인으로 큐잉한다`() = runBlocking {
         val registry = mock(GateConnectionRegistryImpl::class.java)
-        val handler = DefaultGatePacketHandler(registry, mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), mock(GateLogService::class.java))
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 2))
@@ -123,7 +129,7 @@ class DefaultGatePacketHandlerTest {
         // 잔존했다. 또한 onlineLanesRecorded에 계속 남아 있으면 나중에 그 레인이 다시 나타나도
         // "이미 온라인으로 기록됨"으로 오인해 온라인 갱신 자체가 생략되는 2차 버그도 함께 검증한다.
         val registry = mock(GateConnectionRegistryImpl::class.java)
-        val handler = DefaultGatePacketHandler(registry, mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), mock(GateLogService::class.java))
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 3))
@@ -146,7 +152,7 @@ class DefaultGatePacketHandlerTest {
         // 구현에는 없어, 물리 센서가 분리돼도(레인번호만 남고 나머지 바이트가 0) 레인이 패킷에
         // 계속 보고되기만 하면 온라인으로 남는 문제가 있었다.
         val registry = mock(GateConnectionRegistryImpl::class.java)
-        val handler = DefaultGatePacketHandler(registry, mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), mock(GateLogService::class.java))
         val state = newState()
 
         // 레인 2의 센서 바이트를 0으로 둬 "미연결" 상태로 만든다.
@@ -164,7 +170,7 @@ class DefaultGatePacketHandlerTest {
         // 레인 수와 무관하게 항상 isLaneConnected를 적용하는 동작을 의도적으로 유지하기로 했다 —
         // 이 결정을 회귀 테스트로 고정한다.
         val registry = mock(GateConnectionRegistryImpl::class.java)
-        val handler = DefaultGatePacketHandler(registry, mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), mock(GateLogService::class.java))
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 1) { 0x00 })
@@ -175,7 +181,7 @@ class DefaultGatePacketHandlerTest {
     @Test
     fun `연결돼 있던 레인의 센서 값이 0으로 바뀌면 오프라인으로 큐잉한다`() = runBlocking {
         val registry = mock(GateConnectionRegistryImpl::class.java)
-        val handler = DefaultGatePacketHandler(registry, mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), mock(GateLogService::class.java))
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 2))
@@ -191,7 +197,7 @@ class DefaultGatePacketHandlerTest {
     fun `GATE_LOG 패킷은 GateLogService에 위임하고 net_state는 건드리지 않는다`() = runBlocking {
         val registry = mock(GateConnectionRegistryImpl::class.java)
         val gateLogService = mock(GateLogService::class.java)
-        val handler = DefaultGatePacketHandler(registry, gateLogService)
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), gateLogService)
         val state = newState()
 
         val packet = GatePacket(
@@ -218,7 +224,7 @@ class DefaultGatePacketHandlerTest {
         // DataInfo(45)+Status(2*74)=220)과 entryCount(1)로 호출되는지 검증한다.
         val registry = mock(GateConnectionRegistryImpl::class.java)
         val gateLogService = mock(GateLogService::class.java)
-        val handler = DefaultGatePacketHandler(registry, gateLogService)
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), gateLogService)
         val state = newState()
 
         val address = SpeedGatePacketCodec.buildAddress(comSlot = 1, controller = 1, deviceNumber = 1)

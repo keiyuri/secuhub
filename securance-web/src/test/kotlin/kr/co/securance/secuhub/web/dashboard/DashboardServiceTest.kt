@@ -26,7 +26,8 @@ class DashboardServiceTest {
     private fun fakeError(dtlIp: String = "192.168.0.1"): DataReceiveAnalysis =
         DataReceiveAnalysis(
             analDate = "202601010000",
-            analType = "PLM",
+            analTp = "PLM",
+            rcvDate = "202601010000",
             dtlIp = dtlIp,
             dtlLaneNo = 1,
             errType = 3,

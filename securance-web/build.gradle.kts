@@ -13,9 +13,10 @@ dependencies {
     implementation(project(":securance-common"))
     implementation(project(":securance-domain"))
     // Phase 4(#12 GateModeChange, #13 GateSetupMotor) — 제어 명령 패킷 빌더(GateControlCommandBuilder)
-    // 재사용을 위해 securance-protocol에 의존한다. 이 모듈은 Netty/Spring 의존이 없는 순수 Kotlin이라
-    // securance-web -> securance-server 의존을 만들지 않는다(계획서 4절, 모듈 경계 유지).
+    // 재사용을 위해 securance-protocol에 의존한다.
     implementation(project(":securance-protocol"))
+    // 게이트 제어/리셋 화면이 GateControlService(제어 명령 발행)를 호출하기 위해 필요하다(계획서 5.5절).
+    implementation(project(":securance-server"))
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")

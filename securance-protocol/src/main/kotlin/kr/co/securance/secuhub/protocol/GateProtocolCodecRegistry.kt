@@ -31,4 +31,12 @@ class GateProtocolCodecRegistry(codecs: List<GateProtocolCodec>) {
 
     /** [dtlType]을 현재 지원하는지 여부(연결 수락 전 사전 검사용). */
     fun supports(dtlType: Int): Boolean = byGateType.containsKey(dtlType)
+
+    /**
+     * 예외 대신 null을 돌려주는 조회.
+     *
+     * 커넥션이 아직 없는 장비로 보낼 명령을 미리 인코딩하는 경우처럼(QUEUED 접수 경로),
+     * 지원 여부를 호출자가 직접 처리해야 하는 상황에서 쓴다.
+     */
+    fun forGateTypeOrNull(dtlType: Int): GateProtocolCodec? = byGateType[dtlType]
 }

@@ -9,10 +9,12 @@ import kr.co.securance.secuhub.protocol.GatePacket
 import kr.co.securance.secuhub.protocol.GateProtocolCodec
 import kr.co.securance.secuhub.protocol.GateProtocolCodecRegistry
 import kr.co.securance.secuhub.protocol.PacketReassembler
+import kr.co.securance.secuhub.protocol.SpeedGateControlPayload
 import kr.co.securance.secuhub.server.config.GatewayMode
 import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.db.GateDbWriteQueue
+import kr.co.securance.secuhub.server.db.GatePacketPersister
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import java.net.InetSocketAddress
@@ -37,11 +39,14 @@ class GateTcpServerTest {
 
     private object FakeCodec : GateProtocolCodec {
         override val supportedGateTypes: Set<Int> = setOf(1)
-        override fun verifyChecksum(packet: ByteArray): Boolean = true
+        override val defaultAddress: ByteArray = ByteArray(0)
+    override fun verifyChecksum(packet: ByteArray): Boolean = true
         override fun decode(packet: ByteArray): GatePacket =
             GatePacket(0, 0, 0, 0, 0, 0, raw = packet)
 
         override fun buildStatusRequest(address: ByteArray, dateTime: LocalDateTime): ByteArray = ByteArray(0)
+    override fun buildAck(objectCode: Byte, dateTime: LocalDateTime): ByteArray = ByteArray(0)
+    override fun buildControlCommand(laneNo: Int, payload: SpeedGateControlPayload): ByteArray = ByteArray(0)
 
         // 테스트 편의상 한 번의 append 호출로 들어온 바이트를 그대로 패킷 1개로 취급한다.
         override fun newReassembler(): PacketReassembler = object : PacketReassembler {
@@ -71,6 +76,7 @@ class GateTcpServerTest {
             gateDetailRepository = gateDetailRepository,
             codecRegistry = GateProtocolCodecRegistry(listOf(FakeCodec)),
             packetHandler = packetHandler,
+            packetPersister = mock(GatePacketPersister::class.java),
         )
     }
 

@@ -6,15 +6,19 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
-import org.springframework.transaction.annotation.Transactional
+import org.springframework.data.repository.query.Param
 import java.time.LocalDateTime
 
 /**
  * `tb_data_rcv_anal` 리포지토리.
  *
  * [findRecentUnresolvedErrors]는 레거시 뷰 `uvw_anlz_error`를 리포지토리 쿼리로 이식한 것이다
- * (계획서 4.4절: 1차 스캐폴드에서는 이 조회 1개만 구현해 "DB 뷰 대신 서비스 계층" 패턴을 증명한다.
- * 나머지 uvw_anlz_event/uvw_anlz_problem/uvw_snd_control/uvw_user_cnt는 동일 방식으로 후속 추가).
+ * (계획서 4.4절: DB 뷰 대신 서비스 계층).
+ *
+ * `resolve*` 계열은 레거시 `ClsMariaDB.UpdateResetFlag`/`UpdateResetFlagSensor`/
+ * `UpdateResetFlagMotor`의 이식이다. 레거시는 IP 단위로만 해제했으나(다중 레인 장비에서
+ * 한 레인 리셋이 다른 레인 장애까지 해제해 버림) 여기서는 **레인 번호까지 조건에 넣어**
+ * 리셋한 레인의 장애만 해제한다.
  */
 /**
  * [JpaSpecificationExecutor] 추가 — #9 SR_F_ViewEvent(계획서 4절)가 위치/그룹/게이트/이벤트유형/
@@ -34,7 +38,7 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
         WHERE a.errType = 3
           AND a.hasErrorEvent = true
           AND a.resolveYn = 'N'
-          AND a.analType IN ('PLM', 'STA')
+          AND a.analTp IN ('PLM', 'STA')
           AND a.analDate >= :sinceDate
         ORDER BY a.analId DESC
         """,
@@ -49,108 +53,108 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
         WHERE a.errType = 3
           AND a.hasErrorEvent = true
           AND a.resolveYn = 'N'
-          AND a.analType IN ('PLM', 'STA')
+          AND a.analTp IN ('PLM', 'STA')
           AND a.analDate >= :sinceDate
         """,
     )
     fun countRecentUnresolvedErrors(sinceDate: String): Long
 
     /**
-     * `SendControlJob`(레거시 `ClsQuartzJobSendControl.FinalizeSuccessfulSend`)이 RESET 계열 제어
-     * 명령 전송에 성공했을 때, 해당 게이트(`dtlIp`)의 미해결 오류 중 **모터** 관련 오류만 resolve
-     * 처리한다. 레거시 `DbProviderBase.UpdateResetFlagMotor`의 조건(`DESC_GATE_STATUS10`/`11`이
-     * 비어있지 않음)을 그대로 옮겼다.
-     *
-     * [Codex 적대적 리뷰 수정] 예전에는 서브타입을 구분하지 않고 `dtlIp`의 미해결 오류 전체를
-     * resolve 처리했다 — 모터 하나만 RESET해도 같은 IP의 무관한(예: 화재경보) 활성 오류까지 사라져
-     * 운영자가 실제 장애를 놓칠 수 있는 결함이었다. 레거시 SQL(`ClsMariaDB.UpdateResetFlagGeneric`)을
-     * 다시 확인해 정확한 서브타입별 조건을 복원했다.
-     *
-     * @param sinceDate/[untilDate] 레거시와 동일하게 "어제 00:00 ~ 오늘 23:59"로 대상 기간을 제한한다
-     *   (`yyyyMMddHHmm` 포맷, `anal_date`와 동일한 문자열 비교).
+     * 게이트 전체 장애 해제(레거시 `UpdateResetFlag` — 조건 `has_error_event = 1`).
+     * 생성 컬럼을 그대로 조건에 써서 `IDX_ANAL_ERR3_SCAN` 인덱스를 탄다.
      */
-    @Modifying
-    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         UPDATE DataReceiveAnalysis a
-        SET a.resolveYn = 'Y', a.resolveUser = :resolveUser, a.resolveDate = :resolveDate
-        WHERE a.dtlIp = :dtlIp
-          AND a.resolveYn = 'N'
-          AND a.errType = 3
-          AND a.analDate >= :sinceDate
-          AND a.analDate <= :untilDate
-          AND LENGTH(TRIM(CONCAT(
-                COALESCE(a.descMainMotorError, ''), COALESCE(a.descSlaveMotorError, '')
-              ))) > 0
+           SET a.resolveYn = 'Y', a.resolveDate = :resolvedAt, a.resolveUser = :resolvedBy
+         WHERE a.errType = 3 AND a.resolveYn = 'N'
+           AND a.hasErrorEvent = true
+           AND a.dtlIp = :dtlIp AND a.dtlLaneNo = :dtlLaneNo
+           AND a.analDate >= :fromDate AND a.analDate <= :toDate
         """,
     )
-    fun resolveMotorErrors(
-        dtlIp: String,
-        resolveUser: String,
-        resolveDate: LocalDateTime,
-        sinceDate: String,
-        untilDate: String,
+    fun resolveAllErrors(
+        @Param("dtlIp") dtlIp: String,
+        @Param("dtlLaneNo") dtlLaneNo: Int,
+        @Param("fromDate") fromDate: String,
+        @Param("toDate") toDate: String,
+        @Param("resolvedBy") resolvedBy: String,
+        @Param("resolvedAt") resolvedAt: LocalDateTime,
     ): Int
 
     /**
-     * 센서/운영 오류만 resolve 처리한다. 레거시 `UpdateResetFlagSensor`의 조건(운영 센서 8종 +
-     * 안전 센서 4종이 비어있지 않음)을 그대로 옮겼다. [resolveMotorErrors] 문서 참고.
+     * 운영/안전 센서 장애 해제(레거시 `UpdateResetFlagSensor` — 13개 desc 컬럼 중 하나라도 값이 있으면 대상).
+     *
+     * 레거시는 `LENGTH(TRIM(CONCAT(...)))`로 판정하면서 NULL 컬럼 하나가 CONCAT 전체를 NULL로
+     * 만들어 실제 장애가 있어도 누락되는 버그가 있었다(2026-07-22 `IFNULL` 추가로 수정).
+     * 여기서는 컬럼이 `NOT NULL DEFAULT ''`이고 조건도 컬럼별 OR이라 그 문제가 발생하지 않는다.
      */
-    @Modifying
-    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         UPDATE DataReceiveAnalysis a
-        SET a.resolveYn = 'Y', a.resolveUser = :resolveUser, a.resolveDate = :resolveDate
-        WHERE a.dtlIp = :dtlIp
-          AND a.resolveYn = 'N'
-          AND a.errType = 3
-          AND a.analDate >= :sinceDate
-          AND a.analDate <= :untilDate
-          AND LENGTH(TRIM(CONCAT(
-                COALESCE(a.descOperation01, ''), COALESCE(a.descOperation02, ''),
-                COALESCE(a.descOperation03, ''), COALESCE(a.descOperation04, ''),
-                COALESCE(a.descSafety01, ''), COALESCE(a.descSafety02, ''),
-                COALESCE(a.descSafety03, ''), COALESCE(a.descSafety04, ''),
-                COALESCE(a.descOperation05, ''), COALESCE(a.descOperation06, ''),
-                COALESCE(a.descOperation07, ''), COALESCE(a.descOperation08, ''),
-                COALESCE(a.descGateStatus09, '')
-              ))) > 0
+           SET a.resolveYn = 'Y', a.resolveDate = :resolvedAt, a.resolveUser = :resolvedBy
+         WHERE a.errType = 3 AND a.resolveYn = 'N'
+           AND a.dtlIp = :dtlIp AND a.dtlLaneNo = :dtlLaneNo
+           AND a.analDate >= :fromDate AND a.analDate <= :toDate
+           AND (TRIM(a.descOperation01) <> '' OR TRIM(a.descOperation02) <> ''
+             OR TRIM(a.descOperation03) <> '' OR TRIM(a.descOperation04) <> ''
+             OR TRIM(a.descSafety01) <> '' OR TRIM(a.descSafety02) <> ''
+             OR TRIM(a.descSafety03) <> '' OR TRIM(a.descSafety04) <> ''
+             OR TRIM(a.descOperation05) <> '' OR TRIM(a.descOperation06) <> ''
+             OR TRIM(a.descOperation07) <> '' OR TRIM(a.descOperation08) <> ''
+             OR TRIM(a.descGateStatus09) <> '')
         """,
     )
     fun resolveSensorErrors(
-        dtlIp: String,
-        resolveUser: String,
-        resolveDate: LocalDateTime,
-        sinceDate: String,
-        untilDate: String,
+        @Param("dtlIp") dtlIp: String,
+        @Param("dtlLaneNo") dtlLaneNo: Int,
+        @Param("fromDate") fromDate: String,
+        @Param("toDate") toDate: String,
+        @Param("resolvedBy") resolvedBy: String,
+        @Param("resolvedAt") resolvedAt: LocalDateTime,
     ): Int
 
-    /**
-     * 게이트(전체) 오류를 resolve 처리한다. 레거시 `UpdateResetFlag`의 조건을 그대로 옮겼다 — 대상
-     * 15개 컬럼이 생성 컬럼 `has_error_event`와 완전히 동일해(레거시 2026-07-22 수정 이력 참고)
-     * `hasErrorEvent = true` 하나로 대체됐다. [resolveMotorErrors] 문서 참고.
-     */
-    @Modifying
-    @Transactional
+    /** 모터 장애 해제(레거시 `UpdateResetFlagMotor` — `desc_gate_status10`/`11`). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         UPDATE DataReceiveAnalysis a
-        SET a.resolveYn = 'Y', a.resolveUser = :resolveUser, a.resolveDate = :resolveDate
-        WHERE a.dtlIp = :dtlIp
-          AND a.resolveYn = 'N'
-          AND a.errType = 3
-          AND a.analDate >= :sinceDate
-          AND a.analDate <= :untilDate
-          AND a.hasErrorEvent = true
+           SET a.resolveYn = 'Y', a.resolveDate = :resolvedAt, a.resolveUser = :resolvedBy
+         WHERE a.errType = 3 AND a.resolveYn = 'N'
+           AND a.dtlIp = :dtlIp AND a.dtlLaneNo = :dtlLaneNo
+           AND a.analDate >= :fromDate AND a.analDate <= :toDate
+           AND (TRIM(a.descGateStatus10) <> '' OR TRIM(a.descGateStatus11) <> '')
         """,
     )
-    fun resolveGateErrors(
-        dtlIp: String,
-        resolveUser: String,
-        resolveDate: LocalDateTime,
-        sinceDate: String,
-        untilDate: String,
+    fun resolveMotorErrors(
+        @Param("dtlIp") dtlIp: String,
+        @Param("dtlLaneNo") dtlLaneNo: Int,
+        @Param("fromDate") fromDate: String,
+        @Param("toDate") toDate: String,
+        @Param("resolvedBy") resolvedBy: String,
+        @Param("resolvedAt") resolvedAt: LocalDateTime,
+    ): Int
+
+    /** 화재 경보 해제(레거시 트리거의 "화재 경보 복구" 분기 — `desc_gate_status07`). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE DataReceiveAnalysis a
+           SET a.resolveYn = 'Y', a.resolveDate = :resolvedAt, a.resolveUser = :resolvedBy
+         WHERE a.errType = 3 AND a.resolveYn = 'N'
+           AND a.dtlIp = :dtlIp AND a.dtlLaneNo = :dtlLaneNo
+           AND a.analDate >= :fromDate AND a.analDate <= :toDate
+           AND TRIM(a.descGateStatus07) <> ''
+        """,
+    )
+    fun resolveFireAlarms(
+        @Param("dtlIp") dtlIp: String,
+        @Param("dtlLaneNo") dtlLaneNo: Int,
+        @Param("fromDate") fromDate: String,
+        @Param("toDate") toDate: String,
+        @Param("resolvedBy") resolvedBy: String,
+        @Param("resolvedAt") resolvedAt: LocalDateTime,
     ): Int
 }

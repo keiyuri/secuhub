@@ -12,6 +12,7 @@ import kr.co.securance.secuhub.domain.repository.NetStateRepository
 import kr.co.securance.secuhub.protocol.GatePacket
 import kr.co.securance.secuhub.protocol.GateProtocolCodec
 import kr.co.securance.secuhub.protocol.PacketReassembler
+import kr.co.securance.secuhub.protocol.SpeedGateControlPayload
 import kr.co.securance.secuhub.server.db.GateDbWriteQueue
 import kr.co.securance.secuhub.server.db.GateDbWriteTask
 import org.mockito.Mockito
@@ -49,9 +50,12 @@ private fun <T> anyKt(): T {
 /** 테스트에서 [GateProtocolCodec]의 실제 파싱 로직은 필요 없으므로 최소한만 구현한 페이크. */
 private object FakeCodec : GateProtocolCodec {
     override val supportedGateTypes: Set<Int> = setOf(1)
+    override val defaultAddress: ByteArray = ByteArray(0)
     override fun verifyChecksum(packet: ByteArray): Boolean = true
     override fun decode(packet: ByteArray): GatePacket = throw UnsupportedOperationException()
     override fun buildStatusRequest(address: ByteArray, dateTime: LocalDateTime): ByteArray = ByteArray(0)
+    override fun buildAck(objectCode: Byte, dateTime: LocalDateTime): ByteArray = ByteArray(0)
+    override fun buildControlCommand(laneNo: Int, payload: SpeedGateControlPayload): ByteArray = ByteArray(0)
     override fun newReassembler(): PacketReassembler = object : PacketReassembler {
         override fun append(chunk: ByteArray): List<ByteArray> = emptyList()
     }

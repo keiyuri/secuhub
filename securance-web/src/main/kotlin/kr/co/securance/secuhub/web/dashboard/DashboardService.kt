@@ -42,9 +42,11 @@ class DashboardService(
         dataReceiveAnalysisRepository
             .findRecentUnresolvedErrors(sinceDate, PageRequest.of(0, 8))
             .map { anal ->
-                val description = listOfNotNull(
+                // desc_* 컬럼은 스키마상 NOT NULL DEFAULT ''이라 "값 없음"이 null이 아니라 빈
+                // 문자열로 들어온다 — null 여부가 아니라 공백 여부로 판단해야 한다.
+                val description = listOf(
                     anal.descFireAlarm, anal.descMainMotorError, anal.descSlaveMotorError,
-                ).firstOrNull() ?: "오류 상세 미확인"
+                ).firstOrNull { it.isNotBlank() } ?: "오류 상세 미확인"
                 GateErrorRow(
                     dtlIp = anal.dtlIp,
                     description = description,

@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kr.co.securance.secuhub.protocol.GatePacket
 import kr.co.securance.secuhub.protocol.GateProtocolCodec
 import kr.co.securance.secuhub.protocol.PacketReassembler
+import kr.co.securance.secuhub.protocol.SpeedGateControlPayload
 import org.mockito.Mockito.mock
 import reactor.netty.Connection
 import reactor.netty.NettyOutbound
@@ -18,9 +19,12 @@ import kotlin.test.assertTrue
 /** [GateConnectionRegistryImplTest]와 동일한 최소 페이크 — 파싱 로직은 이 테스트에서 필요 없다. */
 private object StateTestFakeCodec : GateProtocolCodec {
     override val supportedGateTypes: Set<Int> = setOf(1)
+    override val defaultAddress: ByteArray = ByteArray(0)
     override fun verifyChecksum(packet: ByteArray): Boolean = true
     override fun decode(packet: ByteArray): GatePacket = throw UnsupportedOperationException()
     override fun buildStatusRequest(address: ByteArray, dateTime: LocalDateTime): ByteArray = ByteArray(0)
+    override fun buildAck(objectCode: Byte, dateTime: LocalDateTime): ByteArray = ByteArray(0)
+    override fun buildControlCommand(laneNo: Int, payload: SpeedGateControlPayload): ByteArray = ByteArray(0)
     override fun newReassembler(): PacketReassembler = object : PacketReassembler {
         override fun append(chunk: ByteArray): List<ByteArray> = emptyList()
     }

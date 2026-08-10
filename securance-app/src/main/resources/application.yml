@@ -69,7 +69,14 @@ spring:
       port: ${SECURANCE_REDIS_PORT:6379}
 
   quartz:
-    job-store-type: memory # RAMJobStore(레거시와 동일) — 다중 인스턴스 클러스터링은 후속 과제.
+    # RAMJobStore(레거시와 동일). JDBC JobStore로 바꿔 클러스터링하지 않는 것은 의도된 설계다 —
+    # NetCheckJob/ReqStatusJob은 인스턴스 로컬 GateConnectionRegistry(그 인스턴스가 실제로 들고
+    # 있는 TCP 커넥션 집합)만 보고 동작하므로, Quartz 클러스터링으로 "인스턴스 중 하나만 실행"하게
+    # 만들면 다른 인스턴스에 연결된 게이트가 영원히 폴링되지 않는다. 두 잡은 인스턴스마다 독립
+    # 실행돼야 한다(securance-server GateControlDispatcher KDoc 참고). tb_data_snd처럼 인스턴스
+    # 간에 공유되는 상태는 Quartz 클러스터링이 아니라 DB 낙관적 잠금(DataSend.version)으로
+    # 동시성을 제어한다(3차 스프린트).
+    job-store-type: memory
     properties:
       org:
         quartz:
@@ -89,8 +96,15 @@ securance:
   scheduler:
     job-concurrency: 64        # Quartz 잡 팬아웃 동시성 상한(계획서 3.7절)
     net-check-interval-seconds: 5
-    send-control-interval-seconds: 1  # 레거시 INTERVAL_SEND_CONTROL(ini 기본값 1초) 대응 — SendControlJob 폴링 주기
-    req-status-interval-seconds: 5    # 레거시 INTERVAL_REQ_STATUS(ini 기본값 5초) 대응 — ReqStatusJob 폴링 주기
+    req-status-interval-seconds: 10   # ReqStatusJob 상태 폴링 주기(계획서 3.6절)
+
+  control:
+    dispatch-mode: QUEUED      # QUEUED | DIRECT — 프론트엔드 제어 명령 전송 방식(연결 방향과 독립, 계획서 5.5절)
+    poll-interval-seconds: 1   # SendControlJob 폴링 주기(레거시 INTERVAL_SEND_CONTROL)
+    batch-size: 200            # 폴링 1회 처리 상한 — 대기열 폭증 시 한 사이클이 길어지는 것을 방지
+    resend-guard-seconds: 5    # 같은 명령의 물리 재전송 최소 간격(레거시 RESEND_GUARD)
+    ack-timeout-seconds: 10    # 장비 ACK 대기 시간 — 초과 시 재전송 또는 실패 확정
+    max-send-attempts: 3       # ACK 미수신 시 최대 전송 시도 횟수(최초 전송 포함)
 
   # 레거시 ini [LOCATION]/[CLOUD] 섹션 대응 — 설정 스캐폴드만 추가한다. 실사용처는 레거시에서도
   # 불분명했으므로 이번 작업에서는 로직을 구현하지 않는다(과도한 억측 금지).

@@ -27,8 +27,9 @@ interface PacketReassembler {
 /**
  * 게이트 타입별로 교체 가능한 프로토콜 코덱 계약(계획서 3.4절).
  *
- * Speed Gate와 Flap Gate는 [SpeedFlapGateProtocolCodec] 구현 하나를 공유하고,
- * Turn Gate/Fast Gate는 별도 규격 문서 확보 후 각각의 구현체를 추가한다(1차 스캐폴드 미구현).
+ * Speed Gate/Flap Gate/Turn Gate/Fast Gate 네 타입 모두 [SpeedFlapGateProtocolCodec] 구현 하나를
+ * 공유한다 — `FastGate Protocol Ver1_2020102601_01.md` 확보 후 대조한 결과 네 타입이 동일한
+ * Header/Command/Tail 봉투를 쓴다는 것이 확인됐다([SpeedFlapGateProtocolCodec] KDoc 참고).
  */
 interface GateProtocolCodec {
 
@@ -40,6 +41,15 @@ interface GateProtocolCodec {
 
     /** 패킷 헤더를 파싱해 [GatePacket]으로 만든다. */
     fun decode(packet: ByteArray): GatePacket
+
+    /**
+     * 주소를 특정하지 않을 때 쓰는 기본 주소.
+     *
+     * 레거시 서버는 상태 요청/ACK/제어 패킷 모두 Address 구간(헤더 6~18)을 채우지 않은 채
+     * 보냈고 장비도 이를 그대로 처리했다. 상태 폴링 잡처럼 커넥션만 알고 물리 주소를 모르는
+     * 호출자가 쓰도록 코덱이 기본값을 제공한다.
+     */
+    val defaultAddress: ByteArray
 
     /** 상태 조회(+ 시간 동기화) 요청 패킷을 만든다. */
     fun buildStatusRequest(address: ByteArray, dateTime: LocalDateTime = LocalDateTime.now()): ByteArray
@@ -59,6 +69,20 @@ interface GateProtocolCodec {
      */
     fun buildStatusRequest(dateTime: LocalDateTime = LocalDateTime.now()): ByteArray =
         buildStatusRequest(ByteArray(SpeedGateProtocolConstants.ADDRESS_LENGTH), dateTime)
+
+    /**
+     * 수신 패킷에 대한 ACK 회신 패킷을 만든다.
+     *
+     * @param objectCode 응답 대상 패킷의 Object Code — 수신한 값을 그대로 되돌려준다.
+     */
+    fun buildAck(objectCode: Byte, dateTime: LocalDateTime = LocalDateTime.now()): ByteArray
+
+    /** 제어 명령 패킷을 만든다(도어 개폐/모드 변경/리셋/보안등급/스케줄 시간). */
+    fun buildControlCommand(laneNo: Int, payload: SpeedGateControlPayload): ByteArray
+
+    /** 보안등급/시간 데이터가 없는 단순 제어 명령용 축약형. */
+    fun buildControlCommand(laneNo: Int, command: SpeedGateControlCommand): ByteArray =
+        buildControlCommand(laneNo, SpeedGateControlPayload(command))
 
     /** 커넥션 하나가 사용할 프레임 재조립기를 새로 만든다(커넥션당 상태 보유, 공유 금지). */
     fun newReassembler(): PacketReassembler

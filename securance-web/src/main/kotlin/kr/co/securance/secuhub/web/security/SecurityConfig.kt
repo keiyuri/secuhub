@@ -72,6 +72,9 @@ class SecurityConfig {
                 // 나머지 모든 경로에 접근할 수 있었다(3종 권한을 매핑해놓고 실제로는 admin/control
                 // 경로에만 강제하고 있어 사실상 나머지 화면에는 인가가 없는 셈이었다). ROLE_VIEW를
                 // 최소 요구 권한으로 승격한다.
+                // 게이트 제어/리셋 API는 tb_users.auth_ctrl(ROLE_CONTROL) 또는 auth_admin(ROLE_ADMIN)
+                // 권한을 가진 사용자만 호출할 수 있다(계획서 5.4/5.5절).
+                authorize("/api/gate-control/**", hasAnyRole("CONTROL", "ADMIN"))
                 authorize(anyRequest, hasRole("VIEW"))
             }
             formLogin {

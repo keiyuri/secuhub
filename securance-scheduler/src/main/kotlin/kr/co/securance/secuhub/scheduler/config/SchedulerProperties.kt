@@ -16,4 +16,10 @@ data class SchedulerProperties(
 
     /** `NetCheckJob` 반복 주기(초). */
     val netCheckIntervalSeconds: Long = 5,
+
+    /**
+     * `ReqStatusJob`(상태 폴링) 반복 주기(초).
+     * 레거시 ini의 `REQ_STATUS_INTERVAL` 기본값과 동일한 10초로 시작한다.
+     */
+    val reqStatusIntervalSeconds: Long = 10,
 )

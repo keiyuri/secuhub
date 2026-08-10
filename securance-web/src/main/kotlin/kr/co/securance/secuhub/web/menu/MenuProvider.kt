@@ -15,6 +15,7 @@ class MenuProvider {
                 MenuNode.Item("위치/그룹", "/gates/locations"),
                 MenuNode.Item("게이트 상세", "/gates/details"),
                 MenuNode.Item("연결 상태", "/gates/net-state"),
+                MenuNode.Item("게이트 제어", "/gates/control"),
             ),
         ),
         MenuNode.Header("운영"),

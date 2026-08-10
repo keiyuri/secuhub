@@ -183,4 +183,87 @@ object SpeedGatePacketCodec {
             dataLength = 0,
             payload = encodeDateTime(dateTime),
         )
+
+    /**
+     * 주소 필드를 0으로 채운 13바이트 — 레거시가 ACK/제어 패킷을 만들 때 사용하던 형태다.
+     *
+     * `ClsCommon.MakeACKDataAddTime`/`SR_C_DataHandler.BuildPacket`(Brian 보드)은 `new byte[38]`/
+     * `new byte[27]`을 그대로 쓰고 Address 구간(6~18)에 아무 값도 채우지 않았다 — 즉 실제 장비는
+     * 이 경로에서 주소 필드를 보지 않는다. 상태 요청([buildStatusRequestWithTimeSync])만
+     * [buildAddress]로 만든 주소를 사용한다.
+     */
+    val ZERO_ADDRESS: ByteArray
+        get() = ByteArray(SpeedGateProtocolConstants.ADDRESS_LENGTH)
+
+    /**
+     * 수신 패킷에 대한 ACK 회신 패킷을 만든다 — 레거시 `ClsCommon.MakeACKDataAddTime` 대응.
+     *
+     * `Command=SendAck(0x07)/Read(0x02)`, `DataInfoLen=7`, DataInfo에 현재 시각(BCD 7바이트)을
+     * 실어 보내 장비 시간 동기화를 겸한다. 전체 길이는 Header(27)+DataInfo(7)+Tail(4) = 38바이트
+     * ([SpeedGateProtocolConstants.ACK_PACKET_LENGTH]).
+     *
+     * 레거시 시그니처에는 `sAckType`(S/F/R) 파라미터가 있었으나 **프레임 어디에도 기록되지 않는
+     * 죽은 인자**였다(호출부만 값을 넘기고 `MakeACKDataAddTime` 본문은 사용하지 않음). 잘못된
+     * 계약을 그대로 옮기지 않기 위해 이 함수는 해당 인자를 받지 않는다 — 재전송 요청(RESEND)을
+     * 프로토콜로 표현해야 한다면 별도 오브젝트 코드/패킷으로 설계해야 한다.
+     *
+     * @param objectCode 응답 대상 패킷의 Object Code(수신한 패킷의 것을 그대로 되돌려준다).
+     */
+    fun buildAck(objectCode: Byte, dateTime: LocalDateTime = LocalDateTime.now()): ByteArray =
+        buildPacket(
+            address = ZERO_ADDRESS,
+            command1 = SpeedGateProtocolConstants.Command1.SEND_ACK,
+            command2 = SpeedGateProtocolConstants.Command2.READ,
+            objectCode = objectCode,
+            dataInfoLength = 7,
+            dataCount = 0,
+            dataLength = 0,
+            payload = encodeDateTime(dateTime),
+        )
+
+    /**
+     * 제어 명령 패킷을 만든다 — 레거시 `SR_C_DataHandler.SetControlCmd`/`GenerateCmdBody` 대응.
+     *
+     * `Command=SendData(0x05)/Write(0x03)`, `ObjectCode=GATE_SETTING(0x4C)`,
+     * `DataCount=1`, `DataLength=93(0x5D)`이며 본문은 93바이트 고정이다.
+     *
+     * 레거시의 Moon 보드(구형, `0x5B/0x53/0x6E` 헤더)는 이식 대상에서 제외했다 — 현행 장비는
+     * 전부 Brian 보드이며, 클라이언트 코드도 `sDtlBoardType = "B"`로 하드코딩되어 있었다.
+     *
+     * @param laneNo 대상 레인 번호(1~32). 바이트 값 그대로 인코딩한다(레인 10 → 0x0A).
+     * @param payload 명령/보안등급/스케줄 시간 데이터 묶음([SpeedGateControlPayload]).
+     */
+    fun buildControlCommand(
+        laneNo: Int,
+        payload: SpeedGateControlPayload,
+    ): ByteArray {
+        require(laneNo in 1..SpeedGateProtocolConstants.MAX_LANE_COUNT) { "laneNo 범위 오류: $laneNo" }
+
+        val offsets = SpeedGateProtocolConstants.ControlBodyOffset
+        val body = ByteArray(SpeedGateProtocolConstants.CONTROL_BODY_LENGTH)
+        body[offsets.LANE_NUMBER] = laneNo.toByte()
+        body[offsets.CONTROL_MODE] = payload.command.modeByte
+        body[offsets.RESET_CODE] = payload.command.resetByte
+
+        // 보안 등급/시간 데이터는 "지정하지 않으면 0"이 곧 "변경 없음"이다 — 레거시도 해당
+        // 인자가 비어 있으면 배열 초기값(0)을 그대로 보냈다(GenerateCmdBody).
+        payload.securityMode?.let { body[offsets.SECURITY_MODE] = it.value }
+        payload.userTime?.let { it.copyInto(body, offsets.TIME_DATA_USER) }
+        payload.securityTime?.let { it.copyInto(body, offsets.TIME_DATA_SECURITY) }
+
+        return buildPacket(
+            address = ZERO_ADDRESS,
+            command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+            command2 = SpeedGateProtocolConstants.Command2.WRITE,
+            objectCode = SpeedGateProtocolConstants.ObjectCode.GATE_SETTING,
+            dataInfoLength = 0,
+            dataCount = 1,
+            dataLength = SpeedGateProtocolConstants.CONTROL_BODY_LENGTH,
+            payload = body,
+        )
+    }
+
+    /** 보안등급/시간 데이터가 없는 단순 제어 명령용 축약형. */
+    fun buildControlCommand(laneNo: Int, command: SpeedGateControlCommand): ByteArray =
+        buildControlCommand(laneNo, SpeedGateControlPayload(command))
 }

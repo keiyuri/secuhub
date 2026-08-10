@@ -12,6 +12,9 @@ dependencies {
 
     implementation(project(":securance-common"))
     implementation(project(":securance-domain"))
+    // 게이트 제어/리셋 화면이 GateControlService(제어 명령 발행)를 호출하기 위해 필요하다(계획서 5.5절).
+    implementation(project(":securance-protocol"))
+    implementation(project(":securance-server"))
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")

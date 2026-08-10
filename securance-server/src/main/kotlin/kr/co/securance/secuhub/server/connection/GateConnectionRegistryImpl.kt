@@ -50,34 +50,65 @@ class GateConnectionRegistryImpl(
         val state = connections.remove(dtlIp) ?: return
         state.actor.close()
         if (updateNetState) {
-            state.laneSnapshot().forEach { lane -> enqueueNetStateUpdate(dtlIp, lane, online = false) }
+            state.laneSnapshot().forEach { lane -> enqueueNetStateUpdate(state, lane, online = false) }
         }
     }
 
-    override fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray): Boolean {
-        val state = connections[dtlIp] ?: return false
-        if (!state.ownsLane(dtlLaneNo) && state.hasAuthoritativeLaneInfo) return false
-        return try {
+    /**
+     * 커넥션의 액터 체인에 소켓 write를 태운다.
+     *
+     * 레거시 H-4 버그(ACK를 DB 워커 스레드에서 직접 `Socket.Send`로 내보내 DB 지연이 그대로
+     * 통신 지연으로 번지던 문제)의 재발 방지 지점이다 — **모든 송신은 반드시 이 경로를 통한다.**
+     * 레인 소유 검사를 하지 않으므로, 레인이 특정되지 않는 ACK 회신 등에 쓴다.
+     */
+    fun sendRaw(state: GateConnectionState, packet: ByteArray): Boolean =
+        try {
             state.actor.submit {
                 state.outbound.sendByteArray(Mono.just(packet)).then().awaitFirstOrNull()
             }
             true
         } catch (ex: GateTaskRejectedException) {
-            logger.warn("커넥션[{}] 전송 거부(대기열 초과): lane={}", dtlIp, dtlLaneNo, ex)
+            logger.warn("커넥션[{}] 전송 거부(대기열 초과)", state.dtlIp, ex)
             false
         }
+
+    override fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray, trackForAck: Boolean): Boolean {
+        val state = connections[dtlIp] ?: return false
+        if (!state.ownsLane(dtlLaneNo) && state.hasAuthoritativeLaneInfo) return false
+        val accepted = sendRaw(state, packet)
+        // ACK 프레임 자체엔 대상 레인 정보가 없으므로, 나중에 도착할 ACK를 이 레인과 상관시킬 수
+        // 있도록 전송 순서를 기록해 둔다(Codex 리뷰 P1 — GateConnectionState.recordSentLane 참고).
+        // trackForAck=false(상태 폴링 등)인 전송은 기록하지 않는다 — 상관관계가 필요 없는 전송이
+        // 이 큐에 섞이면 뒤이어 도착한 제어 명령 ACK가 엉뚱한 레인으로 잘못 귀속된다
+        // (Codex 어드버서리얼 리뷰 대응).
+        if (accepted && trackForAck) state.recordSentLane(dtlLaneNo)
+        return accepted
     }
 
-    /** `tb_net_state` 갱신을 파티션 큐(3.5절)에 위임한다 — 디바이스 IP당 순서가 보장된다. */
-    fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean) {
+    /**
+     * `tb_net_state` 갱신을 파티션 큐(3.5절)에 위임한다 — 디바이스 IP당 순서가 보장된다.
+     *
+     * `loc_id`/`grp_id`는 커넥션 수립 시 캐시해 둔 [GateConnectionState.laneInfo]에서 읽는다
+     * (레거시 M-8: 패킷마다 `tb_gate_dtl`을 재조회하던 N+1 제거). 레인이 `tb_gate_dtl`에
+     * 아직 등록되지 않은 경우에만 대표 레인 값으로 대체하고, 그것도 없으면 기록을 건너뛴다 —
+     * (0,0)이라는 존재하지 않는 키로 행을 만들면 화면 조인에서 영영 보이지 않기 때문이다.
+     */
+    fun enqueueNetStateUpdate(state: GateConnectionState, dtlLaneNo: Int, online: Boolean) {
+        val dtlIp = state.dtlIp
+        val info = state.laneInfoOf(dtlLaneNo) ?: state.primaryLaneInfo
+        if (info == null) {
+            logger.warn("커넥션[{}] 레인 {}의 게이트 정보가 없어 tb_net_state 갱신을 건너뜁니다.", dtlIp, dtlLaneNo)
+            return
+        }
+        val locId = info.locId
+        val grpId = info.grpId
+
         dbWriteQueue.enqueue(
             GateDbWriteTask(
                 partitionKey = dtlIp,
                 operationName = "UpdateNetState($dtlIp,$dtlLaneNo,$online)",
             ) {
-                // 1차 스캐폴드에서는 loc_id/grp_id를 조회하지 않고 (0,0)으로 남겨 패턴만 증명한다.
-                // 실제 구현에서는 GateDetailRepository로 loc_id/grp_id를 조회해 채운다(후속 작업).
-                val id = NetStateId(dtlIp = dtlIp, dtlLaneNo = dtlLaneNo, locId = 0, grpId = 0)
+                val id = NetStateId(dtlIp = dtlIp, dtlLaneNo = dtlLaneNo, locId = locId, grpId = grpId)
                 val entity = netStateRepository.findById(id).orElseGet { NetState(id = id) }
                 entity.dtlState = if (online) "Y" else "N"
                 entity.checkTime = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"))

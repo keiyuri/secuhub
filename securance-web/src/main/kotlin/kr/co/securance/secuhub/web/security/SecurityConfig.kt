@@ -28,6 +28,9 @@ class SecurityConfig {
                 authorize("/vendor/**", permitAll)
                 authorize("/js/**", permitAll)
                 authorize("/css/**", permitAll)
+                // 게이트 제어/리셋은 tb_users.auth_ctrl(ROLE_CONTROL) 또는 auth_admin(ROLE_ADMIN)
+                // 권한을 가진 사용자만 호출할 수 있다(계획서 5.4/5.5절).
+                authorize("/api/gate-control/**", hasAnyRole("CONTROL", "ADMIN"))
                 authorize(anyRequest, authenticated)
             }
             formLogin {

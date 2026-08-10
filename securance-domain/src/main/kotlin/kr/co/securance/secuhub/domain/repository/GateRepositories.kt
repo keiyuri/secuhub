@@ -36,6 +36,13 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
     /** #4 SetupGateGroup 화면 — 그룹에 속한 레인(게이트 상세) 목록 조회. */
     fun findByGroup_GrpIdOrderByDtlLaneNo(grpId: Long): List<GateDetail>
 
+    /**
+     * #3 SR_F_GateReset — 클라이언트가 보낸 dtlId 목록이 실제로 grpId에 속하는지 서버에서
+     * 교차 검증할 때 사용(전체 프로젝트 재감사 지적: 이전에는 dtlId 존재 여부만 확인하고
+     * grpId/locId 소속은 확인하지 않았다).
+     */
+    fun findByDtlIdInAndGroup_GrpId(dtlIds: Collection<Long>, grpId: Long): List<GateDetail>
+
     /** #6 SetupSchedule(Phase 5) — 위치 단위로 예약 모드를 일괄 적용할 때 사용. */
     fun findByLocation_LocIdAndUseYnTrue(locId: Long): List<GateDetail>
 

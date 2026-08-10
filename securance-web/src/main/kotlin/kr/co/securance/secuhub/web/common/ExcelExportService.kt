@@ -51,7 +51,22 @@ class ExcelExportService {
             null -> setBlank()
             is Number -> setCellValue(value.toDouble())
             is Boolean -> setCellValue(value)
-            else -> setCellValue(value.toString())
+            else -> setCellValue(sanitizeFormulaPrefix(value.toString()))
         }
+    }
+
+    /**
+     * CSV/Excel 수식 인젝션 방어(전체 프로젝트 재감사 지적) — 이 서비스로 내려가는 문자열은
+     * 사용자 계정명(UserForm.userName)·게이트그룹명(GateGroupForm.grpName) 등 자유 입력 텍스트를
+     * 포함하는데, 이런 값을 검증 없이 셀에 그대로 쓰면 `=`/`+`/`-`/`@`로 시작하는 값이 엑셀에서
+     * 열릴 때 수식으로 해석되어 다른 사용자의 PC에서 임의 명령 실행으로 이어질 수 있다(OWASP CSV
+     * Injection). 해당 접두문자로 시작하면 앞에 작은따옴표(')를 붙여 문자열로 강제 고정한다 —
+     * 화면 표시값은 그대로고, 엑셀만 수식이 아닌 텍스트로 인식하게 된다.
+     */
+    private fun sanitizeFormulaPrefix(raw: String): String =
+        if (raw.isNotEmpty() && raw[0] in FORMULA_TRIGGER_CHARS) "'$raw" else raw
+
+    private companion object {
+        val FORMULA_TRIGGER_CHARS = charArrayOf('=', '+', '-', '@', '\t', '\r')
     }
 }

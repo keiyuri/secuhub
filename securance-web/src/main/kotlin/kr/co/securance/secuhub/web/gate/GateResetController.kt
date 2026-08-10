@@ -38,6 +38,18 @@ class GateResetGridService(
             )
         }
     }
+
+    /**
+     * 요청된 dtlId 목록 중 실제로 grpId에 속한 것만 남긴다(전체 프로젝트 재감사 지적 — 서버는
+     * 이전까지 dtlId 존재 여부만 확인하고 grpId 소속은 확인하지 않아, 클라이언트가 화면에 표시된
+     * 그룹과 다른 dtlId를 함께 보내도 그대로 처리됐다). grpId가 없으면(그룹 미선택 화면) 소속
+     * 검증 없이 그대로 통과시킨다.
+     */
+    fun filterByGroupMembership(grpId: Long?, dtlIds: List<Long>): List<Long> {
+        if (grpId == null || dtlIds.isEmpty()) return dtlIds
+        val validIds = detailRepository.findByDtlIdInAndGroup_GrpId(dtlIds, grpId).mapNotNull { it.dtlId }.toSet()
+        return dtlIds.filter { it in validIds }
+    }
 }
 
 data class GateResetRow(
@@ -86,22 +98,31 @@ class GateResetController(
         @RequestParam(required = false, name = "dtlIds") dtlIds: List<Long>?,
         redirectAttributes: RedirectAttributes,
     ): String {
-        val targets = dtlIds.orEmpty()
-        if (targets.isEmpty()) {
+        val requested = dtlIds.orEmpty()
+        if (requested.isEmpty()) {
             redirectAttributes.addFlashAttribute("error", "리셋할 게이트를 선택해 주세요.")
             return "redirect:/gates/reset?locId=${locId ?: ""}&grpId=${grpId ?: ""}"
         }
 
+        // grpId 소속 교차 검증(전체 프로젝트 재감사 지적) — 화면에 표시된 그룹과 무관한 dtlId가
+        // 섞여 들어와도 서버가 그대로 처리하지 않도록, 요청된 grpId에 속한 dtlId만 실제 대상으로 삼는다.
+        val targets = gateResetGridService.filterByGroupMembership(grpId, requested)
+        val rejected = requested - targets.toSet()
+
         val requestedBy = currentUsername()
         val failed = targets.filterNot { gateControlService.sendReset(it, requestedBy) }
 
-        if (failed.isEmpty()) {
-            redirectAttributes.addFlashAttribute("message", "리셋 명령 ${targets.size}건을 전송 대기열에 등록했습니다.")
-        } else {
-            redirectAttributes.addFlashAttribute(
+        when {
+            rejected.isNotEmpty() -> redirectAttributes.addFlashAttribute(
+                "error",
+                "리셋 명령 ${targets.size - failed.size}건 등록, " +
+                    "${failed.size}건 실패(대상 없음), ${rejected.size}건 거부(선택한 그룹에 속하지 않음): $rejected",
+            )
+            failed.isNotEmpty() -> redirectAttributes.addFlashAttribute(
                 "error",
                 "리셋 명령 ${targets.size - failed.size}건 등록, ${failed.size}건 실패(대상 없음): $failed",
             )
+            else -> redirectAttributes.addFlashAttribute("message", "리셋 명령 ${targets.size}건을 전송 대기열에 등록했습니다.")
         }
         return "redirect:/gates/reset?locId=${locId ?: ""}&grpId=${grpId ?: ""}"
     }

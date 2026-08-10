@@ -94,4 +94,46 @@ class GateResetGridServiceTest {
 
         assertFalse(rows.single().online)
     }
+
+    @Test
+    fun `grpId가 null이면 소속 검증 없이 요청된 dtlId를 그대로 통과시킨다`() {
+        val detailRepository = mock(GateDetailRepository::class.java)
+        val netStateRepository = mock(NetStateRepository::class.java)
+        val service = GateResetGridService(detailRepository, netStateRepository)
+
+        val result = service.filterByGroupMembership(null, listOf(1L, 2L))
+
+        assertEquals(listOf(1L, 2L), result)
+    }
+
+    @Test
+    fun `요청한 dtlId 중 grpId에 속하지 않은 것은 걸러낸다`() {
+        // 전체 프로젝트 재감사 지적 회귀 방지: 클라이언트가 화면에 표시된 그룹과 무관한 dtlId를
+        // 함께 보내도(조작/버그) 서버가 dtlId 존재 여부만 보고 그대로 처리하면 안 된다.
+        val detailRepository = mock(GateDetailRepository::class.java)
+        `when`(detailRepository.findByDtlIdInAndGroup_GrpId(listOf(1L, 2L, 99L), 1L)).thenReturn(
+            listOf(
+                detail(dtlId = 1L, dtlIp = "192.168.0.1", laneNo = 1),
+                detail(dtlId = 2L, dtlIp = "192.168.0.2", laneNo = 2),
+            ),
+        )
+        val netStateRepository = mock(NetStateRepository::class.java)
+        val service = GateResetGridService(detailRepository, netStateRepository)
+
+        val result = service.filterByGroupMembership(1L, listOf(1L, 2L, 99L))
+
+        assertEquals(listOf(1L, 2L), result)
+    }
+
+    @Test
+    fun `dtlIds가 비어 있으면 조회 없이 빈 목록을 반환한다`() {
+        val detailRepository = mock(GateDetailRepository::class.java)
+        val netStateRepository = mock(NetStateRepository::class.java)
+        val service = GateResetGridService(detailRepository, netStateRepository)
+
+        val result = service.filterByGroupMembership(1L, emptyList())
+
+        assertEquals(emptyList(), result)
+        Mockito.verify(detailRepository, Mockito.never()).findByDtlIdInAndGroup_GrpId(anyKt(), Mockito.anyLong())
+    }
 }

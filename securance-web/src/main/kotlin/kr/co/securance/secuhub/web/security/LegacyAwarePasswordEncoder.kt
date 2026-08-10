@@ -2,6 +2,8 @@ package kr.co.securance.secuhub.web.security
 
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
+import java.security.MessageDigest
+import java.nio.charset.StandardCharsets
 
 /**
  * `tb_users.passwd`에는 두 종류의 값이 섞여 있을 수 있다: 신규/이관된 BCrypt 해시와,
@@ -27,10 +29,15 @@ class LegacyAwarePasswordEncoder(
         return if (isBCryptHash(encodedPassword)) {
             delegate.matches(rawPassword, encodedPassword)
         } else {
-            // 레거시 평문 저장분 — 상수 시간 비교는 아니지만, 이는 일회성 이관 경로일 뿐이며
-            // 성공 시 즉시 BCrypt로 승격되므로(아래 upgradeEncoding) 같은 계정은 다음 로그인부터
-            // 이 분기를 다시 타지 않는다.
-            rawPassword?.toString() == encodedPassword
+            // 레거시 평문 저장분 — 전체 프로젝트 재감사 지적: 일회성 이관 경로라도 `==` 비교는
+            // 문자열이 앞에서부터 다른 지점까지의 소요 시간 차이로 비밀번호 길이/일치 구간을
+            // 추론할 수 있는 타이밍 사이드채널이다. MessageDigest.isEqual은 두 배열을 항상
+            // 끝까지 비교해 상수 시간을 보장한다(단, 두 배열의 길이가 다르면 그 자체로 바로
+            // false를 반환하는데 이는 비밀번호 "정확한 길이"가 아니라 "같은 길이인지"만 새어나가는
+            // 것이라 실질적 위험이 낮다).
+            val raw = (rawPassword?.toString() ?: "").toByteArray(StandardCharsets.UTF_8)
+            val encoded = encodedPassword.toByteArray(StandardCharsets.UTF_8)
+            MessageDigest.isEqual(raw, encoded)
         }
     }
 

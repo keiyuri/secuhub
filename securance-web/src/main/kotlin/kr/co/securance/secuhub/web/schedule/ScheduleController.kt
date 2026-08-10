@@ -8,10 +8,11 @@ import kr.co.securance.secuhub.domain.entity.GateDetail
 import kr.co.securance.secuhub.domain.entity.GateTimeZone
 import kr.co.securance.secuhub.domain.repository.DataSendRepository
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
-import kr.co.securance.secuhub.domain.repository.GateGroupRepository
 import kr.co.securance.secuhub.domain.repository.GateTimeZoneRepository
 import kr.co.securance.secuhub.protocol.GateControlCommandBuilder
 import kr.co.securance.secuhub.protocol.TimeZoneCommandBuilder
+import kr.co.securance.secuhub.web.gate.GateDetailService
+import kr.co.securance.secuhub.web.gate.GateGroupService
 import kr.co.securance.secuhub.web.gate.GateLocationService
 import kr.co.securance.secuhub.web.menu.MenuProvider
 import org.springframework.security.core.context.SecurityContextHolder
@@ -294,8 +295,8 @@ class ScheduleController(
     private val timeZoneService: TimeZoneService,
     private val scheduleApplyService: ScheduleApplyService,
     private val locationService: GateLocationService,
-    private val groupRepository: GateGroupRepository,
-    private val detailRepository: GateDetailRepository,
+    private val groupService: GateGroupService,
+    private val detailService: GateDetailService,
     private val menuProvider: MenuProvider,
 ) {
     @GetMapping
@@ -311,8 +312,8 @@ class ScheduleController(
         model.addAttribute("timezoneForm", TimeZoneForm())
 
         model.addAttribute("allLocations", locationService.findAll())
-        model.addAttribute("groupsForLoc", locId?.let { groupRepository.findByLocation_LocId(it) } ?: emptyList<Any>())
-        model.addAttribute("detailsForGrp", grpId?.let { detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(it) } ?: emptyList<Any>())
+        model.addAttribute("groupsForLoc", locId?.let { groupService.findByLocation(it) } ?: emptyList<Any>())
+        model.addAttribute("detailsForGrp", grpId?.let { detailService.findByGroup(it) } ?: emptyList<Any>())
         model.addAttribute("selectedLocId", locId)
         model.addAttribute("selectedGrpId", grpId)
         model.addAttribute("selectedDtlId", dtlId)

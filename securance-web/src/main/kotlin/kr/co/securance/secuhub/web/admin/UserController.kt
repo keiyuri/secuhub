@@ -1,6 +1,7 @@
 package kr.co.securance.secuhub.web.admin
 
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
 import kr.co.securance.secuhub.domain.entity.AppUser
 import kr.co.securance.secuhub.domain.repository.AppUserRepository
@@ -79,7 +80,14 @@ data class UserForm(
     @field:NotBlank(message = "아이디는 필수입니다")
     @field:Size(max = 20, message = "아이디는 20자 이하여야 합니다")
     var userId: String = "",
-    /** 등록 시 필수, 수정 시 비워두면 기존 비밀번호 유지. */
+    /**
+     * 등록 시 필수, 수정 시 비워두면 기존 비밀번호 유지(빈 문자열은 통과시켜야 하므로
+     * [NotBlank]를 걸 수 없다 — 신규 등록 시 빈 값 거부는 [UserController.create]에서 별도 처리).
+     *
+     * 길이 제약만 검증한다(전체 프로젝트 재감사 지적: 기존에는 공백 여부만 검사하고 최소 길이/
+     * 복잡도 검증이 전혀 없어 "1"처럼 한 글자짜리 비밀번호도 그대로 저장됐다).
+     */
+    @field:Pattern(regexp = "^$|^.{8,64}$", message = "비밀번호는 8자 이상 64자 이하여야 합니다")
     var password: String = "",
     @field:NotBlank(message = "이름은 필수입니다")
     var userName: String = "",

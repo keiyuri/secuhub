@@ -46,4 +46,11 @@ class LegacyAwarePasswordEncoderTest {
         assertFalse(encoder.upgradeEncoding(hash), "encode() 결과는 다시 upgrade 대상이 되면 안 된다")
         assertTrue(encoder.matches("secret1234", hash))
     }
+
+    @Test
+    fun `레거시 평문 비교에서 rawPassword가 null이어도 예외 없이 false를 반환한다`() {
+        // 전체 프로젝트 재감사 지적으로 상수 시간 비교(MessageDigest.isEqual)로 바꾼 뒤,
+        // null-safe 처리(rawPassword?.toString() ?: "")가 여전히 유효한지 확인한다.
+        assertFalse(encoder.matches(null, "plainSecret1"))
+    }
 }

@@ -1,6 +1,5 @@
 package kr.co.securance.secuhub.web.security
 
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
@@ -9,7 +8,6 @@ import org.springframework.security.config.annotation.web.invoke
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 import org.springframework.security.web.session.HttpSessionEventPublisher
 
 /**
@@ -17,14 +15,13 @@ import org.springframework.security.web.session.HttpSessionEventPublisher
  * `securance.cache.redis.enabled=true`가 되면 Spring Session Redis로 교체해
  * 다중 인스턴스 배포에 대비할 수 있다(계획서 6절, 후속 작업).
  *
- * [devAutoLoginFilterProvider]는 [DevAutoLoginFilter]가 빈으로 존재할 때만(=
- * `securance.security.dev-auto-login-enabled=true`) 값을 가진다 — 전환 작업 검증 동안
- * 로그인 없이 ROLE_ADMIN으로 통과시키기 위한 임시 조치다. 기본값(false)에서는 폼 로그인만 동작한다.
+ * 전환 작업 검증용 로그인 우회 필터(`DevAutoLoginFilter`, `securance.security.dev-auto-login-enabled`)는
+ * 2026-08-12(B9)에 제거했다 — 기본값·prod 모두 false로 이미 비활성 상태였고, 파일 KDoc이 지시한
+ * "전환/검증 종료 후 제거"를 이행한 것이다. 필요해지면 git 이력(`DevAutoLoginFilter.kt` 삭제
+ * 커밋 이전)에서 복원할 수 있다.
  */
 @Configuration
-class SecurityConfig(
-    private val devAutoLoginFilterProvider: ObjectProvider<DevAutoLoginFilter>,
-) {
+class SecurityConfig {
 
     // 레거시 평문 비밀번호(AppUser 주석 참고)와 BCrypt 해시가 tb_users.passwd에 섞여 있을 수 있어,
     // 단순 BCryptPasswordEncoder를 쓰면 레거시 계정이 영구히 로그인 불가가 된다.
@@ -104,11 +101,6 @@ class SecurityConfig(
                     maxSessionsPreventsLogin = false
                 }
             }
-        }
-        // 개발 전용 자동 로그인 필터가 활성화돼 있으면 폼 로그인 필터보다 먼저 태워
-        // 인증을 선점하게 한다 — 플래그가 꺼져 있으면(기본값) 이 블록은 아무 일도 하지 않는다.
-        devAutoLoginFilterProvider.ifAvailable { filter ->
-            http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter::class.java)
         }
         return http.build()
     }

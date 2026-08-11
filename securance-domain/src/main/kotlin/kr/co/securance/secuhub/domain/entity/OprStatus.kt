@@ -92,6 +92,18 @@ class OprStatus(
     @Column(name = "opr_out_total")
     var outTotal: Long? = null,
 
+    /**
+     * 직전 레코드의 누적 출구 통행량 — [outTotal] 재계산 기준값(2026-08-12 codex 적대적 리뷰 지적,
+     * B6 후속 수정). 레거시 `usp_process_status`는 `opr_out_total`을 아예 채우지 않아(원문에
+     * `opr_out_count`만 UPDATE) 참고할 원본 컬럼이 없었다 — Total/In/Door과 달리 프로토콜에
+     * "누적 출구 카운터" 원시 바이트가 없고 `deltaTotal - deltaIn`으로 매번 새로 계산되는 값이기
+     * 때문이다. 이 필드는 그 델타를 in/door와 동일한 (증가분, 누적, 전일기준) 3종 패턴으로 맞추기
+     * 위해 secuhub에서 새로 도입한 누적값이며, `AccessReportController`가 [outTotal]을 합산해
+     * 리포트/CSV에 노출하므로 반드시 채워야 한다.
+     */
+    @Column(name = "opr_out_before")
+    var outBefore: Long? = null,
+
     @Column(name = "opr_door_count")
     var doorCount: Int? = null,
 

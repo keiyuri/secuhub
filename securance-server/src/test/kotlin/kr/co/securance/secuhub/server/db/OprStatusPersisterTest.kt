@@ -97,7 +97,7 @@ class OprStatusPersisterTest {
         `when`(repository.findById(anyKt())).thenReturn(Optional.empty())
         val prev = OprStatus(
             id = OprStatusId(oprDate = "202608120959", oprSeq = 1, dtlIp = "192.168.0.20", dtlLaneNo = 1),
-            totalCount = 40L, doorTotal = 5L, inTotal = 20L,
+            totalCount = 40L, doorTotal = 5L, inTotal = 20L, outTotal = 8L,
         )
         `when`(
             repository.findLatestBefore(anyLong(), anyString(), anyInt(), anyString(), anyString(), anyKt()),
@@ -123,6 +123,8 @@ class OprStatusPersisterTest {
         assertEquals(60L, saved.inTotal)
         assertEquals(20L, saved.inBefore)
         assertEquals(20, saved.outCount) // (100-40) - (60-20)
+        assertEquals(8L, saved.outBefore) // PREV의 outTotal
+        assertEquals(28L, saved.outTotal) // 8(before) + 20(delta) — SP 원문에 없는 secuhub 자체 누적값
         assertEquals(42L, saved.dtlId)
         assertEquals(7L, saved.locId)
         assertEquals(3L, saved.grpId)
@@ -138,6 +140,7 @@ class OprStatusPersisterTest {
             totalCount = 100L, beforeTotal = 40L,
             doorTotal = 10L, doorBefore = 5L,
             inTotal = 60L, inBefore = 20L,
+            outTotal = 40L, outBefore = 8L,
         )
         val repository = mock(OprStatusRepository::class.java)
         `when`(repository.findById(anyKt())).thenReturn(Optional.of(existing))
@@ -159,6 +162,8 @@ class OprStatusPersisterTest {
         assertEquals(7, saved.doorCount) // 12 - 5
         assertEquals(70, saved.inCount) // 90 - 20
         assertEquals(40, saved.outCount) // 110 - 70
+        assertEquals(8L, saved.outBefore) // INSERT 시점 값 그대로(재수신에도 변하지 않는다)
+        assertEquals(48L, saved.outTotal) // 8(before) + 40(재계산된 delta)
         // PREV 조회는 UPDATE 분기에서 아예 일어나지 않는다(SP 원문과 동일).
         verify(repository, Mockito.never())
             .findLatestBefore(anyLong(), anyString(), anyInt(), anyString(), anyString(), anyKt())

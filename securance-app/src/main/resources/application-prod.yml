@@ -25,6 +25,10 @@ spring:
   flyway:
     baseline-on-migrate: false
 
+securance:
+  security:
+    dev-auto-login-enabled: false  # ⚠ 운영에서는 절대 true로 바꾸지 말 것 — 로그인 우회 임시 필터 차단용 재확인.
+
 logging:
   level:
     root: WARN

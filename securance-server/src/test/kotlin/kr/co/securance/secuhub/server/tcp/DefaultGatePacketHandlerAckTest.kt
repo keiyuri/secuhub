@@ -23,6 +23,7 @@ import kr.co.securance.secuhub.server.control.GateControlDispatcher
 import kr.co.securance.secuhub.server.control.GateFaultResolutionService
 import kr.co.securance.secuhub.server.db.GateDbWriteQueue
 import kr.co.securance.secuhub.server.db.GatePacketPersister
+import kr.co.securance.secuhub.server.db.OprStatusPersister
 import org.mockito.Mockito.mock
 import reactor.netty.Connection
 import reactor.netty.NettyOutbound
@@ -156,7 +157,7 @@ class DefaultGatePacketHandlerAckTest {
     fun `상태 변경이 없어도 ACK는 반드시 회신한다`() = runBlocking {
         val registry = RecordingRegistry()
         val persister = CountingPersister()
-        val handler = DefaultGatePacketHandler(registry, persister, RecordingDispatcher(), mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, persister, RecordingDispatcher(), mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
         val state = newState()
 
         val raw = statusPacket(listOf(1, 2))
@@ -181,7 +182,7 @@ class DefaultGatePacketHandlerAckTest {
     fun `상태가 바뀌면 DB 적재와 ACK가 모두 수행된다`() = runBlocking {
         val registry = RecordingRegistry()
         val persister = CountingPersister()
-        val handler = DefaultGatePacketHandler(registry, persister, RecordingDispatcher(), mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, persister, RecordingDispatcher(), mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
         val state = newState()
 
         handler.handle(state, decoded(statusPacket(listOf(1, 2), marker = 0x00)))
@@ -195,7 +196,7 @@ class DefaultGatePacketHandlerAckTest {
     @Test
     fun `0x4D 상태 패킷은 레인 집합을 authoritative하게 교체하고 온라인으로 기록한다`() = runBlocking {
         val registry = RecordingRegistry()
-        val handler = DefaultGatePacketHandler(registry, CountingPersister(), RecordingDispatcher(), mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, CountingPersister(), RecordingDispatcher(), mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
         val state = newState()
 
         // marker != 0: 레인 블록의 나머지 바이트가 전부 0이면 "센서 미연결"로 판정되어 온라인
@@ -213,7 +214,7 @@ class DefaultGatePacketHandlerAckTest {
         // 레거시 H-3/H-1: 4D가 아닌 패킷에서 레인 집합을 교체해버려 다중 레인 소켓의 레인 정보가
         // 대표 레인 1개로 줄어들고, 그 결과 다른 레인으로 제어 명령이 전달되지 않던 버그의 회귀 테스트.
         val registry = RecordingRegistry()
-        val handler = DefaultGatePacketHandler(registry, CountingPersister(), RecordingDispatcher(), mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, CountingPersister(), RecordingDispatcher(), mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
         val state = newState()
 
         handler.handle(state, decoded(statusPacket(listOf(1, 2))))
@@ -233,7 +234,7 @@ class DefaultGatePacketHandlerAckTest {
         // 레인 항목을 잘못 소비하지 않는지 검증한다.
         val registry = RecordingRegistry()
         val persister = CountingPersister()
-        val handler = DefaultGatePacketHandler(registry, persister, RecordingDispatcher(), mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, persister, RecordingDispatcher(), mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
         val state = newState()
 
         // 제어 명령이 레인 2로 전송됐다고 가정 — FIFO에 레인 2가 쌓인다.
@@ -246,7 +247,7 @@ class DefaultGatePacketHandlerAckTest {
         // 이어서 실제 제어 명령 ACK(objectCode=GATE_SETTING)가 도착하면 레인 2로 정확히 상관돼야 한다.
         val controlAck = SpeedGatePacketCodec.buildAck(SpeedGateProtocolConstants.ObjectCode.GATE_SETTING)
         val dispatcher = RecordingDispatcher()
-        val handlerWithDispatcher = DefaultGatePacketHandler(registry, persister, dispatcher, mock(GateLogService::class.java))
+        val handlerWithDispatcher = DefaultGatePacketHandler(registry, persister, dispatcher, mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
         handlerWithDispatcher.handle(state, decoded(controlAck))
 
         assertEquals(listOf("192.168.0.10" to 2), dispatcher.ackedLanes, "제어 ACK는 실제로 전송한 레인 2로 상관돼야 한다")
@@ -257,7 +258,7 @@ class DefaultGatePacketHandlerAckTest {
     fun `게이트가 보낸 ACK는 저장만 하고 회신하지 않는다`() = runBlocking {
         val registry = RecordingRegistry()
         val persister = CountingPersister()
-        val handler = DefaultGatePacketHandler(registry, persister, RecordingDispatcher(), mock(GateLogService::class.java))
+        val handler = DefaultGatePacketHandler(registry, persister, RecordingDispatcher(), mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
         val state = newState()
 
         val gateAck = SpeedGatePacketCodec.buildAck(SpeedGateProtocolConstants.ObjectCode.GATE_STATUS)

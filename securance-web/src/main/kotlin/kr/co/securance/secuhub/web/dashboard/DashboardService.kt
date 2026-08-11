@@ -2,8 +2,10 @@ package kr.co.securance.secuhub.web.dashboard
 
 import kr.co.securance.secuhub.domain.repository.DataReceiveAnalysisRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
+import kr.co.securance.secuhub.domain.repository.OprStatusRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -15,8 +17,10 @@ import java.time.format.DateTimeFormatter
 class DashboardService(
     private val netStateRepository: NetStateRepository,
     private val dataReceiveAnalysisRepository: DataReceiveAnalysisRepository,
+    private val oprStatusRepository: OprStatusRepository,
 ) {
     private val dateKeyFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmm")
+    private val dayFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
 
     /**
      * 대시보드 화면 1회 렌더링에 필요한 요약 통계 + 최근 오류 목록을 한 번에 묶어 반환한다.
@@ -32,10 +36,21 @@ class DashboardService(
             // 목록은 상위 8건만 보여주지만, 카운트는 별도의 COUNT 쿼리로 실제 총 건수를 센다
             // (페이지 크기로 미해결 오류 개수가 8건에 잘려 보이는 버그 방지).
             unresolvedErrorCount = dataReceiveAnalysisRepository.countRecentUnresolvedErrors(sinceDate),
-            // 오늘 통행량(uvw_user_cnt 대응)은 loc/grp별 집계 화면과 함께 후속 작업으로 구현한다(계획서 5.2절).
-            todayTrafficCount = 0,
+            todayTrafficCount = todayTrafficCount(),
         )
         return DashboardView(summary = summary, recentErrors = errors)
+    }
+
+    /**
+     * "오늘 통행량" — `tb_opr_status.opr_user_count`(분 버킷별 순증가분)의 오늘치 합계
+     * (2026-08-12, B6 — [OprStatusPersister]가 이 테이블을 채우기 시작하면서 구현 가능해짐).
+     *
+     * `uvw_user_cnt` 뷰를 그대로 옮기지 않은 이유는 [OprStatusRepository.sumUserCountToday] 참고 —
+     * 그 뷰를 참조하는 레거시 C# 코드를 찾지 못해 정확한 원본 집계식을 검증할 수 없었다.
+     */
+    private fun todayTrafficCount(): Long {
+        val today = LocalDate.now().format(dayFormatter)
+        return oprStatusRepository.sumUserCountToday("${today}0000", "${today}2359")
     }
 
     private fun recentUnresolvedErrors(sinceDate: String): List<GateErrorRow> =

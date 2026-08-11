@@ -7,6 +7,7 @@ import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.connection.GateConnectionState
 import kr.co.securance.secuhub.server.control.GateControlDispatcher
 import kr.co.securance.secuhub.server.db.GatePacketPersister
+import kr.co.securance.secuhub.server.db.OprStatusPersister
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
@@ -38,6 +39,7 @@ class DefaultGatePacketHandler(
     private val persister: GatePacketPersister,
     private val controlDispatcher: GateControlDispatcher,
     private val gateLogService: GateLogService,
+    private val oprStatusPersister: OprStatusPersister,
 ) : GatePacketHandler {
 
     private val logger = LoggerFactory.getLogger(DefaultGatePacketHandler::class.java)
@@ -131,6 +133,9 @@ class DefaultGatePacketHandler(
                 // 원시 저장과 분석 적재를 한 지점에서 함께 호출한다 — 레거시는 원시 INSERT의 DB
                 // 트리거가 분석을 수행해 "저장은 됐는데 분석은 안 된" 상태를 추적할 수 없었다.
                 persister.persistStatusAnalysis(state, packet.raw)
+                // 통행량 집계(tb_opr_status, 2026-08-12 B6) — 레거시 usp_process_status 이식.
+                // errType과 무관하게 항상 반영한다(장애 여부와 통행량 집계는 별개).
+                oprStatusPersister.persistOprStatus(state, packet.raw)
                 logger.debug(
                     "커넥션[{}] 상태 변경 감지: lane={}, changedLanes={}",
                     state.dtlIp, laneNo, changes.laneChanges.count { it.anyChanged },

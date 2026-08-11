@@ -3,6 +3,7 @@ package kr.co.securance.secuhub.web.dashboard
 import kr.co.securance.secuhub.domain.entity.DataReceiveAnalysis
 import kr.co.securance.secuhub.domain.repository.DataReceiveAnalysisRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
+import kr.co.securance.secuhub.domain.repository.OprStatusRepository
 import org.mockito.Mockito
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.mock
@@ -22,6 +23,13 @@ private fun <T> anyKt(): T {
 }
 
 class DashboardServiceTest {
+
+    /** `todayTrafficCount()`가 오늘 합계를 조회할 때 쓰는 리포지토리 — 값 검증 대상이 아닌 테스트는 0으로 스텁한다. */
+    private fun fakeOprStatusRepository(): OprStatusRepository {
+        val repo = mock(OprStatusRepository::class.java)
+        `when`(repo.sumUserCountToday(anyKt(), anyKt())).thenReturn(0L)
+        return repo
+    }
 
     private fun fakeError(dtlIp: String = "192.168.0.1"): DataReceiveAnalysis =
         DataReceiveAnalysis(
@@ -50,7 +58,7 @@ class DashboardServiceTest {
         // 하지만 실제 총 건수는 42건 — 이 값이 그대로 unresolvedErrorCount에 반영되어야 한다.
         `when`(analysisRepository.countRecentUnresolvedErrors(anyKt())).thenReturn(42L)
 
-        val service = DashboardService(netStateRepository, analysisRepository)
+        val service = DashboardService(netStateRepository, analysisRepository, fakeOprStatusRepository())
 
         val view = service.loadDashboard()
 
@@ -71,7 +79,7 @@ class DashboardServiceTest {
         `when`(analysisRepository.findRecentUnresolvedErrors(anyKt(), anyKt())).thenReturn(emptyList())
         `when`(analysisRepository.countRecentUnresolvedErrors(anyKt())).thenReturn(0L)
 
-        val service = DashboardService(netStateRepository, analysisRepository)
+        val service = DashboardService(netStateRepository, analysisRepository, fakeOprStatusRepository())
         service.loadDashboard()
 
         verify(analysisRepository, Mockito.times(1)).findRecentUnresolvedErrors(anyKt(), anyKt())
@@ -96,7 +104,7 @@ class DashboardServiceTest {
             0L
         }.`when`(analysisRepository).countRecentUnresolvedErrors(anyKt())
 
-        val service = DashboardService(netStateRepository, analysisRepository)
+        val service = DashboardService(netStateRepository, analysisRepository, fakeOprStatusRepository())
         service.loadDashboard()
 
         assertEquals(listSinceDate, countSinceDate)
@@ -111,7 +119,7 @@ class DashboardServiceTest {
         `when`(analysisRepository.findRecentUnresolvedErrors(anyKt(), anyKt())).thenReturn(listOf(fakeError()))
         `when`(analysisRepository.countRecentUnresolvedErrors(anyKt())).thenReturn(1L)
 
-        val service = DashboardService(netStateRepository, analysisRepository)
+        val service = DashboardService(netStateRepository, analysisRepository, fakeOprStatusRepository())
         val view = service.loadDashboard()
 
         assertEquals("오류 상세 미확인", view.recentErrors.single().description)

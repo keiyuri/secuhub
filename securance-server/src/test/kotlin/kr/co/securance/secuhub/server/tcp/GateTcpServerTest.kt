@@ -75,8 +75,7 @@ class GateTcpServerTest {
             registry = registry,
             gateDetailRepository = gateDetailRepository,
             codecRegistry = GateProtocolCodecRegistry(listOf(FakeCodec)),
-            packetHandler = packetHandler,
-            packetPersister = mock(GatePacketPersister::class.java),
+            inboundProcessor = GateInboundPacketProcessor(packetHandler, mock(GatePacketPersister::class.java)),
         )
     }
 

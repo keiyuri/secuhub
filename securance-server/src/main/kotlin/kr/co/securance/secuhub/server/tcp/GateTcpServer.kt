@@ -15,7 +15,6 @@ import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactor.mono
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kr.co.securance.secuhub.common.exception.GateTaskRejectedException
 import kr.co.securance.secuhub.common.exception.UnsupportedGateTypeException
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.protocol.GateProtocolCodecRegistry
@@ -24,7 +23,6 @@ import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.connection.GateConnectionActor
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.connection.GateConnectionState
-import kr.co.securance.secuhub.server.db.GatePacketPersister
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Mono
@@ -55,8 +53,7 @@ class GateTcpServer(
     private val registry: GateConnectionRegistryImpl,
     private val gateDetailRepository: GateDetailRepository,
     private val codecRegistry: GateProtocolCodecRegistry,
-    private val packetHandler: GatePacketHandler,
-    private val packetPersister: GatePacketPersister,
+    private val inboundProcessor: GateInboundPacketProcessor,
 ) {
     private val logger = LoggerFactory.getLogger(GateTcpServer::class.java)
 
@@ -86,16 +83,14 @@ class GateTcpServer(
 
     @PostConstruct
     fun start() {
-        // Opus 전체 리뷰 지적: CLIENT(backend→gate 아웃바운드 연결) 방향은 `GateTcpClient`가
-        // 아직 존재하지 않아 실제 구현이 전혀 없다(SR_Speed_Client_전환_계획.md 어디에도 CLIENT
-        // 구현 범위가 없다). 예전에는 여기서 INFO 로그만 남기고 조용히 리턴했는데, 그러면
-        // mode=CLIENT로 잘못 설정한 배포가 겉보기엔 "정상 기동"한 것처럼 보이면서 게이트 연결이
-        // 전혀 이뤄지지 않는 상태로 운영에 올라갈 수 있다. 침묵 실패 대신 기동 자체를 명시적으로
-        // 실패시켜 배포 단계에서 바로 드러나게 한다(onChunkReceived 등 기존 "침묵 실패 금지" 원칙,
-        // 계획서 3.4절과 동일한 태도).
-        check(config.mode == GatewayMode.SERVER) {
-            "securance.server.mode=${config.mode}는 아직 구현되어 있지 않습니다. " +
-                "현재는 SERVER 모드(backend ← gate)만 지원합니다."
+        // 2026-08-11: GateTcpClient(CLIENT 모드) 구현 완료 — 이제 mode에 따라 두 컴포넌트 중
+        // 하나만 활성화되면 되므로, 예전처럼 CLIENT를 기동 실패로 막을 필요가 없다. CLIENT
+        // 모드에서는 이 서버를 그냥 띄우지 않고 GateTcpClient가 아웃바운드 연결을 담당한다.
+        // stop()의 registry 정리는 mode와 무관하게 계속 수행한다 — GateTcpClient가 만든
+        // 커넥션도 같은 registry를 공유하기 때문이다.
+        if (config.mode != GatewayMode.SERVER) {
+            logger.info("securance.server.mode={} — SERVER 모드 리스너를 기동하지 않습니다(GateTcpClient가 담당).", config.mode)
+            return
         }
 
         disposableServer = TcpServer.create()
@@ -231,41 +226,9 @@ class GateTcpServer(
         }.then()
     }
 
-    /**
-     * 인바운드 바이트 조각을 재조립기에 흘려보내고, 완성된 패킷마다 액터에 처리를 위임한다.
-     *
-     * **패킷 단위 격리(적대적 리뷰에서 지적)**: 재조립/체크섬/디코딩 실패나 액터 대기열 포화
-     * ([GateTaskRejectedException])는 여기서 잡아 해당 패킷(청크)만 폐기하고 다음 청크로 넘어간다 —
-     * 이 예외들을 위로 흘려보내면 `mono{}` 전체가 에러로 끝나 **소켓이 통째로 닫히고**, dispose 가드가
-     * net_state를 오프라인으로 기록해 게이트가 재접속하며, 바쁜 게이트일수록 큐 포화 → 접속 끊김 →
-     * 재접속 → 다시 포화가 반복되는 폭풍에 빠진다. 반면 소켓 자체의 오류(연결 리셋 등)는 `collect`
-     * 밖에서 발생해 정상적으로 이 Mono를 에러로 종료시키므로 여기서 막을 필요가 없다.
-     */
-    private fun onChunkReceived(state: GateConnectionState, chunk: ByteArray) {
-        val packets = try {
-            state.reassembler.append(chunk)
-        } catch (ex: Exception) {
-            logger.warn("커넥션[{}] 패킷 재조립 중 예외가 발생해 이 청크를 폐기합니다.", state.dtlIp, ex)
-            return
-        }
-        for (raw in packets) {
-            try {
-                if (!state.codec.verifyChecksum(raw)) {
-                    // 폐기하되 원본은 tb_data_rcv_fail(Dead-letter)에 남긴다 — 통신선 노이즈/펌웨어
-                    // 이슈를 사후 추적하려면 로그만으로는 부족하다(레거시는 경고 로그만 남기고 버렸다).
-                    logger.warn("커넥션[{}] 체크섬 불일치 패킷을 폐기합니다(len={}).", state.dtlIp, raw.size)
-                    packetPersister.persistChecksumFailure(state.dtlIp, raw)
-                    continue
-                }
-                val decoded = state.codec.decode(raw)
-                state.actor.submit { packetHandler.handle(state, decoded) }
-            } catch (ex: GateTaskRejectedException) {
-                logger.warn("커넥션[{}] 액터 대기열 초과로 패킷을 드롭합니다 - 연결은 유지합니다.", state.dtlIp)
-            } catch (ex: Exception) {
-                logger.warn("커넥션[{}] 패킷 처리 중 예외가 발생해 이 패킷만 폐기합니다.", state.dtlIp, ex)
-            }
-        }
-    }
+    /** 실제 처리는 [GateInboundPacketProcessor]로 위임한다(CLIENT 모드와 공유, 클래스 KDoc 참고). */
+    private fun onChunkReceived(state: GateConnectionState, chunk: ByteArray) =
+        inboundProcessor.onChunkReceived(state, chunk)
 
     private fun remoteIpOf(connection: Connection): String? =
         (connection.channel().remoteAddress() as? InetSocketAddress)?.address?.hostAddress

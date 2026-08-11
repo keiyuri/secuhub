@@ -73,6 +73,10 @@ securance:
     redis:
       enabled: false            # true로 바꾸면 Redis 세션/캐시가 활성화된다(후속 작업).
 
+  security:
+    dev-auto-login-enabled: false  # ⚠ true면 로그인 없이 ROLE_ADMIN 자동 인증(DevAutoLoginFilter).
+                                    # 전환 작업 검증 중에만 local/dev 프로필에서 true로 켤 것 — application-prod.yml에서 다시 false로 고정한다.
+
 server:
   port: 8080
 

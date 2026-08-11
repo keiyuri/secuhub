@@ -1,22 +1,48 @@
 # SR_Speed_Client 전환 계획
 
 레거시 WinForms 클라이언트(`D:\workspace\vstudio\Maintenance\GateControl\SR_Speed_Client`)의
-20개 화면 중 아직 웹(`securance-web`)으로 옮겨지지 않은 **18개 화면**을 어떤 순서로, 어떤 구조로
-전환할지 정리한 문서. 코드는 아직 작성하지 않았다 — 이 문서는 착수 전 합의를 위한 설계서다.
+20개 화면을 웹(`securance-web`)으로 전환하는 작업의 계획과 현황.
 
-## 1. 현재 상태
+> **문서 이력**: 최초에는 착수 전 설계서로 작성됐고(2026-08-06), Phase 1~7 구현이 진행되며
+> 각 항목에 완료 표기가 누적됐다. **2026.08.11에 레거시 원본과 신규 코드를 1:1로 재대조**해
+> 문서상 "완료" 표기와 실제 구현이 어긋난 곳을 정정했다(1.1절). 서버 측(`SR_Speed_Server`)은
+> 별도 문서 [SR_Speed_Server_전환_계획.md](SR_Speed_Server_전환_계획.md)를 참고.
 
-| 구분 | 화면 | 상태 |
+## 1. 현재 상태 (2026.08.11 실측 기준)
+
+| 구분 | 건수 | 화면 |
 | --- | --- | --- |
-| 완료 | Login | `LoginController` + `login.html` (`SecurityConfig` 연동, 브루트포스 방어 포함) |
-| 완료(부분) | DashBoard | `DashboardController` + `dashboard.html` — **정적 위젯 배치만** 구현, 레거시의 TreeView/MapIcon/DataGrid/이벤트폴링/Quartz 연동 등 실시간 기능은 미이식 |
-| 미착수 | 나머지 18개 | 아래 표 |
+| 완전 전환 | 12 | #3 #4 #6 #7 #8 #9 #10 #11 #12 #13 #15 + Login |
+| 부분 전환 | 4 | #1 GateControl, #5 SetupLocation, #17 Warning, #18 DashBoard |
+| 의도적 제외 | 3 | #2 GateInitMotor, #14 Holiday, #16 Overlay(CSS 대체) |
 
-백엔드(도메인/서버/스케줄러)는 이미 `NetCheckJob`/`SendControlJob`/`ReqStatusJob`,
+**전환률: 약 82%** (완전 12 + 부분 4×0.5 = 14 / 전체 17, 제외 3건은 분모에서 제외).
+
+백엔드(도메인/서버/스케줄러)는 `NetCheckJob`/`SendControlJob`/`ReqStatusJob`,
 `GateConnectionRegistry`, `DataReceive(Analysis)`/`DataSend`/`GateDetail`/`GateGroup`/
-`GateLocation`/`NetState`/`OprStatus`/`AppUser`/`CodeMaster` 엔티티가 갖춰져 있어, 프론트 18개
-화면 중 다수는 **신규 백엔드 로직 없이 컨트롤러+뷰만 추가하면 되는 화면**과 **엔티티/서비스를 새로
-만들어야 하는 화면**으로 나뉜다.
+`GateLocation`/`NetState`/`OprStatus`/`AppUser`/`CodeMaster`/`GateTimeZone`/`GateLog` 엔티티가
+갖춰져 있고, **`GateControlService`(QUEUED/DIRECT)와 `GateFaultResolutionService`까지 구현이
+완료**되어 있다 — 이 문서 곳곳에 남아 있던 "`GateControlService` 미구현" 전제는 더 이상 유효하지
+않다(1.1절 C1).
+
+## 1.1 문서상 "완료" 표기와 실제 코드의 괴리 — 2026.08.11 정정
+
+레거시 원본과 신규 코드를 대조해 발견한 항목이다. **표기만 고친 것이 아니라, 어긋난 원인을
+남겨둔다.**
+
+| # | 항목 | 문서상 표기 | 실제 코드 | 조치 |
+| --- | --- | --- | --- | --- |
+| C1 | #1/#17 대시보드 알림 팝업의 리셋 실행 | 3절 Phase 3 "완료(2026-08-06)", 단 "실제 리셋 실행은 `GateControlService` 구현 전까지 미제공" | **`GateControlService`는 이미 구현 완료**(`QueuedGateControlService`/`DirectGateControlService`/`GateControlDispatcher`)이고 `/gates/control` 화면과 `/api/gate-control/reset`(장애 해제 연동 포함)까지 동작한다. 그런데 **대시보드 알림 팝업(`#rt-alert-modal`)에는 여전히 리셋 액션이 없고**, `dashboard-realtime.js:60`·`dashboard.html:82`에 "`GateControlService` 구현 전까지 제공하지 않는다"는 **낡은 주석만 남아 있다** — 차단 사유는 사라졌는데 배선이 안 됐다 | 2절 #1/#17 재기술, Phase 8로 승격 |
+| C2 | 신규 `/gates/control` 화면 | **문서에 아예 없음** | 레거시 `SR_F_GateControl`(제어)과 `SR_F_GateReset`(리셋 5종)을 합친 전용 화면이 2차 스프린트에서 추가됐다(`GateControlPageController` + `GateControlApiController` + `gate-control.html`). 대상 게이트를 DB가 아니라 **현재 접속 중인 커넥션**에서 가져온다 | 2절에 #19로 신규 등재 |
+| C3 | #5 SetupLocation 지도 좌표 | "완료(2026-08-06, 축소 범위)" | 축소 범위인 것은 맞으나, **구현된 범위조차 동작하지 않을 가능성이 높다** — `gates/location-map.html:105`의 `<script>`에 `th:inline="javascript"`가 빠져 `locMapWidth`/`locMapHeight`가 리터럴 `0`으로 남고, 결과적으로 드래그한 그룹 아이콘 좌표가 **항상 (0,0)으로 저장**된다 | 2절 #5를 "부분(결함)"으로 정정 |
+| C4 | #17 Warning의 화재/장애 구분 | "완료 — `descFireAlarm` 유무로 화재/일반 장애를 구분" | `DashboardPushService.kt:68`이 `descFireAlarm != null`로 판정하는데 `DataReceiveAnalysis.descFireAlarm`은 **non-null String getter**라 조건이 항상 참 → **모든 알림이 "화재 경고"로 표시**된다. `DashboardService.kt:47`은 같은 필드를 `isNotBlank()`로 올바르게 처리해 두 곳의 판정이 불일치 | 2절 #17을 "부분(결함)"으로 정정 |
+| C5 | #7 `SR_F_Schedule`의 성격 | 2절/3절 Phase 5에서 "**구버전, 죽은 코드**"라 서술 | **폼 자체는 살아 있다** — `SR_F_DashBoard.Menu.cs`의 좌측 메뉴 9종 중 "스케줄설정"이 이 폼을 열고, 타임존 목록 그리드 + 폼 내장 편집(`pnlTimezone` → `SaveScheduleTime` → `InsertTimezone` + `SendTimeZoneData`) + 전체 시간동기화가 실제로 동작한다. 죽은 것은 **폼 안의 일부 메서드**(`SendData`, `SendModeData`, `btnSch*` 고아 핸들러)이지 폼이 아니다. 다만 이 라이브 기능은 `/schedule` 좌측 패널로 **이미 이관돼 있어 기능 공백은 없다** | 서술만 정정(기능 영향 없음) |
+| C6 | #18 DashBoard | Phase 3 "완료(2026-08-06)" | 실시간 push 인프라(WebSocket `/ws/dashboard` + 폴링)는 실제로 완성됐으나, **레거시 대시보드의 주요 구성요소 다수가 미이식**이다 — 게이트 **트리뷰**(LOC/GRP/DTL 3계층, 델타 갱신, 연결상태 아이콘, 툴팁, 우클릭 제어 메뉴), **맵 아이콘 실시간 갱신**(`GroupIconRefresh` 잡 5초), **이용자 수 위젯**(`todayTrafficCount`가 하드코딩 `0`). 웹 사이드바는 게이트 트리가 아니라 `MenuProvider`에 **하드코딩된 메뉴**다 | 2절 #18을 "부분"으로 정정 |
+| C7 | 죽은 링크 3건 | — | `MenuProvider`와 `dashboard.html`이 `/gates/net-state`, `/gates/errors`, `/control/history`를 링크하지만 **매핑된 컨트롤러가 없어 404**다 | Phase 9로 등재 |
+
+> **정정하지 않은 것**: #2 GateInitMotor(레거시 인스턴스화 0건)와 #14 Holiday(저장 로직이 빈 스텁,
+> 진입 핸들러가 어떤 컨트롤에도 연결되지 않은 고아 메서드)의 **제외 판단은 이번 재조사로 근거가
+> 오히려 강화됐다** — 유지한다.
 
 ## 2. 화면별 인벤토리 및 매핑
 
@@ -24,11 +50,11 @@
 
 | # | 레거시 화면 | 목적 | 실시간성 | 필요 백엔드 | 비고 |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `SR_F_GateControl` | 장애 알림 팝업 + 리셋 | 高 | 기존(`SendControlJob`, `DataReceiveAnalysis`) 재사용 + WebSocket/SSE 푸시 | **가장 실시간성 요구가 높은 화면** — 폴링이 아니라 서버→브라우저 push 설계 필요 |
+| 1 | `SR_F_GateControl` | 장애 알림 팝업 + 리셋 5종 | 高 | `GateControlService`, `GateFaultResolutionService`, WebSocket push | **부분(2026.08.11 정정)** — 두 갈래로 나뉘어 있다. (a) **전용 화면 `/gates/control`은 완료**: 리셋 5종(OS/SS/MB/MT/AC) 전송 + `tb_data_rcv_anal` 장애 해제까지 동작(#19 참고). (b) **대시보드 실시간 알림 팝업은 미완**: 팝업이 뜨기만 하고 **리셋 액션이 없다**. 레거시 `SR_F_GateControl`은 알림에서 곧바로 리셋 → 약 18초 진행바 → 사운드 → 리셋 유형별 복구 처리까지 한 화면에서 끝냈다. 상세 사유는 1.1절 C1 |
 | 2 | `SR_F_GateInitMotor` | 모터 초기값 설정 | 中 | - | **제외 확정(2026-08-06)** — 레거시 호출부 없음, 전환 대상 아님 |
 | 3 | `SR_F_GateReset` | 다중 게이트 일괄 리셋 | 中 | `DataSend`, `GateDetail` 재사용 | **완료(2026-08-06)** — `/gates/reset`, 리셋 실행 버튼까지 동작(`GateControlService.sendReset`, `buildModeChangeCommand("AC")` 재사용) |
 | 4 | `SR_F_SetupGateGroup` | 게이트그룹/상세 CRUD | 低 | `GateGroup`/`GateDetail` 리포지토리 재사용, 서비스 신규 | 마스터데이터 관리 — 우선순위 높음(다른 화면의 전제조건) |
-| 5 | `SR_F_SetupLocation` | 위치/지도 좌표 관리 | 低 | `GateLocation` 재사용 + 이미지 업로드 신규 | **완료(2026-08-06, 축소 범위)** — `/gates/locations/{id}/map`, 배치도 업로드 + 그룹 아이콘 드래그 배치. 장비별 아이콘/상위 구역맵 계층은 제외(사유는 Phase 6 항목 참고) |
+| 5 | `SR_F_SetupLocation` | 위치/지도 좌표 관리 | 低 | `GateLocation` 재사용 + 이미지 업로드 신규 | **부분(2026.08.11 정정)** — 축소 범위(배치도 업로드 + 그룹 아이콘 드래그)로 이관한 것은 계획대로이나, **그 범위조차 좌표가 항상 (0,0)으로 저장되는 결함**이 있다(`th:inline="javascript"` 누락, 1.1절 C3). 장비별 아이콘/상위 구역맵 계층 제외는 유지(사유는 Phase 6 항목 참고) |
 | 6 | `SR_F_SetupSchedule` | 모드/타임존 일괄 적용 | 中 | `DataSend` 재사용, TimeZone 엔티티 신규 | **완료(2026-08-06)** — `/schedule`(예약 모드 일괄 적용 폼). `SR_F_Schedule.cs`(구버전, 죽은 코드)가 아니라 라이브 로직인 `SR_F_SetupSchedule.cs`를 이식 |
 | 7 | `SR_F_Schedule` | 타임존 등록 + 동기화 | 中 | TimeZone 엔티티 신규 | **완료(2026-08-06)** — 6번과 한 화면(`/schedule`)으로 통합, `GateTimeZone` 엔티티(`tb_time`) 신규 |
 | 8 | `SR_F_ViewAccess` | 이용자 통계 조회 | 低 | `OprStatus`/신규 통계 리포지토리 | 조회+엑셀, 패턴 공통화 1호 |
@@ -40,8 +66,9 @@
 | 14 | `SR_P_Holiday` | 휴일 등록 | - | - | **제외 확정(2026-08-06)** — 레거시 자체가 미완성 스텁, 신규 요구사항 나오기 전까지 전환 대상 아님 |
 | 15 | `SR_P_Timezone` | 타임존 등록 | 中 | TimeZone 엔티티 신규 | **완료(2026-08-06)** — 6/7번과 함께 `/schedule` 화면에서 등록(저장 시 전체 게이트 자동 전송) |
 | 16 | `SR_F_Overlay` | 모달 배경 딤 처리 | - | 불필요 | Bootstrap `modal-backdrop` CSS로 대체, 별도 이식 불필요 |
-| 17 | `SR_F_Warning` | 화재 경고 팝업 | 高 | #1과 동일 push 채널 재사용 | #1(GateControl)과 실시간 인프라 공유 |
-| 18 | `SR_F_DashBoard` 나머지 | 트리뷰/맵아이콘/메뉴/이벤트폴링 오케스트레이션 | 高 | 전체 허브 | 이미 있는 정적 대시보드를 실시간 허브로 승격하는 작업, 사실상 별도 대형 과제 |
+| 17 | `SR_F_Warning` | 화재 경고 팝업 | 高 | #1과 동일 push 채널 재사용 | **부분(2026.08.11 정정)** — 전용 화면 없이 대시보드 `#rt-alert-modal`로만 구현. **화재/장애 구분이 실제로 깨져 있다**(모든 알림이 "화재 경고"로 표시, 1.1절 C4). 레거시의 화재 해제 처리(`UpdateResetFlagFire` → `fire_close_yn`)와 중복 오픈 차단(`IsFireOpen`)도 미이식. 경고 이력 목록·경고음 없음 |
+| 18 | `SR_F_DashBoard` 나머지 | 트리뷰/맵아이콘/메뉴/이벤트폴링 오케스트레이션 | 高 | 전체 허브 | **부분(2026.08.11 정정)** — 실시간 push 인프라(WebSocket `/ws/dashboard` + `@Scheduled` 폴링)는 완료. 미이식: **게이트 트리뷰**(LOC/GRP/DTL 3계층, 델타 갱신, 연결상태 아이콘, 툴팁, 우클릭 제어 메뉴 5종 OP/CS/AT/FF/RP), **맵 아이콘 실시간 갱신**(레거시 `GroupIconRefresh` 5초 잡), **이용자 수 위젯**(하드코딩 0). 상세는 1.1절 C6 |
+| 19 | (신규) `/gates/control` | 접속 중인 게이트 대상 제어 + 리셋 5종 | 高 | `GateControlService`(QUEUED/DIRECT), `GateFaultResolutionService` | **완료 — 2026.08.11에 문서에 추가**. 계획서 작성 이후 2차 스프린트에서 신설된 화면이라 기존 인벤토리에 없었다. UI→REST→`tb_data_snd` 큐→`SendControlJob`→`GateControlDispatcher`→소켓 write 전 구간 실구현(스텁 아님). 레거시 대비 개선: 장애 해제를 **장비 ACK 확인 후**에 수행 |
 
 ## 3. 단계별 우선순위 제안
 
@@ -59,6 +86,11 @@
    (`/ws/dashboard`) + `@Scheduled` DB 폴링(요약 5초/알림 3초) 하이브리드로 구현. #1/#17은
    실시간 팝업(모달)까지, 실제 리셋 실행은 `GateControlService` 구현 전까지 미제공(#3 GateReset과
    동일 방침). 상세는 [작업일지.md](작업일지.md) 참고.
+   > **⚠ 2026.08.11 정정**: 위 "`GateControlService` 구현 전까지 미제공" 전제는 **더 이상 유효하지
+   > 않다**. 이후 2차 스프린트에서 `GateControlService`가 구현 완료됐으나 **대시보드 팝업의 리셋
+   > 배선은 끝내 이뤄지지 않았다**. #3 GateReset은 Phase 6에서 활성화됐지만 #1/#17 팝업은 함께
+   > 처리되지 않아 지금도 알림 전용이다 → **Phase 8로 분리**(1.1절 C1). 또한 이 Phase에서 #18을
+   > "완료"로 적었으나 트리뷰/맵아이콘/이용자수는 미이식이다(1.1절 C6).
 5. **Phase 4 — 개별 게이트 제어 팝업** (#12 GateModeChange, #13 GateSetupMotor): **완료(2026-08-06)** —
    레거시 원본(`SR_C_DataHandler.cs`, `SR_P_GateModeChange.cs`, `SR_P_GateSetupMotor.cs`)을 직접
    확인해 패킷을 바이트 단위로 그대로 이식(`GateControlCommandBuilder`, 사용자 확인: "레거시 그대로
@@ -110,6 +142,22 @@
    구현 가능한 범위로 한정). 조회기간 기본값(전일~내일)과 3개월 초과 제한(초과 시 안내 후 fromDate를
    전일로 되돌림), 빈 설명 행 제외는 레거시 그대로 재현했다. `/reports/logs`, 상세는
    [작업일지.md](작업일지.md) 참고.
+
+10. **Phase 8 — #1/#17 대시보드 알림 팝업 ↔ 리셋 배선 (미착수, 최우선)**: `GateControlService`가
+    이미 완성돼 있으므로 **신규 백엔드 없이** `#rt-alert-modal`에 리셋 버튼을 붙이고
+    `/api/gate-control/reset`을 호출하면 된다. 함께 처리할 것: (a) `DashboardPushService`의
+    `descFireAlarm != null` → `isNotBlank()` 정정(1.1절 C4 — 이걸 고치지 않으면 화재/장애 구분이
+    계속 깨진 채로 리셋만 붙는다), (b) `dashboard-realtime.js:60`·`dashboard.html:82`의 낡은 주석
+    제거, (c) 레거시의 화재 해제 처리(`fire_close_yn`)와 중복 오픈 차단 이식.
+11. **Phase 9 — 누락 화면 3종 신설 (미착수)**: `/gates/net-state`(연결 상태),
+    `/gates/errors`(미해결 오류 목록), `/control/history`(제어 명령 이력). 현재 사이드바·대시보드가
+    링크만 걸어두고 **컨트롤러가 없어 404**다(1.1절 C7). 데이터 원본(`tb_net_state`,
+    `tb_data_rcv_anal`, `tb_data_snd`)과 리포지토리는 이미 있어 컨트롤러+뷰만 추가하면 된다.
+12. **Phase 10 — #18 대시보드 게이트 트리뷰 (미착수, 대형)**: 레거시 대시보드의 핵심 UI였던
+    LOC/GRP/DTL 3계층 트리 + 연결상태 아이콘 + 우클릭 제어 메뉴. 현재 웹 사이드바는 하드코딩된
+    정적 메뉴라 대체재가 아니다. 별도 과제로 분리 권장.
+13. **Phase 11 — 결함 수정 (미착수)**: #5 좌표 저장 결함(C3), 이용자 수 위젯 하드코딩(C6),
+    대시보드 SmallBox의 DOM 순서 의존 id 부착(위젯 순서 변경 시 값이 엉뚱한 박스에 들어감).
 
 ## 4. 착수 전 확인 필요한 의사결정 — **확정(2026-08-06, 사용자 확인)**
 
@@ -164,8 +212,19 @@
 - **컨트롤/서비스/리포지토리 계층**: 화면당 `XxxController`(securance-web) +
   `XxxService`(securance-web 또는 필요 시 securance-server) + 기존 `securance-domain` 리포지토리.
 
-## 6. 다음 단계
+## 6. 다음 단계 (2026.08.11 갱신)
 
-1. 4절의 의사결정 항목을 현업/사용자와 확인.
-2. Phase 1(#4, #11)부터 실제 구현 세션 착수 — 공통 패턴 확립.
-3. Phase 3 착수 전 실시간 push 방식(WebSocket vs SSE vs 폴링) 스파이크로 결론.
+Phase 1~7이 완료된 현재 시점 기준의 남은 작업 순서다. 위 원본 목록(Phase 1~3 착수 안내)은
+이미 소화됐으므로 대체한다.
+
+1. **Phase 8 — #1/#17 알림 팝업 리셋 배선 + 화재/장애 판정 버그 수정**. 가장 실운영 영향이 크고,
+   백엔드가 이미 있어 비용이 가장 낮다.
+2. **Phase 11 중 C3 좌표 저장 결함 수정**. 한 줄(`th:inline="javascript"`) 수정으로 #5가
+   실제로 동작하게 된다 — 투입 대비 효과가 가장 크다.
+3. **Phase 9 — 누락 화면 3종**(`/gates/net-state`, `/gates/errors`, `/control/history`).
+   사용자에게 404로 노출되는 죽은 링크를 없앤다.
+4. **Phase 10 — 게이트 트리뷰**. 레거시 대시보드의 핵심 UI, 대형 과제라 별도 일정 필요.
+5. **`DevAutoLoginFilter` 제거**. 전환 검증용 임시 필터가 남아 있다 — 프로퍼티 하나로 전 권한이
+   부여되므로 운영 반입 전 반드시 제거(작업일지 2026.08.11 0003 항목의 후속 과제).
+6. 서버 측 남은 범위는 [SR_Speed_Server_전환_계획.md](SR_Speed_Server_전환_계획.md) 4절 참고 —
+   특히 **Flyway 버전 중복(V2/V3/V4)** 은 클린 DB 기동을 막을 수 있어 최우선 확인 대상이다.

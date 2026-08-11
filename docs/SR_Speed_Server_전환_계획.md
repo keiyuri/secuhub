@@ -15,14 +15,25 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 | 구분 | 건수 | 비고 |
 | --- | --- | --- |
 | 완전 전환 | 17 | TCP 수신·분석·ACK·DB 파이프라인·Quartz 잡 3종 + 모터/스케줄/휴일 수신 저장 + **CLIENT 모드**(2026-08-11 신규) 등 |
-| 부분 전환 | 1 | 게이트 타입별 코덱 분리(P9, Turn/Fast 문서-코드 불일치) |
+| 부분 전환 | 1 | `FAST_GATE_MOTOR`(0x50) 코덱 미구현(P11/P9 잔여분, 아래 참고) |
 | 미전환 | 0 | — |
 | 의도적 제외 | 3 | 메모리 GC 워치독, INI 설정, 서비스 인스톨러. UDP 에코(D2)도 제외 확정(3절 참고) |
 | 레거시 초과(신규) | 1 | `GATE_LOG`(0x61) 로그 파싱 — 레거시 미구현분을 신규 설계 |
 
-**전환률: 약 100%**(완전 17 + 부분 0.5 / 전체 17.5, 의도적 제외 4건은 분모에서 제외). 남은 것은
-P9(Turn/Fast 코덱 문서-코드 불일치, D4) 확인뿐이며, 이는 신규 구현이 아니라 기존 코드/문서 중
-어느 쪽이 맞는지 현장 확인이 필요한 항목이다.
+**전환률: 약 100%**(완전 17 + 부분 0.5 / 전체 17.5, 의도적 제외 4건은 분모에서 제외).
+
+> **2026-08-12 정정(D4/P9)**: `FastGate Protocol Ver1_2020102601_01.md`(SmartGate Protocol, 상위
+> 호환 규격 원본)를 직접 대조한 결과, Speed/Flap/Turn/Fast **4개 타입 모두 동일한 봉투**(Header
+> 27B+Tail 4B, `GATE_STATUS`(0x4D)/`GATE_SETTING`(0x4C)/`GATE_MOTOR`(0x4B)/`TIME_ZONE`(0x54)/
+> `HOLIDAY`(0x48) 객체)를 쓴다는 것이 규격 문서로 확인됐다 — Turn Gate는 상태 데이터의 GATE TYPE
+> 필드 값(0x03)으로만 구분되고, Fast Gate의 Pause/Slide Open/Slide Close도 같은 0x4C 제어 봉투
+> 안의 제어모드 값 확장(0x41/0x42/0x43)일 뿐이다. 즉 "Turn/Fast는 별도 프로토콜이라 미구현"이라던
+> `GateTypeCodes.kt`/설계서 3.4절의 서술이 낡은 것이었고, `SpeedFlapGateProtocolCodec.
+> supportedGateTypes`가 4종 전부를 지원하는 **코드 쪽이 정답**이었다 — 현장에 Turn/Fast 게이트가
+> 있는지와 무관하게 규격 문서만으로 결론 낼 수 있는 문제였다(정정 전 "현장 확인 필요" 판단 철회).
+> `GateTypeCodes.kt` 주석을 갱신했다. 유일하게 실제로 미구현인 것은 Fast Gate 전용 모터 설정
+> Object Code `FAST_GATE_MOTOR`(0x50, 72바이트 TURN/SLIDE 모터 포지션·RPM·보정값 페이로드)뿐이며,
+> 이는 P11에서 이미 별도로 추적 중이던 항목이다.
 
 > **2026-08-11 정정**: 최초 분석에서 R3(모터)/R4(스케줄)/R5(휴일) 수신 저장을 "미전환"으로
 > 잘못 판정했다(아래 정오표 참고). `GatePacketPersister.persistReceivedPacket`을 실제로
@@ -62,7 +73,7 @@ P9(Turn/Fast 코덱 문서-코드 불일치, D4) 확인뿐이며, 이는 신규 
 | P6 | `ClsCommon.MakeReqStatusDataWithDateTime`/`CheckData` | `ClsCommon.cs` | 헤더 빌더, 체크섬(XOR+SUM), BCD 날짜 인코딩 | **완료** | `SpeedGatePacketCodec.kt` |
 | P7 | `ClsConst` 상수 | `ClsConst.cs` | 섹션 길이(Header 27/Tail 4/DataInfo 45/Status 74/Log 36), STX/ETX, CMD1/CMD2, Object Code | **완료** | `SpeedGateProtocolConstants.kt` |
 | P8 | `SendAckData` | `SpeedServer.cs:1337` | 수신 패킷에 대한 ACK 응답 송신 | **완료** | `DefaultGatePacketHandler`(ACK 경로) |
-| P9 | 게이트 타입별 코덱 분리 | — | Speed/Flap 공용, Turn/Fast는 별도 규격 | **부분** | `GateProtocolCodecRegistry` + `SpeedFlapGateProtocolCodec` 1개만 존재. 이 코덱이 `supportedGateTypes`에 **4종(Speed/Flap/Turn/Fast) 전부를 등록**하고 있어, 설계서 3.4절 및 `GateTypeCodes.kt` 주석의 "Turn/Fast 미구현" 서술과 코드가 어긋난다 — 3절 D4 참고 |
+| P9 | 게이트 타입별 코덱 분리 | — | Speed/Flap 공용, Turn/Fast는 별도 규격(추정) | **완료(2026-08-12 정정)** | 규격 문서(`FastGate Protocol Ver1_2020102601_01.md`) 대조 결과 4종 모두 동일 봉투/객체코드를 쓰는 것으로 확인 — `SpeedFlapGateProtocolCodec`이 `supportedGateTypes`에 4종 전부를 등록한 것이 정답이었다. 설계서 3.4절의 "Turn/Fast 별도 규격" 추정이 규격 미확보 시점의 낡은 서술이었다(3절 D4 참고) |
 | P10 | Object Code 정의 범위 | `ClsConst.cs` | — | **부분** | `SpeedGateProtocolConstants.ObjectCode`에 **15종 상수**가 정의돼 있으나 실제 인코딩/파싱 구현이 있는 것은 **0x4D/0x4C/0x4B/0x46/0x54/0x61의 6종**뿐. 나머지 9종(0x4E/0x47/0x4F/0x52/0x55/0x48/0x57/0x50 등)은 **상수만 있고 빌더·파서 없음** |
 | P11 | `FAST_GATE_MOTOR`(0x50) | — | FastGate 모터 설정 | **미전환** | 상수만 정의, 페이로드 코덱 없음 |
 
@@ -158,13 +169,14 @@ P9(Turn/Fast 코덱 문서-코드 불일치, D4) 확인뿐이며, 이는 신규 
   적이 없다, `92_DB_Script` 스키마 대조 확인). 즉 "보낸 값이 장비에 반영됐는지 화면에서 확인"하는
   기능은 레거시에도 없었으므로 전환 누락이 아니다 — 화면화가 필요하면 별도 신규 기능으로 다뤄야
   한다.
-- **D4. Turn Gate / Fast Gate 코덱(P9) — 문서와 코드가 어긋나 있다**
-  설계서 3.4절과 `GateTypeCodes.kt` 주석은 "Turn/Fast는 별도 프로토콜이라 미구현"이라고 하는데,
-  실제 `SpeedFlapGateProtocolCodec.supportedGateTypes`는 **4종 전부를 지원한다고 선언**하고 있다.
-  즉 Turn/Fast 게이트가 접속하면 미지원 오류가 아니라 **Speed/Flap 코덱으로 파싱을 시도**한다.
-  둘 중 하나가 틀렸다 — (1) 실제로 4종이 같은 봉투를 쓴다면 주석을 정정해야 하고, (2) 아니라면
-  `supportedGateTypes`를 좁혀 `UnsupportedGateTypeException`이 나도록 되돌려야 한다. **현장에
-  Turn/Fast 게이트가 있는지** 확인이 선행되어야 한다.
+- ~~D4. Turn Gate / Fast Gate 코덱(P9) — 문서와 코드가 어긋나 있다~~ **해결 완료(2026-08-12)**
+  `FastGate Protocol Ver1_2020102601_01.md`(SmartGate Protocol) 규격 문서를 직접 대조해 4종
+  게이트가 완전히 동일한 봉투/객체코드를 쓴다는 것을 확인했다 — 코드(`SpeedFlapGateProtocolCodec.
+  supportedGateTypes` 4종 전부 지원)가 정답이었고, "Turn/Fast는 별도 프로토콜" 서술 쪽이 규격
+  미확보 시절의 낡은 추정이었다. "현장에 Turn/Fast 게이트가 있는지 확인이 선행돼야 한다"던 판단은
+  철회한다 — 규격 문서만으로 결론 낼 수 있는 문제였다(현장 여부와 무관). `GateTypeCodes.kt` 주석
+  정정 완료. 유일한 실제 미구현분은 Fast Gate 전용 `FAST_GATE_MOTOR`(0x50) 모터 코덱이며 P11로
+  계속 추적한다.
 - **D5. 데이터 보관/정리(retention) 정책**
   레거시에도 없던 기능이라 "전환 누락"은 아니지만, 신규 코드베이스에도 `tb_data_rcv` /
   `tb_data_rcv_anal` / `tb_gate_log`를 정리하는 잡·쿼리가 **전무**하다(`retention`/`purge`/

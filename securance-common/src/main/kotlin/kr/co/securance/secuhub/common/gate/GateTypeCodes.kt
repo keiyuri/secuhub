@@ -18,9 +18,20 @@ object GateTypeCodes {
     /** Flap Gate. Speed Gate와 동일 프로토콜(`SpeedFlapGateProtocolCodec`)을 사용한다. */
     const val FLAP_GATE = 2
 
-    /** Turn Gate — 별도 프로토콜 규격 사용(1차 스캐폴드 미구현, 계획서 3.4절). */
+    /**
+     * Turn Gate. `FastGate Protocol Ver1_2020102601_01.md` 대조 확인 결과 Speed/Flap과 완전히
+     * 동일한 봉투(Header/Command/Tail, GATE_SETTING/GATE_STATUS/GATE_MOTOR 객체)를 쓴다 — 상태
+     * 데이터의 GATE TYPE 필드 값(0x03)으로만 구분될 뿐 별도 프로토콜이 아니다(2026-08-12 D4 정정,
+     * `SpeedFlapGateProtocolCodec` 참고). "1차 스캐폴드 미구현" 서술은 규격 문서 확보 전 남은
+     * 낡은 코멘트였다.
+     */
     const val TURN_GATE = 3
 
-    /** Fast Gate — 별도 프로토콜 규격 사용(1차 스캐폴드 미구현, 계획서 3.4절). */
+    /**
+     * Fast Gate. Status/제어(Pause·Slide Open·Slide Close 포함)/TimeZone/Holiday는 Speed/Flap과
+     * 동일한 `SpeedFlapGateProtocolCodec`으로 처리된다(2026-08-12 D4 정정) — 다만 모터 설정만은
+     * 전용 Object Code `FAST_GATE_MOTOR(0x50)`을 쓰는 별도 페이로드(72바이트, TURN/SLIDE 모터
+     * 포지션·RPM·보정값)라 아직 코덱이 없다(계획서 P11, 미전환).
+     */
     const val FAST_GATE = 4
 }

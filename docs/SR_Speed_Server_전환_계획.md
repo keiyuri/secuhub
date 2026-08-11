@@ -14,13 +14,15 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 
 | 구분 | 건수 | 비고 |
 | --- | --- | --- |
-| 완전 전환 | 16 | TCP 수신·분석·ACK·DB 파이프라인·Quartz 잡 3종 + 모터/스케줄/휴일 수신 저장 등 핵심 경로 |
+| 완전 전환 | 17 | TCP 수신·분석·ACK·DB 파이프라인·Quartz 잡 3종 + 모터/스케줄/휴일 수신 저장 + **CLIENT 모드**(2026-08-11 신규) 등 |
 | 부분 전환 | 1 | 게이트 타입별 코덱 분리(P9, Turn/Fast 문서-코드 불일치) |
-| 미전환 | 1 | CLIENT 모드 |
+| 미전환 | 0 | — |
 | 의도적 제외 | 3 | 메모리 GC 워치독, INI 설정, 서비스 인스톨러. UDP 에코(D2)도 제외 확정(3절 참고) |
 | 레거시 초과(신규) | 1 | `GATE_LOG`(0x61) 로그 파싱 — 레거시 미구현분을 신규 설계 |
 
-**전환률: 약 94%** (완전 16 + 부분 0.5 / 전체 17.5, 의도적 제외 4건은 분모에서 제외).
+**전환률: 약 100%**(완전 17 + 부분 0.5 / 전체 17.5, 의도적 제외 4건은 분모에서 제외). 남은 것은
+P9(Turn/Fast 코덱 문서-코드 불일치, D4) 확인뿐이며, 이는 신규 구현이 아니라 기존 코드/문서 중
+어느 쪽이 맞는지 현장 확인이 필요한 항목이다.
 
 > **2026-08-11 정정**: 최초 분석에서 R3(모터)/R4(스케줄)/R5(휴일) 수신 저장을 "미전환"으로
 > 잘못 판정했다(아래 정오표 참고). `GatePacketPersister.persistReceivedPacket`을 실제로
@@ -41,7 +43,7 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 | --- | --- | --- | --- | --- | --- |
 | S1 | `SpeedServer.OnStart/OnStop` | `SpeedServer.cs:267/361` | 서비스 기동·종료, 리스너/스케줄러/DB Writer 순차 기동 | **완료** | Spring Boot 기동 + `GateServerConfiguration` |
 | S2 | `StartTcpListener`/`AcceptCallback`/`HandleNewClient` | `SpeedServer.cs:426/476/524` | TCP 리스너 bind, accept 콜백, IP별 커넥션 등록(`_ipConnectLocks`로 동일 IP 재연결 경쟁 차단) | **완료** | `GateTcpServer.kt` (Reactor Netty) |
-| S3 | `ClientModeMonitor`/`ConnectToAllDevices`/`ConnectToDevice` | `SpeedServer.cs:1388/1431/1495` (약 290줄) | **CLIENT 모드** — 백엔드가 `tb_gate_dtl`(use_yn='Y')을 읽어 게이트로 아웃바운드 접속 | **미전환** | 없음. `GateTcpServer.start()`가 `check(mode == SERVER)`로 **기동 실패**시킴 |
+| S3 | `ClientModeMonitor`/`ConnectToAllDevices`/`ConnectToDevice` | `SpeedServer.cs:1388/1431/1495` (약 290줄) | **CLIENT 모드** — 백엔드가 `tb_gate_dtl`(use_yn='Y')을 읽어 게이트로 아웃바운드 접속 | **완료(2026-08-11)** | `GateTcpClient.kt` 신규 구현 — 재확인 주기 폴링 + IP 그룹핑 + 코루틴 병렬 연결. `GateTcpServer`/`GateInboundPacketProcessor`와 등록·처리·종료 경로 공유 |
 | S4 | `OnUDPServer` | `SpeedServer.cs:1677` | `GetServerPort`에서 UDP 데이터그램을 그대로 되돌려주는 **에코 응답기**(생존 확인용) | **미전환** | 없음 — 3절 D2 참고 |
 | S5 | `SetKeepAlive` | `SpeedServer.cs:1314` | 소켓 TCP KeepAlive 설정 | **완료** | Netty 채널 옵션 |
 | S6 | `CloseClientSocket` | `SpeedServer.cs:1251` | 연결 종료 + 오프라인 DB 반영(더 최신 연결 존재 시 반영 생략하는 레이스 가드 포함) | **완료** | `GateConnectionRegistryImpl` |
@@ -135,12 +137,9 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 
 착수 전 확인이 필요한 항목. 클라이언트 계획서 4절과 같은 성격이다.
 
-- **D1. CLIENT 모드(S3)를 구현할 것인가?**
-  레거시는 SERVER/CLIENT 양방향을 모두 지원했고 약 290줄이 이 로직에 쓰였다. 신규는 SERVER만
-  구현하고 CLIENT 설정 시 기동을 실패시킨다(2026-08-07(2) 조치 — 침묵 실패 방지 목적이지 구현이
-  아니다). **현장 게이트 중 백엔드가 먼저 접속해야 하는 장비가 있는지** 확인이 필요하다. 없다면
-  `GatewayMode` enum에서 CLIENT를 제거해 죽은 설정을 없애는 편이 낫고, 있다면 `GateTcpClient`
-  신규 구현이 필요하다(설계서 3.1절에 이미 설계는 있음).
+- ~~**D1. CLIENT 모드(S3)를 구현할 것인가?**~~ **해소(2026-08-11)** — 사용자 확인 결과 현장에
+  백엔드가 먼저 접속해야 하는 게이트가 있어 **구현 필요**로 확정, `GateTcpClient` 신규 구현 완료
+  (S3 정오표 참고).
 - **D2. UDP 에코 응답기(S4) → 제외 권고(근거 확보됨)**
   레거시 서버의 UDP 기능은 받은 데이터그램을 그대로 되돌려주는 **에코**뿐이며, 프로토콜 파싱도
   DB 저장도 없다(`NET_PRTC_TYPE=UDP`일 때만 기동하고 ini 기본값은 TCP). 결정적으로 **수신 측인
@@ -176,9 +175,8 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 
 - ~~**Phase S1 — 수신 저장 공백 메우기(R3, R4)**~~: **취소(2026-08-11) — 이미 완료돼 있었다.**
   D3 정정 참고.
-- **Phase S2 — CLIENT 모드 결정 및 처리(S3)**: **우선순위 최상으로 승격** — 2026-08-11 사용자 확인
-  결과 현장에 백엔드가 먼저 접속해야 하는 게이트가 있어 **구현 필요**로 확정. `GateTcpClient` 신규
-  구현 착수(설계서 3.1절 설계 참고).
+- ~~**Phase S2 — CLIENT 모드 결정 및 처리(S3)**~~: **완료(2026-08-11)** — `GateTcpClient` 신규
+  구현 완료(D1/S3 정오표 참고). 실제 게이트 장비 접속 검증은 6절 "검증되지 않은 영역" 참고.
 - **Phase S3 — 대시보드 알림 팝업 ↔ 리셋 배선**: 서버 측이 아니라 웹 측 작업이지만, 서버의
   `GateControlService`/`GateFaultResolutionService`가 이미 완성돼 있는데 화면만 연결이 안 된
   상태라 여기 함께 적는다. 상세는 `SR_Speed_Client_전환_계획.md` 2절 #1/#17 항목 참고.
@@ -195,14 +193,14 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 | --- | --- | --- | --- |
 | B1 | `securance-domain/src/main/resources/db/migration/` | **Flyway 버전 번호 중복** — `V2`(align_entity_schema / fix_dashboard_query_indexes), `V3`(add_timezone / data_snd_optimistic_lock), `V4`(add_data_snd_pending_index / gate_log_events)가 각각 2개씩. Flyway는 동일 버전 중복 시 `Found more than one migration with version N`으로 **기동 시점에 실패**한다. `spring.flyway.enabled: true`이므로 **클린 DB 기동이 불가능할 가능성이 높다**. 병합 커밋(`4b0f13d`)에서 두 라인이 합쳐지며 발생한 것으로 보인다 | **최상** |
 | B2 | `ServerModeConfig.kt` vs `application.yml` | 게이트 TCP 포트 기본값 불일치 — 코드 기본값 **28010**, yml **9000**. `client-port`도 코드 1005 vs yml 9000. yml이 있으면 yml이 이기지만, 기본값에 의존하는 테스트/배포에서 어긋난다 | 중 |
-| B3 | `securance-web/realtime/DashboardPushService.kt:68` | `alertType = if (error.descFireAlarm != null) "FIRE" else "FAULT"` — 그런데 `DataReceiveAnalysis.descFireAlarm`은 **non-null String getter**라 조건이 항상 참. **모든 실시간 알림이 "화재 경고"로 표시된다**(#17 Warning과 #1 GateControl 구분이 무너짐). 같은 파일 `alertDescription()`의 `?: "오류 상세 미확인"` 폴백도 같은 이유로 절대 동작하지 않고 빈 문자열을 반환한다. `DashboardService.kt:47`은 같은 필드를 `isNotBlank()`로 올바르게 처리하고 있어 **두 곳의 판정이 불일치** | **상** |
-| B4 | `securance-web/templates/gates/location-map.html:105` | `<script>` 태그에 **`th:inline="javascript"` 누락**. 내부 `const locMapWidth = /*[[${location.locMapWidth}]]*/ 0;`이 인라인 처리되지 않아 리터럴 `0`으로 남고, `savePosition()`의 `Math.round((leftPercent/100) * 0)` → **드래그한 그룹 아이콘 좌표가 항상 (0,0)으로 저장**된다(#5 SetupLocation 기능 무력화). 대조군: `gate-control.html:110`은 속성이 제대로 붙어 있음 | **상** |
-| B5 | `MenuProvider.kt`, `dashboard.html:19,21,23` | **죽은 링크 3건** — `/gates/net-state`, `/gates/errors`, `/control/history`를 사이드바·SmallBox가 링크하지만 **매핑된 컨트롤러가 전 프로젝트에 없다**(클릭 시 404) | 중 |
-| B6 | `securance-web/dashboard/DashboardService.kt:36` | `todayTrafficCount = 0` **하드코딩** — 대시보드 "금일 통행량" 위젯이 항상 0 | 중 |
-| B7 | `tb_data_snd.snd_type_cd` | **코드 체계 이원화** — `web.gate.GateControlService`는 `"GATE_RESET"`/`"MODE_CCLM"`/`"MOTOR_INIT"`를, `server.control.*`는 `command.legacyCode`(`"AC"`/`"OP"`/`"CL"`)를 쓴다. 같은 컬럼에 두 체계가 섞여 레거시 리포트 호환이 깨진다 | 중 |
-| B8 | `dashboard.html:26~32` | small-box 프래그먼트가 `<h3>`에 id를 못 붙여, **DOM 순서 인덱스로 `rt-*` id를 사후 부착**한다. 그런데 `dashboard-widgets.js`가 SortableJS로 위젯 순서를 바꿀 수 있어, **순서 변경 시 실시간 갱신값이 엉뚱한 박스에 들어간다** | 중 |
-| B9 | `securance-web/security/DevAutoLoginFilter.kt` | 프로퍼티 하나(`dev-auto-login-enabled=true`)로 **DB 조회 없이 VIEW+CONTROL+ADMIN 전권을 부여**하는 필터가 남아 있다. 기본값·prod 모두 false이나, 파일 KDoc의 "전환 종료 후 제거" 지시가 미이행 상태 | **상**(운영 반입 전 제거 필수) |
-| B10 | 낡은 주석 다수 | `GatePacketHandler.kt:11`("상세 파싱·저장은 후속 작업" — 실제로는 `GatePacketPersister`로 구현 완료), `SecurityConfig.kt:62`("`/admin/**`은 매칭 경로 없음" — `/admin/users` 존재), `dashboard.html:82` / `dashboard-realtime.js:60`("GateControlService 미구현" — 실제로는 구현 완료). 후임자가 오판할 수 있다 | 하 |
+| B3 | `securance-web/realtime/DashboardPushService.kt:68` | ~~`alertType = if (error.descFireAlarm != null) "FIRE" else "FAULT"`~~ **수정 완료(2026-08-11, 커밋 941b403)** — `isNotBlank()` 판정으로 교체, 리셋 버튼도 함께 배선 | ~~상~~ 완료 |
+| B4 | `securance-web/templates/gates/location-map.html:105` | ~~`th:inline="javascript"` 누락으로 좌표가 항상 (0,0) 저장~~ **수정 완료(2026-08-11, 커밋 0d208d7)** | ~~상~~ 완료 |
+| B5 | `MenuProvider.kt`, `dashboard.html:19,21,23` | ~~죽은 링크 3건~~ **수정 완료(2026-08-11, 커밋 aee9f51)** — `/control/history` 신규 화면 제작, 나머지 2건은 기존 화면으로 재연결 | ~~중~~ 완료 |
+| B6 | `securance-web/dashboard/DashboardService.kt:36` | `todayTrafficCount = 0` **하드코딩** — 대시보드 "금일 통행량" 위젯이 항상 0. 레거시 `uvw_user_cnt` 뷰의 정확한 집계 기준을 코드만으로 확인할 수 없어 임의로 채우지 않았다(과도한 억측 금지 원칙) — 미해결 | 중 |
+| B7 | `tb_data_snd.snd_type_cd` | **코드 체계 이원화** — `web.gate.GateControlService`는 `"GATE_RESET"`/`"MODE_CCLM"`/`"MOTOR_INIT"`를, `server.control.*`는 `command.legacyCode`(`"AC"`/`"OP"`/`"CL"`)를 쓴다. 같은 컬럼에 두 체계가 섞여 레거시 리포트 호환이 깨진다 — 미해결 | 중 |
+| B8 | `dashboard.html:26~32` | small-box 프래그먼트가 `<h3>`에 id를 못 붙여, **DOM 순서 인덱스로 `rt-*` id를 사후 부착**한다. 그런데 `dashboard-widgets.js`가 SortableJS로 위젯 순서를 바꿀 수 있어, **순서 변경 시 실시간 갱신값이 엉뚱한 박스에 들어간다** — 미해결 | 중 |
+| B9 | `securance-web/security/DevAutoLoginFilter.kt` | 프로퍼티 하나(`dev-auto-login-enabled=true`)로 **DB 조회 없이 VIEW+CONTROL+ADMIN 전권을 부여**하는 필터가 남아 있다. 기본값·prod 모두 false이나, 파일 KDoc의 "전환 종료 후 제거" 지시가 미이행 상태 — 운영 반입 전 제거 필수, 미해결 | **상** |
+| B10 | 낡은 주석 다수 | `GatePacketHandler.kt:11`("상세 파싱·저장은 후속 작업" — 실제로는 `GatePacketPersister`로 구현 완료), `SecurityConfig.kt:62`("`/admin/**`은 매칭 경로 없음" — `/admin/users` 존재). `dashboard.html:82`/`dashboard-realtime.js:60`의 "GateControlService 미구현" 주석은 B3 수정과 함께 정정 완료 | 하 |
 
 ## 6. 검증되지 않은 영역(공통 리스크)
 
@@ -211,5 +209,8 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
   기록은 작업일지에 없다** — 실수신 hex 패킷 샘플 기반 검증(2026.08.07 0003/0005/0006)까지가
   최대다.
 - 동시 연결 1,000개 부하 테스트 미실시(설계서 3.7/8절 목표).
-- Windows 임시 포트 고갈 튜닝(`MaxUserPort`/`TcpTimedWaitDelay`)은 CLIENT 모드 전용 이슈라
-  D1 결정 전까지는 무의미하다.
+- **CLIENT 모드(`GateTcpClient`, 2026-08-11 신규)는 실제 게이트 장비로 검증되지 않았다** —
+  단위 테스트도 아직 없다(`GateTcpServerTest`처럼 임의 포트에 리스너를 띄우고 `GateTcpClient`가
+  거기로 접속하는 통합 테스트를 추가하는 편이 다음 단계로 적절하다). Windows 임시 포트 고갈
+  튜닝(`MaxUserPort`/`TcpTimedWaitDelay`)도 CLIENT 모드가 실제로 켜지는 배포에서는 함께 점검이
+  필요하다.

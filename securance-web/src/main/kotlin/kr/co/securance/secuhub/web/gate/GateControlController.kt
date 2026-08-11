@@ -10,6 +10,7 @@ import kr.co.securance.secuhub.domain.entity.GateDetail
 import kr.co.securance.secuhub.domain.repository.DataSendRepository
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.protocol.GateControlCommandBuilder
+import kr.co.securance.secuhub.protocol.SpeedGateControlCommand
 import kr.co.securance.secuhub.web.menu.MenuProvider
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -52,14 +53,23 @@ class GateControlService(
      * `SetControlCmd(boardType, ip, laneNo, "AC", "", "")`로 리셋 명령을 만드는데, 이는
      * `GenerateCmdBody`의 controlType "AC" 분기(offset 20에 0x01, System Reset)만 다를 뿐
      * #12 모드변경과 완전히 동일한 패킷 조립 경로다 — 별도 빌더 없이 [buildModeChangeCommand]를
-     * "AC"로 호출하는 것만으로 바이트 단위 동일 패킷이 나온다. 타입 코드만 레거시와 동일하게
-     * "GATE_RESET"으로 구분한다.
+     * "AC"로 호출하는 것만으로 바이트 단위 동일 패킷이 나온다.
+     *
+     * `snd_type_cd`도 반드시 [SpeedGateControlCommand.RESET_SYSTEM]의 `legacyCode`("AC")와
+     * 동일하게 저장해야 한다 — `GateControlDispatcher.resolveFaultsIfReset`가 ACK 확인 후
+     * `SpeedGateControlCommand.ofLegacyCode(sndTypeCd)`로 리셋 여부를 판별해 `tb_data_rcv_anal`의
+     * 장애를 자동 해제하기 때문이다. 이전에는 "GATE_RESET"이라는 임의 문자열을 저장해 이 조회가
+     * 항상 null을 반환했고, 그 결과 이 화면(#3 GateReset)으로 리셋해도 장비 ACK 후 자동 장애
+     * 해제가 전혀 동작하지 않았다(2026-08-12 B7 수정 — 물리 전송 자체는 `sndRaw`만 쓰므로
+     * 영향받지 않았지만, 자동 해제 기능만 조용히 죽어 있었다).
      */
     @Transactional
     fun sendReset(dtlId: Long, requestedBy: String): Boolean {
         val detail = findDetailOrNull(dtlId) ?: return false
         val packet = GateControlCommandBuilder.buildModeChangeCommand(detail.dtlLaneNo, "AC")
-        enqueue(detail, packet, "GATE_RESET", requestedBy)
+        // sndDataTp="RESET_GATE"는 QueuedGateControlService.legacyDataTypeOf(GateFaultCategory.ALL)와
+        // 동일한 값이다 — 같은 "시스템 전체 리셋" 동작이므로 두 진입 경로의 이력 표기를 맞춘다.
+        enqueue(detail, packet, SpeedGateControlCommand.RESET_SYSTEM.legacyCode, requestedBy, dataTp = "RESET_GATE")
         return true
     }
 
@@ -90,7 +100,7 @@ class GateControlService(
         return true
     }
 
-    private fun enqueue(detail: GateDetail, packet: ByteArray, typeCd: String, requestedBy: String) {
+    private fun enqueue(detail: GateDetail, packet: ByteArray, typeCd: String, requestedBy: String, dataTp: String = "") {
         dataSendRepository.save(
             DataSend(
                 sndDate = LocalDateTime.now().format(SND_DATE_FORMAT),
@@ -98,6 +108,7 @@ class GateControlService(
                 dtlLaneNo = detail.dtlLaneNo,
                 sndUser = requestedBy,
                 sndTypeCd = typeCd,
+                sndDataTp = dataTp,
                 sndRaw = HexCodec.toHex(packet),
             ),
         )

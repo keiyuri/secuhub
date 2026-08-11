@@ -57,7 +57,12 @@ class GateControlServiceTest {
     }
 
     @Test
-    fun `sendReset은 GATE_RESET 타입으로 controlType AC 패킷을 적재한다`() {
+    fun `sendReset은 AC 타입(SpeedGateControlCommand legacyCode)으로 controlType AC 패킷을 적재한다`() {
+        // 2026-08-12(B7): snd_type_cd는 GateControlDispatcher.resolveFaultsIfReset이
+        // SpeedGateControlCommand.ofLegacyCode로 되읽으므로 "AC"여야 한다("GATE_RESET"이면
+        // 리셋 인식에 실패해 ACK 후 자동 장애 해제가 동작하지 않는다). 레거시 문자열
+        // "GATE_RESET"은 snd_data_tp 쪽으로 옮겨(QueuedGateControlService의 RESET_GATE와 동일 값)
+        // 리포트 호환을 유지한다.
         val detailRepository = mock(GateDetailRepository::class.java)
         val dataSendRepository = mock(DataSendRepository::class.java)
         val service = GateControlService(detailRepository, dataSendRepository)
@@ -68,7 +73,8 @@ class GateControlServiceTest {
 
         val captor = ArgumentCaptor.forClass(kr.co.securance.secuhub.domain.entity.DataSend::class.java)
         verify(dataSendRepository).save(captor.capture())
-        assertEquals("GATE_RESET", captor.value.sndTypeCd)
+        assertEquals("AC", captor.value.sndTypeCd)
+        assertEquals("RESET_GATE", captor.value.sndDataTp)
         assertEquals(d.dtlIp, captor.value.dtlIp)
         assertEquals(d.dtlLaneNo, captor.value.dtlLaneNo)
         assertEquals("admin", captor.value.sndUser)

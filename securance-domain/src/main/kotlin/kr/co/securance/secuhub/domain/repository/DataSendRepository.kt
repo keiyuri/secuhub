@@ -3,6 +3,7 @@ package kr.co.securance.secuhub.domain.repository
 import kr.co.securance.secuhub.domain.entity.DataSend
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
@@ -10,9 +11,10 @@ import org.springframework.transaction.annotation.Transactional
 
 /**
  * `tb_data_snd` 리포지토리. `SendControlJob`(계획서 3.6/5.5절, QUEUED 경로)이
- * 미전송/미확인 명령을 폴링할 때 사용한다.
+ * 미전송/미확인 명령을 폴링할 때 사용하고, [JpaSpecificationExecutor]는 `/control/history`
+ * 조회 화면(2026-08-11, B5 죽은 링크 해소)이 동적 필터 조합에 사용한다.
  */
-interface DataSendRepository : JpaRepository<DataSend, Long> {
+interface DataSendRepository : JpaRepository<DataSend, Long>, JpaSpecificationExecutor<DataSend> {
 
     /**
      * 전송 대기(`snd_yn='N' AND chk_yn='N'`) 명령을 오래된 순으로 읽는다.

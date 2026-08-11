@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<!--/* 제어 명령 이력 조회 — tb_data_snd 읽기 전용 조회(2026-08-11, B5 죽은 링크 해소). */-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>제어 명령 이력</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="card card-outline card-secondary mb-3">
+    <div class="card-body py-2">
+      <form method="get" th:action="@{/control/history}" class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-0">게이트 IP</label>
+          <input type="text" name="dtlIp" class="form-control form-control-sm" th:value="${dtlIp}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">명령 코드</label>
+          <input type="text" name="sndTypeCd" class="form-control form-control-sm" th:value="${sndTypeCd}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">전송</label>
+          <select name="sndYn" class="form-select form-select-sm">
+            <option value="">전체</option>
+            <option value="Y" th:selected="${sndYn == 'Y'}">전송됨</option>
+            <option value="N" th:selected="${sndYn == 'N'}">대기</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">ACK</label>
+          <select name="chkYn" class="form-select form-select-sm">
+            <option value="">전체</option>
+            <option value="Y" th:selected="${chkYn == 'Y'}">확인됨</option>
+            <option value="N" th:selected="${chkYn == 'N'}">대기</option>
+            <option value="F" th:selected="${chkYn == 'F'}">실패</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">시작일</label>
+          <input type="date" name="fromDate" class="form-control form-control-sm" th:value="${fromDate}"/>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0">종료일</label>
+          <input type="date" name="toDate" class="form-control form-control-sm" th:value="${toDate}"/>
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-primary">조회</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card card-outline card-primary">
+    <div class="card-header">
+      <h3 class="card-title">
+        조회 결과
+        <span class="badge text-bg-secondary" th:text="${result.totalElements} + '건'">0건</span>
+      </h3>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0">
+        <thead>
+          <tr>
+            <th>전송일시</th><th>IP</th><th>레인</th><th>명령</th><th>전송</th><th>ACK</th>
+            <th>요청자</th><th>전송서버</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:if="${result.empty}">
+            <td colspan="8" class="text-center text-muted">조회된 이력이 없습니다.</td>
+          </tr>
+          <tr th:each="row : ${result.content}">
+            <td th:text="${row.sndDate}">일시</td>
+            <td th:text="${row.dtlIp}">IP</td>
+            <td th:text="${row.dtlLaneNo}">0</td>
+            <td th:text="${row.sndTypeCd}">명령</td>
+            <td th:text="${row.sndYn}">N</td>
+            <td th:text="${row.chkYn}">N</td>
+            <td th:text="${row.sndUser}">-</td>
+            <td th:text="${row.sndServer}">-</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer" th:if="${result.totalPages > 1}">
+      <nav>
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" th:each="p : ${#numbers.sequence(0, result.totalPages - 1)}"
+              th:classappend="${p == result.number} ? 'active'">
+            <a class="page-link"
+               th:href="@{/control/history(dtlIp=${dtlIp},sndTypeCd=${sndTypeCd},sndYn=${sndYn},chkYn=${chkYn},fromDate=${fromDate},toDate=${toDate},page=${p})}"
+               th:text="${p + 1}">1</a>
+          </li>
+        </ul>
+      </nav>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

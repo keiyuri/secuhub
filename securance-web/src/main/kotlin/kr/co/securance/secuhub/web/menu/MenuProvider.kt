@@ -15,7 +15,10 @@ class MenuProvider {
                 MenuNode.Item("위치", "/gates/locations"),
                 MenuNode.Item("게이트그룹", "/gates/groups"),
                 MenuNode.Item("게이트 상세", "/gates/details"),
-                MenuNode.Item("연결 상태", "/gates/net-state"),
+                // 버그 수정(2026-08-11, B5): 전용 컨트롤러 없이 /gates/net-state로 링크돼 있어 404였다.
+                // 온라인/오프라인 연결 상태를 실제로 보여주는 화면은 /gates/reset(GateResetGridService가
+                // tb_net_state를 레인별 online 컬럼으로 노출)이라 그쪽으로 재연결한다.
+                MenuNode.Item("연결 상태", "/gates/reset"),
                 MenuNode.Item("게이트 제어", "/gates/control"),
                 MenuNode.Item("일괄 리셋", "/gates/reset"),
                 MenuNode.Item("스케줄/타임존", "/schedule"),

@@ -65,8 +65,13 @@ class DashboardPushService(
             newErrors.forEach { error ->
                 val payload = mapOf(
                     "type" to "ALERT",
-                    "alertType" to if (error.descFireAlarm != null) "FIRE" else "FAULT",
+                    // 버그 수정(2026-08-11, B2): descFireAlarm 등은 DB 컬럼 기본값이 빈 문자열인
+                    // non-null String이라 `!= null`은 항상 참이었다 — 실제 내용 유무는 isNotBlank()로
+                    // 판정해야 한다. 이 오류로 모터 장애까지 전부 "화재 경고"로 표시되고 있었다.
+                    "alertType" to if (error.descFireAlarm.isNotBlank()) "FIRE" else "FAULT",
                     "dtlIp" to error.dtlIp,
+                    // 리셋 버튼(#1/#17 팝업)이 /api/gate-control/reset 호출에 필요로 한다(2026-08-11 B3).
+                    "dtlLaneNo" to error.dtlLaneNo,
                     "description" to alertDescription(error),
                     "analDate" to error.analDate,
                 )
@@ -85,8 +90,10 @@ class DashboardPushService(
     }
 
     private fun alertDescription(error: DataReceiveAnalysis): String =
-        listOfNotNull(error.descFireAlarm, error.descMainMotorError, error.descSlaveMotorError)
-            .firstOrNull() ?: "오류 상세 미확인"
+        // 위와 동일한 이유로 listOfNotNull은 걸러내는 게 없었다(전부 non-null) — 실제 값이 채워진
+        // 항목만 고르도록 isNotBlank()로 필터링한다.
+        listOf(error.descFireAlarm, error.descMainMotorError, error.descSlaveMotorError)
+            .firstOrNull { it.isNotBlank() } ?: "오류 상세 미확인"
 
     /** [kr.co.securance.secuhub.web.dashboard.DashboardService]/[DataReceiveAnalysisRepository.findRecentUnresolvedErrors]
      * 의 미해결 오류 조건과 동일(errType=3, hasErrorEvent=true, resolveYn='N', analType IN ('PLM','STA')) + analId 하한.

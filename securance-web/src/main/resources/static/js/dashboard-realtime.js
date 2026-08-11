@@ -57,8 +57,11 @@
     }).join('');
   }
 
-  // #1 SR_F_GateControl(장애 알림 팝업) / #17 SR_F_Warning(화재 경고 팝업) — 실제 리셋 실행은
-  // GateControlService 구현 전까지 제공하지 않는다(계획서 3절, /gates/reset과 동일한 방침).
+  // #1 SR_F_GateControl(장애 알림 팝업) / #17 SR_F_Warning(화재 경고 팝업) — 리셋 실행은
+  // GateControlApiController(/api/gate-control/reset, gate-control.html과 동일한 엔드포인트)를
+  // 그대로 호출한다(2026-08-11 B3, 계획서 3절 C4). 화재 경보는 시스템 리셋(RESET_SYSTEM),
+  // 그 외(모터 장애 등)는 모터 리셋(RESET_MOTOR)으로 매핑한다 — 레거시 SR_F_Warning/GateControl의
+  // 화재↔시스템 리셋, 모터 장애↔모터 리셋 대응과 동일하다.
   function showAlertModal(payload) {
     var isFire = payload.alertType === 'FIRE';
     var modalEl = document.getElementById('rt-alert-modal');
@@ -69,9 +72,54 @@
     modalEl.querySelector('.rt-alert-desc').textContent = payload.description || '-';
     modalEl.querySelector('.rt-alert-date').textContent = payload.analDate || '-';
 
+    var resultEl = modalEl.querySelector('.rt-alert-result');
+    if (resultEl) { resultEl.textContent = ''; resultEl.className = 'rt-alert-result small mt-2'; }
+
+    var resetBtn = modalEl.querySelector('.rt-alert-reset');
+    if (resetBtn) {
+      resetBtn.disabled = false;
+      resetBtn.textContent = '리셋 실행';
+      resetBtn.onclick = function () { sendResetCommand(payload, resetBtn, resultEl); };
+    }
+
     if (window.bootstrap && window.bootstrap.Modal) {
       window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
+  }
+
+  function sendResetCommand(payload, resetBtn, resultEl) {
+    if (!payload.dtlIp || payload.dtlLaneNo === undefined || payload.dtlLaneNo === null) {
+      if (resultEl) { resultEl.className = 'rt-alert-result small mt-2 text-danger'; resultEl.textContent = '리셋 대상 정보가 없습니다.'; }
+      return;
+    }
+    var csrfToken = document.querySelector('meta[name="_csrf"]');
+    var csrfHeader = document.querySelector('meta[name="_csrf_header"]');
+    var command = payload.alertType === 'FIRE' ? 'RESET_SYSTEM' : 'RESET_MOTOR';
+
+    var headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    if (csrfToken && csrfHeader) headers[csrfHeader.content] = csrfToken.content;
+
+    var params = new URLSearchParams({ dtlIp: payload.dtlIp, dtlLaneNo: payload.dtlLaneNo, command: command });
+
+    resetBtn.disabled = true;
+    resetBtn.textContent = '전송 중...';
+    if (resultEl) { resultEl.className = 'rt-alert-result small mt-2 text-muted'; resultEl.textContent = '리셋 명령 전송 중...'; }
+
+    fetch('/api/gate-control/reset', { method: 'POST', headers: headers, body: params.toString() })
+      .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; }); })
+      .then(function (r) {
+        if (resultEl) {
+          resultEl.className = 'rt-alert-result small mt-2 ' + (r.ok ? 'text-success' : 'text-danger');
+          resultEl.textContent = '[' + r.status + '] ' + (r.body.message || '');
+        }
+        resetBtn.disabled = false;
+        resetBtn.textContent = '리셋 실행';
+      })
+      .catch(function (err) {
+        if (resultEl) { resultEl.className = 'rt-alert-result small mt-2 text-danger'; resultEl.textContent = '요청 실패: ' + err; }
+        resetBtn.disabled = false;
+        resetBtn.textContent = '리셋 실행';
+      });
   }
 
   function escapeHtml(value) {

@@ -79,8 +79,9 @@
     </div>
   </div>
 
-  <!-- #1 GateControl / #17 Warning 팝업. 리셋 실행 버튼은 /gates/reset과 동일한 이유로 아직 없다
-       (GateControlService 미구현, dashboard-realtime.js 주석 참고). -->
+  <!-- #1 GateControl(장애 알림 팝업) / #17 Warning(화재 경고 팝업). 리셋 실행 버튼은
+       GateControlApiController(/api/gate-control/reset)가 구현된 뒤부터 여기서도 호출한다
+       (2026-08-11 B3 — 백엔드는 완성돼 있었는데 이 팝업만 배선이 안 돼 있었다). -->
   <div class="modal fade" id="rt-alert-modal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -94,8 +95,12 @@
             <dt class="col-4">내용</dt><dd class="col-8 rt-alert-desc">-</dd>
             <dt class="col-4">발생일시</dt><dd class="col-8 rt-alert-date">-</dd>
           </dl>
+          <div class="rt-alert-result small mt-2"></div>
         </div>
         <div class="modal-footer">
+          <button type="button" class="btn btn-danger rt-alert-reset">
+            <i class="bi bi-arrow-clockwise"></i> 리셋 실행
+          </button>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">확인</button>
         </div>
       </div>

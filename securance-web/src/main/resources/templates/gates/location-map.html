@@ -79,9 +79,12 @@
 
 </div>
 
-<script th:if="${location.locMap != null}">
+<script th:if="${location.locMap != null}" th:inline="javascript">
   // #5 SetupLocation 그룹 아이콘 드래그 배치 — 레거시 AddGroupIconToMap의 scaleW/scaleH 환산과
   // 동일한 원리로, 화면(퍼센트) 좌표를 배치도 원본 픽셀 좌표로 변환해 서버에 저장한다.
+  // 버그 수정(2026-08-11, B4): th:inline="javascript"가 빠져 있어 아래 인라인 표현식이 치환되지
+  // 않고 리터럴 "0"으로 남아 있었다 — locMapWidth/Height가 항상 0이 되어 좌표가 (0,0)으로만
+  // 저장되던 결함(대조군 gate-control.html:106에는 이 속성이 붙어 있었음).
   (function () {
     const container = document.getElementById('mapContainer');
     const locMapWidth = /*[[${location.locMapWidth}]]*/ 0;

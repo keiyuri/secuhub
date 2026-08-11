@@ -1,12 +1,14 @@
 -- ============================================================================
--- V4 — tb_data_rcv_log 신규 (3차 스프린트 "0x61 로그 패킷" 구조화 파싱)
+-- V10 — tb_data_rcv_log 신규 (3차 스프린트 "0x61 로그 패킷" 구조화 파싱)
+-- (원래 V4로 작성됐으나 기존 V4__add_data_snd_pending_index.sql과 버전 번호가 충돌해
+--  Flyway 적용 순서를 그대로 유지한 채 V10로 재번호했다. 2026-08-11 B1 이슈 수정.)
 --
 -- 레거시 TB_DATA_RCV_LOG(SR_F_ViewLog가 조회하던 원본 테이블)에 대응한다. SR_F_ViewLog 화면
 -- 자체는 이미 tb_data_rcv_anal 재사용으로 완료됐지만(docs/SR_Speed_Client_전환_계획.md 4절 9번),
 -- 원본 0x61 로그 엔트리(36바이트 고정 구조, SpeedGate_Log_protocol_20260728_01.md) 필드는 그
 -- 방식으로 재현할 수 없어 별도 테이블로 신규 적재한다(GatePacketPersister.enqueueLogInsert).
 --
--- 숫자 컬럼을 전부 INT로 두는 이유: V2에서 겪은 TINYINT vs Hibernate 매핑 불일치(Kotlin Int ↔
+-- 숫자 컬럼을 전부 INT로 두는 이유: V8에서 겪은 TINYINT vs Hibernate 매핑 불일치(Kotlin Int ↔
 -- 스키마 검증 실패)를 이번엔 처음부터 피하기 위함이다.
 -- ============================================================================
 

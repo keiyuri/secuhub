@@ -14,13 +14,22 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 
 | 구분 | 건수 | 비고 |
 | --- | --- | --- |
-| 완전 전환 | 13 | TCP 수신·분석·ACK·DB 파이프라인·Quartz 잡 3종 등 핵심 경로 |
-| 부분 전환 | 1 | 수신 패킷 처리(오브젝트 코드 5종 중 2종만 저장) |
-| 미전환 | 3 | CLIENT 모드, 모터/스케줄/휴일 수신 저장, UDP 에코 |
-| 의도적 제외 | 3 | 메모리 GC 워치독, INI 설정, 서비스 인스톨러 |
+| 완전 전환 | 16 | TCP 수신·분석·ACK·DB 파이프라인·Quartz 잡 3종 + 모터/스케줄/휴일 수신 저장 등 핵심 경로 |
+| 부분 전환 | 1 | 게이트 타입별 코덱 분리(P9, Turn/Fast 문서-코드 불일치) |
+| 미전환 | 1 | CLIENT 모드 |
+| 의도적 제외 | 3 | 메모리 GC 워치독, INI 설정, 서비스 인스톨러. UDP 에코(D2)도 제외 확정(3절 참고) |
 | 레거시 초과(신규) | 1 | `GATE_LOG`(0x61) 로그 파싱 — 레거시 미구현분을 신규 설계 |
 
-**전환률: 약 72%** (완전 13 + 부분 0.5 / 전체 19, 의도적 제외 3건은 분모에서 제외).
+**전환률: 약 94%** (완전 16 + 부분 0.5 / 전체 17.5, 의도적 제외 4건은 분모에서 제외).
+
+> **2026-08-11 정정**: 최초 분석에서 R3(모터)/R4(스케줄)/R5(휴일) 수신 저장을 "미전환"으로
+> 잘못 판정했다(아래 정오표 참고). `GatePacketPersister.persistReceivedPacket`을 실제로
+> 읽지 않고 표면적인 "레거시는 전용 테이블 3개를 쓰는데 신규는 안 보인다"는 인상만으로
+> 결론 내린 것이 원인이다. 실제로는 `DefaultGatePacketHandler`의 `else` 분기(모든 비상태·
+> 비로그 패킷)가 이미 세 오브젝트 코드 전부를 `tb_data_rcv`에 적재하고 있었고, 이 코드는
+> 2차 스프린트 커밋(`0d28faf`, 이 문서 최초 작성보다 먼저 병합됨)에 이미 존재했다. 정정
+> 전 문서를 근거로 사용자가 "모터+스케줄 구현" 결정을 내렸으나, 실제로는 추가 구현이
+> 필요 없어 그 결정을 취소하고 문서만 정정한다.
 
 ## 2. 컴포넌트 인벤토리 및 매핑
 
@@ -64,9 +73,9 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 | --- | --- | --- | --- | --- |
 | R1 | `0x4D` Gate Status | `InsertReceiveStatusData` → `tb_data_rcv`/`tb_data_rcv_anal`/`tb_net_state`/`tb_opr_status` | **완료** | `DefaultGatePacketHandler` + `GatePacketPersister` + `GateStatusAnalyzer` |
 | R2 | `0x4C` Setting Data | 설정 응답 수신 · 제어 명령 ACK | **완료** | `DefaultGatePacketHandler` (ACK 큐 소비는 `0x4C`에서만) |
-| R3 | `0x4B` Motor Data | `InsertReceiveMotorData` (`ClsMariaDB.cs:568`) → **`TB_DATA_RCV_MOTOR`**(`motor_header`/`motor_data`/`motor_tail` 분리 저장) | **미전환** | **없음** — 분기 자체가 존재하지 않아 패킷이 조용히 버려진다. 대응 테이블도 신규 스키마에 없음 |
-| R4 | `0x54` Schedule/TimeZone | `InsertReceiveScheduleData` (`ClsMariaDB.cs:573`) → `TB_DATA_RCV` | **미전환** | **없음** — 상동 |
-| R5 | `0x48` Holiday | `InsertReceiveHolidayData` (`ClsMariaDB.cs:578`) → `TB_DATA_RCV` | **미전환** | **없음** — 클라이언트 #14 Holiday 제외 결정과 연동(3절 D3) |
+| R3 | `0x4B` Motor Data | `InsertReceiveMotorData` (`ClsMariaDB.cs:568`) → **`TB_DATA_RCV_MOTOR`**(`motor_header`/`motor_data`/`motor_tail` 분리 저장) | **완료(2026-08-11 정정)** | `GatePacketPersister.persistReceivedPacket`의 `else` 분기(`GATE_MOTOR`) → `tb_data_rcv`에 header/data/tail 원시 적재. 레거시의 전용 `TB_DATA_RCV_MOTOR` 테이블 대신 R1과 같은 `tb_data_rcv`로 통합(의도적 차이, 아래 정오표 참고) |
+| R4 | `0x54` Schedule/TimeZone | `InsertReceiveScheduleData` (`ClsMariaDB.cs:573`) → `TB_DATA_RCV` | **완료(2026-08-11 정정)** | 〃(`TIME_ZONE` 분기) — 레거시도 이 오브젝트 코드는 애초에 `TB_DATA_RCV`를 썼으므로 테이블 자체는 레거시와 동일 |
+| R5 | `0x48` Holiday | `InsertReceiveHolidayData` (`ClsMariaDB.cs:578`) → `TB_DATA_RCV` | **완료(2026-08-11 정정)** | 〃(`HOLIDAY` 분기) — 클라이언트 #14 Holiday 제외 결정(화면 자체가 스텁)과 무관하게 수신 저장은 이미 구현되어 있었다 |
 | R6 | `0x61` Gate Log | 레거시는 **로그를 별도 Object Code로 받지 않았다** — 상태 패킷 꼬리에 붙은 36바이트 블록을 header[23,24] 개수만큼 잘라 SP `usp_rcv_log_anlz`로 넘기는 방식이었고, 그마저 완결되지 않았다 | **완료(신규 설계)** | `SpeedGateLogCodec` + `LogEventCodec` + `GateLogService` — 임베디드/독립 두 형태 모두 처리, **레거시를 초과 달성** |
 | R7 | `0x4E` Gate Data None, `0x50` Fast Motor | **레거시도 미매핑**(`default` 분기로 빠져 Warn 로그만) | **해당 없음** | 레거시가 처리하지 않았으므로 전환 누락이 아니다 |
 
@@ -142,12 +151,14 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
   UDP를 쏠 수 없어 구조적으로 이식 불가하며, 서버 경유 전송(`tb_data_snd` 큐 / DIRECT)으로 이미
   대체됐다. **결론: 전환 대상에서 제외한다.** 남은 확인 사항은 게이트 장비 자체가 UDP 에코를
   생존 확인에 쓰는지 여부 하나뿐이다.
-- **D3. 모터/스케줄/휴일 수신 저장(R3~R5)을 구현할 것인가?**
-  가장 실질적인 기능 공백이다. 세 가지 선택지: (1) 3종 모두 구현해 레거시 동등성 확보,
-  (2) 모터(R3)·스케줄(R4)만 구현하고 휴일(R5)은 클라이언트 #14 제외 결정에 맞춰 함께 제외,
-  (3) 전부 보류. **권장은 (2)** — 모터/스케줄은 웹에 이미 송신 화면(#13/#6)이 있어 "보낸 값이
-  장비에 실제로 반영됐는지" 확인할 수단이 없는 것이 운영상 결함이 되지만, 휴일은 레거시 클라이언트
-  자체가 미완성 스텁이라 되받을 화면조차 없다.
+- ~~**D3. 모터/스케줄/휴일 수신 저장(R3~R5)을 구현할 것인가?**~~ **해소(2026-08-11) — 이미 구현되어
+  있었다.** 최초 분석이 `GatePacketPersister`의 `else` 분기를 놓쳐 "미전환"으로 오판했다(R3~R5
+  정오표 참고). 세 오브젝트 코드 모두 `tb_data_rcv`에 원시 저장되고 있어 추가 구현이 필요 없다.
+  다만 **모터/스케줄 값 자체를 필드 단위로 파싱해 보여주는 화면은 없다** — 레거시도 마찬가지였다
+  (`TB_DATA_RCV_MOTOR`의 `m_data01~08`/`s_data01~08` 파싱 컬럼은 레거시 C# 코드 어디에서도 채워진
+  적이 없다, `92_DB_Script` 스키마 대조 확인). 즉 "보낸 값이 장비에 반영됐는지 화면에서 확인"하는
+  기능은 레거시에도 없었으므로 전환 누락이 아니다 — 화면화가 필요하면 별도 신규 기능으로 다뤄야
+  한다.
 - **D4. Turn Gate / Fast Gate 코덱(P9) — 문서와 코드가 어긋나 있다**
   설계서 3.4절과 `GateTypeCodes.kt` 주석은 "Turn/Fast는 별도 프로토콜이라 미구현"이라고 하는데,
   실제 `SpeedFlapGateProtocolCodec.supportedGateTypes`는 **4종 전부를 지원한다고 선언**하고 있다.
@@ -163,12 +174,11 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 
 ## 4. 단계별 우선순위 제안
 
-- **Phase S1 — 수신 저장 공백 메우기(R3, R4)**: 우선순위 최상. 이미 있는
-  `DefaultGatePacketHandler`의 `when` 분기에 `GATE_MOTOR`(0x4B)/`TIME_ZONE`(0x54)을 추가하고
-  `GatePacketPersister`에 저장 경로를 붙이는 작업으로, **신규 인프라 없이 기존 패턴 반복**이라
-  위험이 낮다. D3 의사결정 선행.
-- **Phase S2 — CLIENT 모드 결정 및 처리(S3)**: D1 확정 후 구현 또는 설정 제거. 현재는 "설정은
-  있는데 켜면 죽는" 어정쩡한 상태라 어느 쪽으로든 정리가 필요하다.
+- ~~**Phase S1 — 수신 저장 공백 메우기(R3, R4)**~~: **취소(2026-08-11) — 이미 완료돼 있었다.**
+  D3 정정 참고.
+- **Phase S2 — CLIENT 모드 결정 및 처리(S3)**: **우선순위 최상으로 승격** — 2026-08-11 사용자 확인
+  결과 현장에 백엔드가 먼저 접속해야 하는 게이트가 있어 **구현 필요**로 확정. `GateTcpClient` 신규
+  구현 착수(설계서 3.1절 설계 참고).
 - **Phase S3 — 대시보드 알림 팝업 ↔ 리셋 배선**: 서버 측이 아니라 웹 측 작업이지만, 서버의
   `GateControlService`/`GateFaultResolutionService`가 이미 완성돼 있는데 화면만 연결이 안 된
   상태라 여기 함께 적는다. 상세는 `SR_Speed_Client_전환_계획.md` 2절 #1/#17 항목 참고.

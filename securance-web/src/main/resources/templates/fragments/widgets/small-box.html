@@ -1,9 +1,13 @@
-<!--/* 계획서 5.2절: adminlte-react SmallBox와 동일한 props(title/text/icon/theme/url/urlText). */-->
+<!--/* 계획서 5.2절: adminlte-react SmallBox와 동일한 props(title/text/icon/theme/url/urlText).
+     id는 실시간 갱신 스크립트(dashboard-realtime.js)가 값을 바꿔 끼울 h3를 직접 지정하기 위한
+     선택 파라미터다(2026-08-12, B8 수정) — 이전에는 <h3>에 id를 못 붙여 dashboard.html이
+     DOM 순서로 사후 부착했는데, 카드가 재배치될 가능성이 생기면 엉뚱한 박스가 갱신될 위험이
+     있었다. id를 안 쓰는 호출부(reports/access.html)는 null을 넘기면 된다. */-->
 <div xmlns:th="http://www.thymeleaf.org"
-     th:fragment="smallBox(title, text, icon, theme, url, urlText)"
+     th:fragment="smallBox(id, title, text, icon, theme, url, urlText)"
      th:class="'small-box text-bg-' + ${theme}">
   <div class="inner">
-    <h3 th:text="${title}">0</h3>
+    <h3 th:id="${id}" th:text="${title}">0</h3>
     <p th:text="${text}">텍스트</p>
   </div>
   <i th:if="${icon}" th:class="'small-box-icon bi ' + ${icon}"></i>

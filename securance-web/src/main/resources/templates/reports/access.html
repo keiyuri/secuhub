@@ -46,9 +46,9 @@
   </div>
 
   <div class="row" th:if="${result != null}">
-    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(${result.totalIn}, '입', 'bi-arrow-down-circle', 'primary', null, null)}"></div>
-    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(${result.totalOut}, '출', 'bi-arrow-up-circle', 'secondary', null, null)}"></div>
-    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(${result.totalDoor}, '도어', 'bi-door-open', 'info', null, null)}"></div>
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(null, ${result.totalIn}, '입', 'bi-arrow-down-circle', 'primary', null, null)}"></div>
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(null, ${result.totalOut}, '출', 'bi-arrow-up-circle', 'secondary', null, null)}"></div>
+    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(null, ${result.totalDoor}, '도어', 'bi-door-open', 'info', null, null)}"></div>
   </div>
 
   <div class="card card-outline card-primary" th:if="${result != null}">

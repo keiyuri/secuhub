@@ -13,26 +13,18 @@
 <div layout:fragment="content">
 
   <!-- 1행: 요약 지표(SmallBox) — adminlte-react widgets/small-box 패턴, col-lg-3 col-6 그리드 -->
+  <!--/* 2026-08-12(B8): id는 fragment가 <h3>에 직접 부착한다 — 이전의 DOM-순서 기반 사후 부착
+        스크립트는 카드 재배치 시 엉뚱한 박스가 갱신될 수 있어 제거했다. */-->
   <div class="row">
     <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
-           ${summary.onlineGateCount}, '온라인 게이트', 'bi-hdd-network', 'success', '/gates/reset', '자세히')}"></div>
+           'rt-online-count', ${summary.onlineGateCount}, '온라인 게이트', 'bi-hdd-network', 'success', '/gates/reset', '자세히')}"></div>
     <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
-           ${summary.offlineGateCount}, '오프라인 게이트', 'bi-hdd-network-fill', 'danger', '/gates/reset', '자세히')}"></div>
+           'rt-offline-count', ${summary.offlineGateCount}, '오프라인 게이트', 'bi-hdd-network-fill', 'danger', '/gates/reset', '자세히')}"></div>
     <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
-           ${summary.unresolvedErrorCount}, '미해결 오류', 'bi-exclamation-triangle', 'warning', '/reports/events?resolveYn=N', '자세히')}"></div>
+           'rt-unresolved-count', ${summary.unresolvedErrorCount}, '미해결 오류', 'bi-exclamation-triangle', 'warning', '/reports/events?resolveYn=N', '자세히')}"></div>
     <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
-           ${summary.todayTrafficCount}, '오늘 통행량', 'bi-people', 'info', '/control/history', '자세히')}"></div>
+           'rt-traffic-count', ${summary.todayTrafficCount}, '오늘 통행량', 'bi-people', 'info', '/control/history', '자세히')}"></div>
   </div>
-
-  <!--/* small-box 프래그먼트가 <h3>를 직접 렌더링해 id를 못 붙이므로, 각 카드의 h3를 순서대로
-        rt-* id로 잡아준다(구조가 바뀌면 이 스크립트도 함께 수정 필요). */-->
-  <script>
-    (function () {
-      var boxes = document.querySelectorAll('.small-box .inner h3');
-      var ids = ['rt-online-count', 'rt-offline-count', 'rt-unresolved-count', 'rt-traffic-count'];
-      boxes.forEach(function (el, idx) { if (ids[idx]) el.id = ids[idx]; });
-    })();
-  </script>
 
   <!-- 2행: 위젯 카드 컬럼 — SortableJS 드래그 재배치(계획서 5.2절), 위젯 추가/삭제는 후속 작업 -->
   <div class="row">

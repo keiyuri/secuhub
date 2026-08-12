@@ -26,6 +26,33 @@
            'rt-traffic-count', ${summary.todayTrafficCount}, '오늘 통행량', 'bi-people', 'info', '/control/history', '자세히')}"></div>
   </div>
 
+  <!-- Phase 10: #18 대시보드 게이트 트리뷰 — LOC/GRP/DTL 3계층 + 연결상태 아이콘 + 우클릭 제어 메뉴.
+       레거시 UI 원본이 이 워크스페이스에 없어 계획서 요구사항만으로 신규 설계했다(2026-08-12
+       사용자 확인 — GateTreeApiController 참고). -->
+  <div class="row">
+    <div class="col-12">
+      <div th:replace="~{fragments/widgets/card :: card(
+             'widget-gate-tree', '게이트 트리뷰', 'primary', 'outline',
+             true, true, false, ~{::#gateTreeBody})}"></div>
+
+      <div th:block id="gateTreeBody" th:remove="tag">
+        <div id="gate-tree" class="gate-tree" data-loading="true">
+          <div class="text-muted small">불러오는 중...</div>
+        </div>
+        <!-- 우클릭 제어 메뉴 — DTL(레인) 노드 대상. GateControlApiController(리셋)/
+             GateControlController(모드 변경·모터 설정)를 그대로 재사용한다. -->
+        <ul id="gate-tree-context-menu" class="dropdown-menu gate-tree-context-menu" style="display:none; position:fixed;">
+          <li><h6 class="dropdown-header gate-tree-context-target">게이트</h6></li>
+          <li><a class="dropdown-item" href="#" data-action="reset-system"><i class="bi bi-arrow-clockwise"></i> 시스템 리셋</a></li>
+          <li><a class="dropdown-item" href="#" data-action="reset-motor"><i class="bi bi-arrow-clockwise"></i> 모터 리셋</a></li>
+          <li><hr class="dropdown-divider"></li>
+          <li><a class="dropdown-item" href="#" data-action="mode-change"><i class="bi bi-sliders"></i> 모드 변경</a></li>
+          <li><a class="dropdown-item" href="#" data-action="motor-setup"><i class="bi bi-gear"></i> 모터 설정</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- 2행: 위젯 카드 컬럼 — SortableJS 드래그 재배치(계획서 5.2절), 위젯 추가/삭제는 후속 작업 -->
   <div class="row">
     <div class="col-lg-7 connectedSortable">
@@ -105,6 +132,7 @@
 <th:block layout:fragment="scripts">
   <script th:src="@{/js/dashboard-widgets.js}"></script>
   <script th:src="@{/js/dashboard-realtime.js}"></script>
+  <script th:src="@{/js/gate-tree.js}"></script>
 </th:block>
 </body>
 </html>

@@ -91,4 +91,12 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
         """,
     )
     fun findLaneInfoByDtlIp(@Param("dtlIp") dtlIp: String): List<GateLaneInfo>
+
+    /**
+     * Phase 10 대시보드 게이트 트리뷰 — LOC/GRP/DTL 전체를 한 번에 조회한다. `location`/`group`은
+     * LAZY + open-in-view:false라 [GateGroupRepository.findAll]과 동일한 이유로 JOIN FETCH가
+     * 필요하다(컨트롤러 트랜잭션 밖에서 접근 시 LazyInitializationException).
+     */
+    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true order by d.dtlLaneNo")
+    fun findAllForTree(): List<GateDetail>
 }

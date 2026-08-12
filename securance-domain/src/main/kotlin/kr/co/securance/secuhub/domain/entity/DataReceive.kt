@@ -102,13 +102,15 @@ class DataReceiveAck(
 )
 
 /**
- * `tb_data_rcv_log` — 게이트 로그 이벤트(Object Code `0x61`, 36바이트 고정 구조) 적재 테이블.
+ * `tb_gate_log_event` — 게이트 로그 이벤트(Object Code `0x61`, 36바이트 고정 구조) 적재 테이블.
  *
  * 레거시 `TB_DATA_RCV_LOG`(`SR_F_ViewLog`가 조회하던 원본 테이블, `docs/SR_Speed_Client_전환_계획.md`
- * 4절 9번 참고)에 대응한다. 화면(`SR_F_ViewLog` → `/reports/logs`)은 이미 `tb_data_rcv_anal` 재사용
- * 방식으로 완료됐지만(event_type 세분류를 재현하지 못하는 한계가 있었음), 이 테이블은
- * `SpeedGateLogCodec`가 파싱한 원본 필드를 그대로 구조화해 저장하므로 필요하면 화면을 이 테이블
- * 기준으로 다시 붙일 수 있다.
+ * 4절 9번 참고)에 대응하는 신규 테이블이지만, 이름을 그대로 `tb_data_rcv_log`로 쓰면 개발 DB에
+ * 이미 존재하는 레거시 테이블(실데이터 50만+ 행, 완전히 다른 컬럼 구조)과 충돌해 `tb_gate_log_event`로
+ * 분리했다(2026-08-12, V10 마이그레이션 기동 실패로 발견 — `V10__gate_log_events.sql` 참고).
+ * 화면(`SR_F_ViewLog` → `/reports/logs`)은 이미 `tb_data_rcv_anal` 재사용 방식으로 완료됐지만
+ * (event_type 세분류를 재현하지 못하는 한계가 있었음), 이 테이블은 `SpeedGateLogCodec`가 파싱한
+ * 원본 필드를 그대로 구조화해 저장하므로 필요하면 화면을 이 테이블 기준으로 다시 붙일 수 있다.
  *
  * `SpeedGateLogCodec.decodeEntry`가 반환하는 [kr.co.securance.secuhub.protocol.GateLogEntry] 1건 =
  * 이 엔티티 1행. 숫자 필드를 전부 `Int`로 두는 이유는 이전 스프린트에서 `TINYINT` 매핑 불일치로
@@ -116,7 +118,7 @@ class DataReceiveAck(
  * 처음부터 `INT`로 만든다.
  */
 @Entity
-@Table(name = "tb_data_rcv_log")
+@Table(name = "tb_gate_log_event")
 class DataReceiveLog(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

@@ -12,12 +12,13 @@ spring:
 
   # spring.flyway.*는 spring.datasource.*와 완전히 별개 프로퍼티다(application.yml 참고 —
   # ADD INDEX 같은 DDL이 5초 소켓 타임아웃에 끊기지 않도록 Flyway 전용 커넥션을 분리하면서
-  # socketTimeout=120000을 별도로 줬다). 위 datasource만 재정의하고 여기를 비워두면 Flyway는
-  # base application.yml의 기본값(SECURANCE_DB_URL 미설정 시 192.168.0.91:28030 — 실제
-  # 개발서버 주소)을 그대로 물려받아, 로컬 DB가 아닌 다른 환경에 마이그레이션을 실행해버릴 수
-  # 있다. datasource를 바꿀 때는 반드시 아래도 같은 값으로 함께 바꿀 것.
+  # socketTimeout=600000(대용량 테이블 재구성 대비, 2026-08-12 V8 사례로 120000에서 상향)을
+  # 별도로 줬다). 위 datasource만 재정의하고 여기를 비워두면 Flyway는 base application.yml의
+  # 기본값(SECURANCE_DB_URL 미설정 시 192.168.0.91:28030 — 실제 개발서버 주소)을 그대로
+  # 물려받아, 로컬 DB가 아닌 다른 환경에 마이그레이션을 실행해버릴 수 있다. datasource를 바꿀
+  # 때는 반드시 아래도 같은 값으로 함께 바꿀 것.
   flyway:
-    url: jdbc:mariadb://db.example.internal:3306/securance_gate?socketTimeout=120000&connectTimeout=3000
+    url: jdbc:mariadb://db.example.internal:3306/securance_gate?socketTimeout=600000&connectTimeout=3000
     user: securance
     password: changeme
 

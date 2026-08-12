@@ -73,7 +73,7 @@ class GatePacketPersister(
                 true
             }
 
-            // 게이트 로그(0x61) — 36바이트 고정 엔트리를 구조화 파싱해 tb_data_rcv_log에 건별 적재한다
+            // 게이트 로그(0x61) — 36바이트 고정 엔트리를 구조화 파싱해 tb_gate_log_event에 건별 적재한다
             // (3차 스프린트, SpeedGate_Log_protocol_20260728_01.md). Data 구간은 다른 Object Code와
             // 동일한 공통 봉투(Header+DataInfo+Data+Tail)를 쓴다고 보고 packet.dataCount/dataInfoLength로
             // 위치를 계산한다 — Log 전용 봉투 규격이 문서에 별도로 없기 때문(코덱 KDoc 참고).
@@ -115,7 +115,7 @@ class GatePacketPersister(
         entries.forEach { entry -> enqueueLogInsert(state, entry, laneNo) }
     }
 
-    /** 로그 엔트리 1건을 `tb_data_rcv_log`에 적재한다. */
+    /** 로그 엔트리 1건을 `tb_gate_log_event`에 적재한다. */
     private fun enqueueLogInsert(state: GateConnectionState, entry: GateLogEntry, laneNo: Int) {
         val info = state.laneInfoOf(laneNo) ?: state.primaryLaneInfo
         val now = LocalDateTime.now()

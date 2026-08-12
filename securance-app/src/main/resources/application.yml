@@ -49,7 +49,9 @@ spring:
     # 물려받는다. ADD INDEX 같은 DDL은 테이블이 커지면 5초를 쉽게 넘겨 마이그레이션 도중 소켓이
     # 끊기고 앱 기동 자체가 실패한다(2026-08-12 V2 마이그레이션 실패 로그로 확인). Flyway 전용
     # 커넥션은 같은 DB를 보되 소켓 타임아웃을 훨씬 넉넉하게 재정의한다.
-    url: ${SECURANCE_DB_URL:jdbc:mariadb://192.168.0.91:28030/securance_gate}?socketTimeout=120000&connectTimeout=3000
+    # 120초도 부족할 수 있다 — V8이 tb_data_rcv_anal(65만+ 행)에 컬럼 19개를 ADD하다 205초만에
+    # 끊긴 사례가 있다(2026-08-12). 대용량 테이블 재구성(rebuild) 여유를 두어 600초로 올린다.
+    url: ${SECURANCE_DB_URL:jdbc:mariadb://192.168.0.91:28030/securance_gate}?socketTimeout=600000&connectTimeout=3000
     user: ${SECURANCE_DB_USER:dba}
     password: ${SECURANCE_DB_PASSWORD:securance}
 

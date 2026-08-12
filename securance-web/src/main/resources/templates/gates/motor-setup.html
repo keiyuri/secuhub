@@ -84,6 +84,8 @@
           </div>
         </div>
 
+        <div th:replace="~{fragments/widgets/reauth-field :: reauthField()}"></div>
+
         <button type="submit" class="btn btn-primary" onclick="document.getElementById('motorMode').value='CHANGE'">설정값 적용</button>
         <button type="submit" class="btn btn-warning" onclick="document.getElementById('motorMode').value='INIT'">초기값 적용</button>
         <a class="btn btn-secondary" th:href="@{/gates/details(grpId=${detail.group.grpId})}">취소</a>

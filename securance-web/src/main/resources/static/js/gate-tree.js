@@ -102,10 +102,24 @@
     return headers;
   }
 
-  function sendReset(dtlIp, dtlLaneNo, command) {
-    var params = new URLSearchParams({ dtlIp: dtlIp, dtlLaneNo: dtlLaneNo, command: command });
+  function sendReset(dtlIp, dtlLaneNo, command, reauthPassword) {
+    var payload = { dtlIp: dtlIp, dtlLaneNo: dtlLaneNo, command: command };
+    if (reauthPassword) payload.reauthPassword = reauthPassword;
+    var params = new URLSearchParams(payload);
     return fetch('/api/gate-control/reset', { method: 'POST', headers: csrfHeaders(), body: params.toString() })
       .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; }); });
+  }
+
+  // securance.security.gate-control-reauth-required=true일 때 GateControlReauthInterceptor가
+  // {reauthRequired:true}를 반환한다 — window.prompt()로 비밀번호를 받아 한 번만 자동 재시도한다.
+  // 취소하면 재시도하지 않고 최초(재인증 요구) 응답을 그대로 반환한다.
+  function sendResetWithReauth(dtlIp, dtlLaneNo, command) {
+    return sendReset(dtlIp, dtlLaneNo, command).then(function (r) {
+      if (!r.body || !r.body.reauthRequired) return r;
+      var password = window.prompt('게이트 제어 재인증 — 비밀번호를 입력하세요.');
+      if (!password) return r;
+      return sendReset(dtlIp, dtlLaneNo, command, password);
+    });
   }
 
   function setupContextMenu(container) {
@@ -153,7 +167,7 @@
       }
       var command = action === 'reset-system' ? 'RESET_SYSTEM' : action === 'reset-motor' ? 'RESET_MOTOR' : null;
       if (!command) return;
-      sendReset(target.dtlIp, target.dtlLaneNo, command).catch(function () { /* 실패는 조용히 무시 — 대시보드 알림 팝업이 별도로 상태를 반영한다 */ });
+      sendResetWithReauth(target.dtlIp, target.dtlLaneNo, command).catch(function () { /* 실패는 조용히 무시 — 대시보드 알림 팝업이 별도로 상태를 반영한다 */ });
     });
 
     document.addEventListener('click', function (e) {

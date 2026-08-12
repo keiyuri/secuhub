@@ -87,7 +87,7 @@
     }
   }
 
-  function sendResetCommand(payload, resetBtn, resultEl) {
+  function sendResetCommand(payload, resetBtn, resultEl, reauthPassword) {
     if (!payload.dtlIp || payload.dtlLaneNo === undefined || payload.dtlLaneNo === null) {
       if (resultEl) { resultEl.className = 'rt-alert-result small mt-2 text-danger'; resultEl.textContent = '리셋 대상 정보가 없습니다.'; }
       return;
@@ -99,15 +99,28 @@
     var headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
     if (csrfToken && csrfHeader) headers[csrfHeader.content] = csrfToken.content;
 
-    var params = new URLSearchParams({ dtlIp: payload.dtlIp, dtlLaneNo: payload.dtlLaneNo, command: command });
+    var body = { dtlIp: payload.dtlIp, dtlLaneNo: payload.dtlLaneNo, command: command };
+    if (reauthPassword) body.reauthPassword = reauthPassword;
+    var params = new URLSearchParams(body);
 
     resetBtn.disabled = true;
     resetBtn.textContent = '전송 중...';
     if (resultEl) { resultEl.className = 'rt-alert-result small mt-2 text-muted'; resultEl.textContent = '리셋 명령 전송 중...'; }
 
     fetch('/api/gate-control/reset', { method: 'POST', headers: headers, body: params.toString() })
-      .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; }); })
+      .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, status: res.status, body: b }; }); })
       .then(function (r) {
+        // securance.security.gate-control-reauth-required=true일 때 GateControlReauthInterceptor가
+        // {reauthRequired:true}를 반환한다 — 비밀번호를 물어 한 번만 자동 재시도한다
+        // (gate-tree.js sendResetWithReauth와 동일한 패턴). 이미 재시도한 요청(reauthPassword 전달됨)은
+        // 다시 묻지 않고 실패를 그대로 보여준다 — 무한 프롬프트 반복을 막는다.
+        if (r.body && r.body.reauthRequired && !reauthPassword) {
+          resetBtn.disabled = false;
+          resetBtn.textContent = '리셋 실행';
+          var password = window.prompt('게이트 제어 재인증 — 비밀번호를 입력하세요.');
+          if (password) sendResetCommand(payload, resetBtn, resultEl, password);
+          return;
+        }
         if (resultEl) {
           resultEl.className = 'rt-alert-result small mt-2 ' + (r.ok ? 'text-success' : 'text-danger');
           resultEl.textContent = '[' + r.status + '] ' + (r.body.message || '');

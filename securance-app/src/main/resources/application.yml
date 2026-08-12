@@ -125,6 +125,12 @@ securance:
     redis:
       enabled: false            # true로 바꾸면 Redis 세션/캐시가 활성화된다(후속 작업).
 
+  # 로그인 기능 on/off 설정(2026-08-12 사용자 확인, Phase 10 후속). 값 변경은 재기동이 필요하다
+  # (다른 securance.* 플래그와 동일 — authorizeHttpRequests/인터셉터는 기동 시 1회만 조립됨).
+  security:
+    web-login-required: true          # false면 웹 화면 전체가 로그인 없이 열린다(admin/control/게이트 제어 API 규칙은 예외 없이 그대로 적용)
+    gate-control-reauth-required: false  # true면 리셋/모드변경/모터설정 등 게이트 제어 실행마다 비밀번호 재입력을 요구
+
 server:
   port: 8080
   servlet:

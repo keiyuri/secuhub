@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<!--/*
+  게이트 제어 재인증 입력 필드(securance.security.gate-control-reauth-required, 2026-08-12 사용자
+  확인). 설정이 꺼져 있어도 필드는 항상 보여준다 — 컨트롤러마다 설정값을 모델에 실어 보내지 않아도
+  되게 하기 위해서다(값이 켜져 있지 않으면 GateControlReauthInterceptor가 그냥 통과시킨다).
+  reauthError는 인터셉터가 실패 시 붙이는 쿼리 파라미터다(GateControlReauthInterceptor 참고).
+*/-->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+  <div th:fragment="reauthField()">
+    <div class="alert alert-danger py-2" th:if="${param.reauthError != null}">
+      재인증에 실패했습니다. 비밀번호를 다시 확인해 주세요.
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="reauthPassword">비밀번호 재확인</label>
+      <input type="password" class="form-control" id="reauthPassword" name="reauthPassword" autocomplete="current-password" />
+      <div class="form-text">관리자 설정에 따라 게이트 제어 실행 시 비밀번호 재입력이 요구될 수 있습니다.</div>
+    </div>
+  </div>
+</body>
+</html>

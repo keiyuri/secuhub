@@ -64,6 +64,7 @@
         </table>
       </div>
       <div class="card-footer" th:if="${selectedGrpId != null and not #lists.isEmpty(rows)}">
+        <div th:replace="~{fragments/widgets/reauth-field :: reauthField()}"></div>
         <button type="submit" class="btn btn-danger btn-sm">
           선택 리셋 실행
         </button>

@@ -1,5 +1,6 @@
 package kr.co.securance.secuhub.web.security
 
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
@@ -20,7 +21,11 @@ import org.springframework.security.web.session.HttpSessionEventPublisher
  * "전환/검증 종료 후 제거"를 이행한 것이다. 필요해지면 git 이력(`DevAutoLoginFilter.kt` 삭제
  * 커밋 이전)에서 복원할 수 있다.
  */
+// SecuritySettingsProperties는 여기서 활성화한다 — SecurityConfigTest처럼 SecurityConfig만 @Import해
+// 최소 컨텍스트를 구성하는 테스트도 securityFilterChain(..., securitySettings)의 의존성을 그대로
+// 만족시킬 수 있어야 하기 때문이다(WebConfig에도 걸어두면 컨텍스트가 겹칠 때 중복 등록 오류가 남).
 @Configuration
+@EnableConfigurationProperties(SecuritySettingsProperties::class)
 class SecurityConfig {
 
     // 레거시 평문 비밀번호(AppUser 주석 참고)와 BCrypt 해시가 tb_users.passwd에 섞여 있을 수 있어,
@@ -40,7 +45,7 @@ class SecurityConfig {
     fun httpSessionEventPublisher(): HttpSessionEventPublisher = HttpSessionEventPublisher()
 
     @Bean
-    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+    fun securityFilterChain(http: HttpSecurity, securitySettings: SecuritySettingsProperties): SecurityFilterChain {
         http {
             authorizeHttpRequests {
                 authorize("/login", permitAll)
@@ -80,7 +85,15 @@ class SecurityConfig {
                 // 게이트 제어/리셋 API는 tb_users.auth_ctrl(ROLE_CONTROL) 또는 auth_admin(ROLE_ADMIN)
                 // 권한을 가진 사용자만 호출할 수 있다(계획서 5.4/5.5절).
                 authorize("/api/gate-control/**", hasAnyRole("CONTROL", "ADMIN"))
-                authorize(anyRequest, hasRole("VIEW"))
+                // 2026-08-12 사용자 확인: 웹 접근 자체의 로그인 요구 여부를 설정으로 켜고 끌 수
+                // 있어야 한다(securance.security.web-login-required). false여도 위에서 이미 명시한
+                // 역할 기반 규칙(admin/control/게이트 제어 API 등)은 이 값과 무관하게 그대로 유지된다
+                // — 이 토글은 오직 "그 외 나머지 화면"의 최소 인증 요구(ROLE_VIEW)만 켜고 끈다.
+                if (securitySettings.webLoginRequired) {
+                    authorize(anyRequest, hasRole("VIEW"))
+                } else {
+                    authorize(anyRequest, permitAll)
+                }
             }
             formLogin {
                 loginPage = "/login"

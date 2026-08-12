@@ -55,6 +55,8 @@
           </div>
         </fieldset>
 
+        <div th:replace="~{fragments/widgets/reauth-field :: reauthField()}"></div>
+
         <button type="submit" class="btn btn-primary">적용(전송 대기열 등록)</button>
         <a class="btn btn-secondary" th:href="@{/gates/details(grpId=${detail.group.grpId})}">취소</a>
       </form>

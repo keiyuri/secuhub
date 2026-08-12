@@ -29,6 +29,20 @@ data class GateDbWriteTask(
     val maxAttempts: Int = 3,
     /** 한 번의 [execute] 시도에 허용하는 최대 시간. 초과하면 실패로 간주하고 재시도(또는 포기)한다. */
     val timeout: Duration = 5.seconds,
+    /**
+     * 이 작업이 큐 포화로 드롭되거나(enqueue 시점) maxAttempts를 모두 소진하고도 끝내 실패했을 때
+     * 호출되는 durable 대체 경로(2026-08-12, 큐 드롭 durable 재작성). 이 손실을 감내할 수 없는
+     * 호출부(예: `OprStatusPersister`의 통행량 집계)만 채워 넣는다 — 지정하지 않으면 예전과 동일하게
+     * 로그+카운터만 남기고 그대로 유실된다.
+     *
+     * [execute]와 마찬가지로 [blockingDispatcher]에서 실행되므로(드롭 시점엔 [enqueue] 호출 스레드,
+     * 최종 실패 시점엔 샤드 워커 코루틴을 막지 않는다), 이 콜백 안에서 블로킹 DB 호출을 해도 안전하다.
+     * 이 콜백 자체가 던지는 예외는 로그만 남기고 삼킨다 — durable 저장조차 실패하는 경우(예: DB
+     * 완전 다운)는 원본 쓰기도 어차피 실패했을 상황이라 이중 장애이며, 더 할 수 있는 게 없다.
+     */
+    val onDropOrFinalFailure: (suspend () -> Unit)? = null,
+    // 기존 호출부 전부가 `GateDbWriteTask(...) { ... }` 트레일링 람다 문법으로 execute를 채우므로,
+    // execute는 반드시 마지막 파라미터여야 한다(트레일링 람다는 항상 마지막 파라미터에 대응된다).
     val execute: suspend () -> Unit,
 )
 
@@ -70,6 +84,14 @@ data class GateDbWriteTask(
  * 실제 쓰기 직전에 자체적으로 "내 이벤트가 여전히 최신인가"를 검증해야 한다 —
  * `GateConnectionRegistryImpl`이 호출 시점(큐 진입 전)에 발급한 단조증가 시퀀스를 저장 직전에
  * CAS로 재확인하는 방식(`tryClaimNetStateSeq`)이 그 예다.
+ *
+ * **드롭/최종 실패 시 durable 대체 저장(2026-08-12, 큐 드롭 durable 재작성)**: [GateDbWriteTask.onDropOrFinalFailure]를
+ * 지정한 작업은 드롭되거나 재시도를 모두 소진해도 로그+카운터만 남기고 끝나지 않고, 그 콜백이
+ * (보통 별도 테이블에 최소한의 원시값을 동기 저장하는 형태로) 실행된다. 지정하지 않은 작업은
+ * 예전과 동일하게 그대로 유실된다 — 기존 호출부(`GateLogService`, `GatePacketPersister`,
+ * `GateConnectionRegistryImpl`, `DirectGateControlService`)는 대부분 자체적으로 재수신/재조회 시
+ * 자연 복구되거나(멱등 UPSERT, net_state는 다음 상태 패킷이 갱신) 손실 허용 범위로 판단해 그대로
+ * 두었고, `OprStatusPersister`(통행량 집계, codex 적대적 리뷰 지적)만 이 콜백을 채워 넣는다.
  */
 class GateDbWriteQueue(
     private val shardCount: Int,
@@ -116,6 +138,7 @@ class GateDbWriteQueue(
         if (result.isFailure) {
             droppedCount.incrementAndGet()
             logger.error("DB 쓰기 큐가 가득 차 작업을 드롭했습니다: shard={}, op={}", shardIndex, task.operationName)
+            runFallback(task, shardIndex)
         }
     }
 
@@ -174,6 +197,29 @@ class GateDbWriteQueue(
             if (!succeeded) {
                 finalFailureCount.incrementAndGet()
                 logger.error("DB 쓰기 최종 실패: shard={}, op={}", shardIndex, task.operationName)
+                runFallback(task, shardIndex)
+            }
+        }
+    }
+
+    /**
+     * [GateDbWriteTask.onDropOrFinalFailure]가 지정돼 있으면 [blockingDispatcher]에서 실행한다.
+     * 드롭 경로([enqueue])에서 호출될 때는 호출 스레드(Netty 이벤트루프 등)를, 최종 실패 경로
+     * ([runShardWorker])에서 호출될 때는 샤드 워커 코루틴을 막지 않기 위해 항상 별도 launch로
+     * 던지고 완료를 기다리지 않는다 — 어느 쪽도 이 fallback 저장 때문에 지연되어서는 안 된다.
+     */
+    private fun runFallback(task: GateDbWriteTask, shardIndex: Int) {
+        val fallback = task.onDropOrFinalFailure ?: return
+        scope.launch(blockingDispatcher) {
+            try {
+                fallback()
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
+                logger.error(
+                    "durable 대체 저장(onDropOrFinalFailure)마저 실패했습니다 — 이 작업은 완전히 유실됩니다: shard={}, op={}",
+                    shardIndex, task.operationName, ex,
+                )
             }
         }
     }

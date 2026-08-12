@@ -2,6 +2,8 @@ package kr.co.securance.secuhub.server.db
 
 import kr.co.securance.secuhub.domain.entity.OprStatus
 import kr.co.securance.secuhub.domain.entity.OprStatusId
+import kr.co.securance.secuhub.domain.entity.OprStatusOutbox
+import kr.co.securance.secuhub.domain.repository.OprStatusOutboxRepository
 import kr.co.securance.secuhub.domain.repository.OprStatusRepository
 import kr.co.securance.secuhub.protocol.GateStatusAnalyzer
 import kr.co.securance.secuhub.server.connection.GateConnectionState
@@ -49,22 +51,30 @@ import java.time.format.DateTimeFormatter
  * 애초에 이 메서드가 불릴 일이 없다 — 결과적으로 델타가 0인 빈 행만 반복해서 남기지 않는다는
  * 차이가 있을 뿐, 최종 누적/증가분 값 자체는 레거시와 동일하다.
  *
- * ## 큐 드롭/최종 실패 시 데이터 손실 범위(2026-08-12, codex 적대적 리뷰 지적)
+ * ## 큐 드롭/최종 실패 시 데이터 손실 범위와 durable 대체 저장(2026-08-12, codex 적대적 리뷰 지적 →
+ * 2026-08-12 큐 드롭 durable 재작성)
  * [GateDbWriteQueue]는 큐 포화 시 작업을 드롭하고, 재시도를 모두 소진해도 실패하면 그대로
- * 포기한다(둘 다 로그 + 카운터만 남긴다, [GateDbWriteQueue] KDoc 참고). 이 write가 실제로
- * 완전히 빠지면 **그 분(分) 버킷 행 자체는 확실히 비어 남는다** — 이건 사실이고 고치지 않았다
- * (durable outbox/재처리 큐는 이 파이프라인만을 위해 들이기엔 과한 아키텍처 변경이라 범위 밖).
- * 다만 그 다음 성공한 write는 PREV 조회(`findLatestBefore`)로 **마지막으로 실제 저장된 행**을
- * 기준 삼아 델타를 다시 계산하므로(`usp_process_status` 원문 그대로), 드롭된 구간의 통행량이
- * 다음 성공 분 버킷에 합쳐져 들어갈 뿐 하루 합계(`sumUserCountToday`)에서 사라지지는 않는다 —
- * 즉 분 단위 시계열 해상도는 그 구간만 거칠어지지만, 누적 총량은 리커버된다. `PacketDiffer`가
- * "변경 없음"으로 판정해도 다음 실제 변화가 있을 때는 무조건 다시 enqueue되므로(위 "호출 시점"
- * 참고), 드롭 이후 상태가 "영구히 다시 enqueue되지 않는" 것도 아니다.
+ * 포기한다(둘 다 로그 + 카운터만 남긴다, [GateDbWriteQueue] KDoc 참고). 처음에는(0003 항목) 이
+ * write가 실제로 빠져도 다음 성공한 write가 PREV 조회(`findLatestBefore`)로 **마지막으로 실제
+ * 저장된 행**을 기준 삼아 델타를 다시 계산하므로(`usp_process_status` 원문 그대로), 드롭된 구간의
+ * 통행량이 다음 성공 분 버킷에 합쳐져 들어갈 뿐 하루 합계(`sumUserCountToday`)에서 사라지지는
+ * 않는다는 self-healing 근거로 문서화만 하고 코드는 그대로 두었었다 — 다만 분 단위 시계열
+ * 해상도(어느 분에 얼마나 통행했는지) 자체는 여전히 영구히 비어 남는 문제가 있었고, 사용자가
+ * 이를 문서화만으로는 부족하다고 판단해 실제 durable 재작성을 요청했다.
+ *
+ * 지금은 [GateDbWriteTask.onDropOrFinalFailure]에 [saveOutboxFallback]을 연결해, 드롭/최종 실패
+ * 시점에 UPSERT에 필요한 원시값을 `tb_opr_status_outbox`에 동기 저장한다([GateDbWriteQueue]가
+ * 이 콜백을 [blockingDispatcher][GateDbWriteQueue]에서 실행하므로 호출 스레드는 막지 않는다).
+ * `OprStatusOutboxReplayJob`(securance-scheduler)이 주기적으로 미처리 행을 읽어 [replayOutboxEntry]로
+ * 원래 UPSERT를 재시도한다 — 재시도 자체가 다시 실패해도 outbox 행은 남아 있으니 다음 실행에서
+ * 또 시도한다. 이 fallback 저장 자체가 실패하는 경우(DB 완전 다운 등 이중 장애)만 여전히 진짜
+ * 유실이며, 그 경우는 [GateDbWriteQueue]가 로그로 크게 남긴다.
  */
 @Component
 class OprStatusPersister(
     private val dbWriteQueue: GateDbWriteQueue,
     private val oprStatusRepository: OprStatusRepository,
+    private val oprStatusOutboxRepository: OprStatusOutboxRepository,
 ) {
     private val logger = LoggerFactory.getLogger(OprStatusPersister::class.java)
 
@@ -89,35 +99,115 @@ class OprStatusPersister(
                 continue
             }
 
+            val currTotal = analysis.totalCount
+            val currDoor = analysis.motorCount.toLong()
+            val currIn = analysis.masterInTotal.toLong()
+
             dbWriteQueue.enqueue(
                 GateDbWriteTask(
                     partitionKey = state.dtlIp,
                     operationName = "UpsertOprStatus(${state.dtlIp},$laneNo)",
+                    onDropOrFinalFailure = {
+                        saveOutboxFallback(
+                            state.dtlIp, laneNo, dtlId, info.dtlType, info.locId, info.grpId,
+                            dateKey, sinceDateKey, currTotal, currDoor, currIn,
+                            analysis.gateType, analysis.userMode, analysis.securityMode, analysis.inoutTime,
+                        )
+                    },
                 ) {
-                    upsert(state.dtlIp, laneNo, analysis, dtlId, info.dtlType, info.locId, info.grpId, dateKey, sinceDateKey)
+                    upsert(
+                        state.dtlIp, laneNo, dtlId, info.dtlType, info.locId, info.grpId, dateKey, sinceDateKey,
+                        currTotal, currDoor, currIn, analysis.gateType, analysis.userMode, analysis.securityMode, analysis.inoutTime,
+                    )
                     Unit
                 },
             )
         }
     }
 
-    private fun upsert(
+    /**
+     * 드롭/최종 실패한 작업을 `tb_opr_status_outbox`에 동기 저장한다([GateDbWriteQueue.blockingDispatcher]에서
+     * 실행되므로 블로킹 JPA 호출이 안전하다). 이 저장 자체가 던지는 예외는 호출부([GateDbWriteQueue.runFallback])가
+     * 잡아 로그로 남기므로 여기서는 별도 처리하지 않는다.
+     */
+    private fun saveOutboxFallback(
         dtlIp: String,
         laneNo: Int,
-        analysis: GateStatusAnalyzer.LaneStatusAnalysis,
         dtlId: Long,
         dtlType: Int,
         locId: Long,
         grpId: Long,
         dateKey: String,
         sinceDateKey: String,
+        currTotal: Long,
+        currDoor: Long,
+        currIn: Long,
+        gateTypeRaw: Int,
+        userModeRaw: Int,
+        securityModeRaw: Int,
+        inoutTime: Int,
     ) {
-        val currTotal = analysis.totalCount
-        val currDoor = analysis.motorCount.toLong()
-        val currIn = analysis.masterInTotal.toLong()
-        val gateType = GateStatusAnalyzer.describeGateType(analysis.gateType)
-        val userMode = analysis.userMode.toString()
-        val securityMode = analysis.securityMode.toString()
+        oprStatusOutboxRepository.save(
+            OprStatusOutbox(
+                dtlIp = dtlIp,
+                dtlLaneNo = laneNo,
+                dtlId = dtlId,
+                dtlType = dtlType,
+                locId = locId,
+                grpId = grpId,
+                oprDate = dateKey,
+                sinceDate = sinceDateKey,
+                currTotal = currTotal,
+                currDoor = currDoor,
+                currIn = currIn,
+                gateTypeRaw = gateTypeRaw,
+                userModeRaw = userModeRaw,
+                securityModeRaw = securityModeRaw,
+                inoutTime = inoutTime,
+                reason = "DROPPED_OR_FINAL_FAILURE",
+            ),
+        )
+        logger.warn(
+            "DB 쓰기 큐 드롭/최종실패한 통행량 집계를 outbox에 durable 저장했습니다: dtlIp={}, lane={}, oprDate={}",
+            dtlIp, laneNo, dateKey,
+        )
+    }
+
+    /**
+     * [OprStatusOutboxReplayJob][kr.co.securance.secuhub.scheduler.job.OprStatusOutboxReplayJob]이
+     * outbox의 미처리 행 하나를 재처리할 때 호출한다 — [upsert]를 그대로 재사용해 라이브 경로와
+     * 재처리 경로의 UPSERT 로직이 갈라지지 않게 한다. `GateDbWriteQueue`를 다시 거치지 않고
+     * 호출 스레드(스케줄러 잡 스레드)에서 직접 실행한다 — 재처리는 이미 저빈도 배치 작업이라
+     * 큐의 파티셔닝/타임아웃 이점이 필요 없다.
+     */
+    fun replayOutboxEntry(entry: OprStatusOutbox) {
+        upsert(
+            entry.dtlIp, entry.dtlLaneNo, entry.dtlId, entry.dtlType, entry.locId, entry.grpId,
+            entry.oprDate, entry.sinceDate, entry.currTotal, entry.currDoor, entry.currIn,
+            entry.gateTypeRaw, entry.userModeRaw, entry.securityModeRaw, entry.inoutTime,
+        )
+    }
+
+    private fun upsert(
+        dtlIp: String,
+        laneNo: Int,
+        dtlId: Long,
+        dtlType: Int,
+        locId: Long,
+        grpId: Long,
+        dateKey: String,
+        sinceDateKey: String,
+        currTotal: Long,
+        currDoor: Long,
+        currIn: Long,
+        gateTypeRaw: Int,
+        userModeRaw: Int,
+        securityModeRaw: Int,
+        inoutTime: Int,
+    ) {
+        val gateType = GateStatusAnalyzer.describeGateType(gateTypeRaw)
+        val userMode = userModeRaw.toString()
+        val securityMode = securityModeRaw.toString()
 
         val id = OprStatusId(oprDate = dateKey, oprSeq = 1, dtlIp = dtlIp, dtlLaneNo = laneNo)
         val existing = oprStatusRepository.findById(id).orElse(null)
@@ -141,7 +231,7 @@ class OprStatusPersister(
             existing.gateType = gateType
             existing.userMode = userMode
             existing.securityMode = securityMode
-            existing.inoutTime = analysis.inoutTime
+            existing.inoutTime = inoutTime
             oprStatusRepository.save(existing)
             return
         }
@@ -173,7 +263,7 @@ class OprStatusPersister(
                 gateType = gateType,
                 userMode = userMode,
                 securityMode = securityMode,
-                inoutTime = analysis.inoutTime,
+                inoutTime = inoutTime,
                 userCount = deltaTotal.toInt(),
                 totalCount = currTotal,
                 beforeTotal = prevTotal,

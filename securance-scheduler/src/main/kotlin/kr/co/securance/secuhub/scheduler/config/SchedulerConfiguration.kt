@@ -1,6 +1,7 @@
 package kr.co.securance.secuhub.scheduler.config
 
 import kr.co.securance.secuhub.scheduler.job.NetCheckJob
+import kr.co.securance.secuhub.scheduler.job.OprStatusOutboxReplayJob
 import kr.co.securance.secuhub.scheduler.job.ReqStatusJob
 import kr.co.securance.secuhub.scheduler.job.RetentionCleanupJob
 import kr.co.securance.secuhub.scheduler.job.SendControlJob
@@ -141,5 +142,44 @@ class SchedulerConfiguration {
             setJobDetail(retentionCleanupJobDetail)
             setCronExpression(properties.retentionCron)
             setMisfireInstruction(CronTrigger.MISFIRE_INSTRUCTION_DO_NOTHING)
+        }.also { it.afterPropertiesSet() }.`object`!!
+
+    // ── 큐 드롭 durable 재작성: outbox 재처리 잡 ──────────────────────
+
+    @Bean
+    @ConditionalOnProperty(
+        prefix = "securance.scheduler",
+        name = ["opr-status-outbox-replay-enabled"],
+        havingValue = "true",
+        matchIfMissing = true,
+    )
+    fun oprStatusOutboxReplayJobDetail(): JobDetail =
+        JobDetailFactoryBean().apply {
+            setJobClass(OprStatusOutboxReplayJob::class.java)
+            setName("oprStatusOutboxReplayJob")
+            setDurability(true)
+        }.also { it.afterPropertiesSet() }.`object`!!
+
+    /**
+     * 다른 상시 폴링 잡들(+5~20초)보다 늦게(+30초) 시작한다 — 이 잡은 드물게(드롭/최종실패 시에만)
+     * 쌓이는 outbox를 훑는 저빈도 배치라 기동 직후 지연에 민감하지 않다.
+     */
+    @Bean
+    @ConditionalOnProperty(
+        prefix = "securance.scheduler",
+        name = ["opr-status-outbox-replay-enabled"],
+        havingValue = "true",
+        matchIfMissing = true,
+    )
+    fun oprStatusOutboxReplayJobTrigger(
+        oprStatusOutboxReplayJobDetail: JobDetail,
+        properties: SchedulerProperties,
+    ): Trigger =
+        SimpleTriggerFactoryBean().apply {
+            setJobDetail(oprStatusOutboxReplayJobDetail)
+            setStartTime(Date(System.currentTimeMillis() + 30_000))
+            setRepeatInterval(properties.oprStatusOutboxReplayIntervalSeconds * 1000)
+            setRepeatCount(SimpleTrigger.REPEAT_INDEFINITELY)
+            setMisfireInstruction(SimpleTrigger.MISFIRE_INSTRUCTION_RESCHEDULE_NEXT_WITH_REMAINING_COUNT)
         }.also { it.afterPropertiesSet() }.`object`!!
 }

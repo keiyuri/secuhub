@@ -3,7 +3,9 @@ package kr.co.securance.secuhub.server.db
 import kotlinx.coroutines.Dispatchers
 import kr.co.securance.secuhub.domain.entity.OprStatus
 import kr.co.securance.secuhub.domain.entity.OprStatusId
+import kr.co.securance.secuhub.domain.entity.OprStatusOutbox
 import kr.co.securance.secuhub.domain.repository.GateLaneInfo
+import kr.co.securance.secuhub.domain.repository.OprStatusOutboxRepository
 import kr.co.securance.secuhub.domain.repository.OprStatusRepository
 import kr.co.securance.secuhub.protocol.GateStatusAnalyzer
 import kr.co.securance.secuhub.protocol.SpeedFlapGateProtocolCodec
@@ -103,7 +105,7 @@ class OprStatusPersisterTest {
             repository.findLatestBefore(anyLong(), anyString(), anyInt(), anyString(), anyString(), anyKt()),
         ).thenReturn(listOf(prev))
 
-        val persister = OprStatusPersister(GateDbWriteQueue(shardCount = 1), repository)
+        val persister = OprStatusPersister(GateDbWriteQueue(shardCount = 1), repository, mock(OprStatusOutboxRepository::class.java))
         val state = newState("192.168.0.20")
         val packet = statusPacket(laneBlock(laneNo = 1, total = 100, door = 10, inCount = 60))
 
@@ -145,7 +147,7 @@ class OprStatusPersisterTest {
         val repository = mock(OprStatusRepository::class.java)
         `when`(repository.findById(anyKt())).thenReturn(Optional.of(existing))
 
-        val persister = OprStatusPersister(GateDbWriteQueue(shardCount = 1), repository)
+        val persister = OprStatusPersister(GateDbWriteQueue(shardCount = 1), repository, mock(OprStatusOutboxRepository::class.java))
         val state = newState("192.168.0.21")
         // 같은 분 안에 더 많이 통행한 재수신 패킷 — 누적치가 더 늘어났다.
         val packet = statusPacket(laneBlock(laneNo = 1, total = 150, door = 12, inCount = 90))
@@ -172,7 +174,7 @@ class OprStatusPersisterTest {
     @Test
     fun `레인 번호 0(사용하지 않는 슬롯)은 건너뛴다`() {
         val repository = mock(OprStatusRepository::class.java)
-        val persister = OprStatusPersister(GateDbWriteQueue(shardCount = 1), repository)
+        val persister = OprStatusPersister(GateDbWriteQueue(shardCount = 1), repository, mock(OprStatusOutboxRepository::class.java))
         val state = newState("192.168.0.22")
         val packet = statusPacket(laneBlock(laneNo = 0, total = 100, door = 10, inCount = 60))
 
@@ -181,5 +183,36 @@ class OprStatusPersisterTest {
         // 큐가 비동기라 "호출되지 않음"을 즉시 단언할 수는 없으므로, 짧게 대기해도 save가 없는지 확인.
         Thread.sleep(200)
         verifyNoInteractions(repository)
+    }
+
+    /**
+     * 큐 드롭 durable 재작성(2026-08-12) 회귀 테스트 — [OprStatusPersister]가 [GateDbWriteQueue]에
+     * `onDropOrFinalFailure`를 제대로 연결했는지 검증한다. `tb_opr_status` 쓰기가 재시도를 모두
+     * 소진하고도 실패하면(여기서는 `findById`가 항상 예외를 던지게 해 흉내낸다), 로그만 남기고 그대로
+     * 유실되던 예전과 달리 `tb_opr_status_outbox`에 원시값이 저장돼야 한다.
+     */
+    @Test
+    fun `최종 실패하면 outbox에 durable 저장한다`() {
+        val repository = mock(OprStatusRepository::class.java)
+        `when`(repository.findById(anyKt())).thenThrow(RuntimeException("DB 장애"))
+        val outboxRepository = mock(OprStatusOutboxRepository::class.java)
+
+        val persister = OprStatusPersister(GateDbWriteQueue(shardCount = 1), repository, outboxRepository)
+        val state = newState("192.168.0.23")
+        val packet = statusPacket(laneBlock(laneNo = 1, total = 100, door = 10, inCount = 60))
+
+        persister.persistOprStatus(state, packet)
+
+        val captor = ArgumentCaptor.forClass(OprStatusOutbox::class.java)
+        verify(outboxRepository, timeout(10_000)).save(captor.capture())
+        val saved = captor.value
+
+        assertEquals("192.168.0.23", saved.dtlIp)
+        assertEquals(1, saved.dtlLaneNo)
+        assertEquals(42L, saved.dtlId)
+        assertEquals(100L, saved.currTotal)
+        assertEquals(10L, saved.currDoor)
+        assertEquals(60L, saved.currIn)
+        assertEquals(false, saved.processed)
     }
 }

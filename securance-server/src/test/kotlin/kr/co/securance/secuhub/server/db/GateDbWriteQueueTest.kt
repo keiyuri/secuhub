@@ -214,4 +214,69 @@ class GateDbWriteQueueTest {
 
         queue.shutdown()
     }
+
+    /**
+     * 큐 드롭 durable 재작성(2026-08-12) 회귀 테스트 — 작업이 드롭되면(큐 포화)
+     * [GateDbWriteTask.onDropOrFinalFailure]가 호출돼야 한다.
+     */
+    @Test
+    fun `큐가 가득 차 드롭되면 onDropOrFinalFailure가 호출된다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val workerStarted = CountDownLatch(1)
+        val releaseWorker = CountDownLatch(1)
+        val fallbackCalled = CountDownLatch(1)
+
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "192.168.0.8", operationName = "BLOCKER") {
+                workerStarted.countDown()
+                releaseWorker.await(5, TimeUnit.SECONDS)
+            },
+        )
+        assertTrue(workerStarted.await(2, TimeUnit.SECONDS))
+
+        repeat(1000) { i ->
+            queue.enqueue(GateDbWriteTask(partitionKey = "192.168.0.8", operationName = "FILL-$i") {})
+        }
+
+        queue.enqueue(
+            GateDbWriteTask(
+                partitionKey = "192.168.0.8",
+                operationName = "DROPPED",
+                onDropOrFinalFailure = { fallbackCalled.countDown() },
+            ) {},
+        )
+
+        try {
+            assertTrue(fallbackCalled.await(2, TimeUnit.SECONDS), "드롭된 작업의 onDropOrFinalFailure가 호출되지 않았습니다")
+        } finally {
+            releaseWorker.countDown()
+            queue.shutdown()
+        }
+    }
+
+    /**
+     * 큐 드롭 durable 재작성(2026-08-12) 회귀 테스트 — maxAttempts를 모두 소진해 최종 실패해도
+     * [GateDbWriteTask.onDropOrFinalFailure]가 호출돼야 한다.
+     */
+    @Test
+    fun `재시도를 모두 소진해 최종 실패하면 onDropOrFinalFailure가 호출된다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val fallbackCalled = CountDownLatch(1)
+
+        queue.enqueue(
+            GateDbWriteTask(
+                partitionKey = "192.168.0.9",
+                operationName = "ALWAYS_FAIL_WITH_FALLBACK",
+                maxAttempts = 2,
+                timeout = 1.seconds,
+                onDropOrFinalFailure = { fallbackCalled.countDown() },
+            ) {
+                throw RuntimeException("항상 실패")
+            },
+        )
+
+        assertTrue(fallbackCalled.await(5, TimeUnit.SECONDS), "최종 실패한 작업의 onDropOrFinalFailure가 호출되지 않았습니다")
+
+        queue.shutdown()
+    }
 }

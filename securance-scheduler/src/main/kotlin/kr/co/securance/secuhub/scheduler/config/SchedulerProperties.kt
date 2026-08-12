@@ -54,4 +54,24 @@ data class SchedulerProperties(
      * 보관 정리 잡 실행 시각(Quartz cron 표현식). 트래픽이 가장 적을 새벽 시간대 기본값.
      */
     val retentionCron: String = "0 0 3 * * ?",
+
+    /**
+     * 큐 드롭 durable 재작성(2026-08-12, `docs/작업일지.md` 참고) — `OprStatusOutboxReplayJob` 자체를
+     * 끌 수 있는 스위치. 꺼도 [OprStatusPersister]가 드롭/최종실패 시 outbox에 저장하는 동작 자체는
+     * 계속되므로(안전장치는 유지), 재처리만 멈춘다.
+     */
+    val oprStatusOutboxReplayEnabled: Boolean = true,
+
+    /** `OprStatusOutboxReplayJob` 반복 주기(초) — 저빈도 배치라 다른 잡들보다 넉넉하게 잡는다. */
+    val oprStatusOutboxReplayIntervalSeconds: Long = 60,
+
+    /** 한 번의 실행에서 재처리할 최대 outbox 행 수. */
+    val oprStatusOutboxBatchSize: Int = 200,
+
+    /**
+     * 재처리가 몇 번 실패하면 자동 재시도를 포기하고 수동 확인 대상으로 남길지. 값을 넘겨도 행 자체는
+     * 지우지 않는다(`processed=false`로 유지) — 운영자가 원인을 파악할 수 있도록 조회 가능한 상태로
+     * 남겨두는 것이 목적이다.
+     */
+    val oprStatusOutboxMaxRetries: Int = 10,
 )

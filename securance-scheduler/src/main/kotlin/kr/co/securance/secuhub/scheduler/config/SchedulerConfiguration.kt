@@ -2,8 +2,10 @@ package kr.co.securance.secuhub.scheduler.config
 
 import kr.co.securance.secuhub.scheduler.job.NetCheckJob
 import kr.co.securance.secuhub.scheduler.job.ReqStatusJob
+import kr.co.securance.secuhub.scheduler.job.RetentionCleanupJob
 import kr.co.securance.secuhub.scheduler.job.SendControlJob
 import kr.co.securance.secuhub.server.control.ControlProperties
+import org.quartz.CronTrigger
 import org.quartz.JobDetail
 import org.quartz.SimpleTrigger
 import org.quartz.Trigger
@@ -11,6 +13,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.scheduling.quartz.CronTriggerFactoryBean
 import org.springframework.scheduling.quartz.JobDetailFactoryBean
 import org.springframework.scheduling.quartz.SimpleTriggerFactoryBean
 import java.util.Date
@@ -103,5 +106,40 @@ class SchedulerConfiguration {
             // 폴링이 밀렸을 때 밀린 횟수만큼 몰아서 실행하면 같은 명령을 반복 조회하게 되므로,
             // 다음 정상 시각으로 재조정만 하고 지나간 실행은 버린다.
             setMisfireInstruction(SimpleTrigger.MISFIRE_INSTRUCTION_RESCHEDULE_NEXT_WITH_REMAINING_COUNT)
+        }.also { it.afterPropertiesSet() }.`object`!!
+
+    // ── D5 데이터 보관 정리 잡 ──────────────────────────────────────
+
+    @Bean
+    @ConditionalOnProperty(
+        prefix = "securance.scheduler",
+        name = ["retention-enabled"],
+        havingValue = "true",
+        matchIfMissing = true,
+    )
+    fun retentionCleanupJobDetail(): JobDetail =
+        JobDetailFactoryBean().apply {
+            setJobClass(RetentionCleanupJob::class.java)
+            setName("retentionCleanupJob")
+            setDurability(true)
+        }.also { it.afterPropertiesSet() }.`object`!!
+
+    /**
+     * 다른 잡들과 달리 매초/매십초 반복이 아니라 하루 한 번 도는 cron 트리거를 쓴다
+     * (기본값 `securance.scheduler.retention-cron` = 매일 03:00) — 대량 삭제라 트래픽이 적은
+     * 새벽 시간대에 몰아서 실행하는 편이 낫다.
+     */
+    @Bean
+    @ConditionalOnProperty(
+        prefix = "securance.scheduler",
+        name = ["retention-enabled"],
+        havingValue = "true",
+        matchIfMissing = true,
+    )
+    fun retentionCleanupJobTrigger(retentionCleanupJobDetail: JobDetail, properties: SchedulerProperties): Trigger =
+        CronTriggerFactoryBean().apply {
+            setJobDetail(retentionCleanupJobDetail)
+            setCronExpression(properties.retentionCron)
+            setMisfireInstruction(CronTrigger.MISFIRE_INSTRUCTION_DO_NOTHING)
         }.also { it.afterPropertiesSet() }.`object`!!
 }

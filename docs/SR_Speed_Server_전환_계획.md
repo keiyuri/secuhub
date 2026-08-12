@@ -177,11 +177,12 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
   철회한다 — 규격 문서만으로 결론 낼 수 있는 문제였다(현장 여부와 무관). `GateTypeCodes.kt` 주석
   정정 완료. 유일한 실제 미구현분은 Fast Gate 전용 `FAST_GATE_MOTOR`(0x50) 모터 코덱이며 P11로
   계속 추적한다.
-- **D5. 데이터 보관/정리(retention) 정책**
-  레거시에도 없던 기능이라 "전환 누락"은 아니지만, 신규 코드베이스에도 `tb_data_rcv` /
-  `tb_data_rcv_anal` / `tb_gate_log`를 정리하는 잡·쿼리가 **전무**하다(`retention`/`purge`/
-  `cleanup` grep 0건). 상태 패킷이 초 단위로 쌓이는 구조라 무한 증가하며, 설계서 4.5절
-  "보관/백업"이 미구현 상태로 남아 있다. 보존 기간 정책 결정이 필요하다.
+- ~~D5. 데이터 보관/정리(retention) 정책~~ **해결 완료(2026-08-12)** — 사용자 결정(보존 기간
+  365일)에 따라 `securance-scheduler`에 `RetentionCleanupJob`(Quartz, 매일 03:00)을 신규
+  추가했다. `tb_data_rcv`/`tb_data_rcv_anal`/`tb_gate_log` 각각에 `deleteBatchOlderThan`
+  (`DELETE ... LIMIT` 네이티브 쿼리, 배치 5,000건)을 반복 호출해 컷오프보다 오래된 행을 지운다.
+  `securance.scheduler.retention-*` 설정으로 기간/배치 크기/on-off 조정 가능. 상세는
+  `docs/작업일지.md` 2026.08.12 항목 참고.
 
 ## 4. 단계별 우선순위 제안
 

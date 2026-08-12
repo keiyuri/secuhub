@@ -3,6 +3,9 @@ package kr.co.securance.secuhub.domain.repository
 import kr.co.securance.secuhub.domain.entity.GateLog
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
+import org.springframework.data.jpa.repository.Modifying
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import java.time.LocalDateTime
 
 /**
@@ -24,4 +27,14 @@ interface GateLogRepository : JpaRepository<GateLog, Long>, JpaSpecificationExec
         errCode: Int,
         functionCode: Int,
     ): Boolean
+
+    /**
+     * D5 데이터 보관 정책(2026-08-12) — `reg_date`(실제 DB 적재 시각, [GateLog.regDate] 참고)
+     * 기준 컷오프보다 오래된 로그를 배치 단위로 삭제한다. `event_time`(장치 자체 시각)이 아니라
+     * `reg_date`를 기준으로 삼는 이유는 장치 시계 오차/역전에 영향받지 않는 서버 수신 시각이
+     * 보관 정책의 기준으로 더 안정적이기 때문이다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "DELETE FROM tb_gate_log WHERE reg_date < :cutoff LIMIT :batchSize", nativeQuery = true)
+    fun deleteBatchOlderThan(@Param("cutoff") cutoff: LocalDateTime, @Param("batchSize") batchSize: Int): Int
 }

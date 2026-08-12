@@ -157,4 +157,13 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
         @Param("resolvedBy") resolvedBy: String,
         @Param("resolvedAt") resolvedAt: LocalDateTime,
     ): Int
+
+    /**
+     * D5 데이터 보관 정책(2026-08-12) — `anal_date`(`yyyyMMddHHmm`) 기준 컷오프보다 오래된 분석
+     * 결과를 배치 단위로 삭제한다. [DataReceiveRepository.deleteBatchOlderThan]과 동일한 이유로
+     * 네이티브 `LIMIT` 삭제를 쓴다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "DELETE FROM tb_data_rcv_anal WHERE anal_date < :cutoff LIMIT :batchSize", nativeQuery = true)
+    fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
 }

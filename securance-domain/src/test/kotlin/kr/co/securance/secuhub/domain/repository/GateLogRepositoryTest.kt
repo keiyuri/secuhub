@@ -33,9 +33,9 @@ class GateLogRepositoryTest {
 
     private val sampleTime: LocalDateTime = LocalDateTime.of(2025, 8, 5, 15, 0, 25)
 
-    private fun sample() = GateLog(
+    private fun sample(dtlLaneNo: Int = 0) = GateLog(
         dtlIp = "192.168.0.50",
-        dtlLaneNo = 0,
+        dtlLaneNo = dtlLaneNo,
         eventType = 0x18,
         objectCode = 0x01,
         code = 0x05,
@@ -73,5 +73,27 @@ class GateLogRepositoryTest {
         )
 
         assertFalse(exists)
+    }
+
+    /**
+     * [GateLogRepository.deleteBatchOlderThan] 검증 — D5 데이터 보관 정책(2026-08-12,
+     * `docs/작업일지.md` 참고). `reg_date`는 DB 기본값(`CURRENT_TIMESTAMP`)이라 애플리케이션에서
+     * 직접 지정할 수 없으므로, `entityManager`로 직접 과거 시각을 UPDATE해 오래된 행을 흉내낸다.
+     */
+    @Test
+    fun `reg_date가 컷오프보다 오래된 행만 지운다`() {
+        val old = sample(dtlLaneNo = 0) // 곧 과거로 되돌릴 행
+        val recent = sample(dtlLaneNo = 1) // 방금 적재된 행(유지 대상, 자연키 충돌 방지용으로 레인만 다르게)
+        entityManager.persistAndFlush(old)
+        entityManager.persistAndFlush(recent)
+        entityManager.entityManager
+            .createNativeQuery("UPDATE tb_gate_log SET reg_date = '2025-01-01 00:00:00' WHERE log_id = ${old.logId}")
+            .executeUpdate()
+        entityManager.clear()
+
+        val deleted = repository.deleteBatchOlderThan(LocalDateTime.of(2026, 1, 1, 0, 0), 100)
+
+        assertTrue(deleted == 1)
+        assertTrue(repository.findAll().size == 1)
     }
 }

@@ -44,6 +44,14 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+    # datasource.hikari.data-source-properties.socketTimeout(5초)은 GateDbWriteQueue 워커의
+    # 블로킹 쿼리를 강제로 풀어주기 위한 값인데, Flyway가 별도 URL을 안 쓰면 이 설정을 그대로
+    # 물려받는다. ADD INDEX 같은 DDL은 테이블이 커지면 5초를 쉽게 넘겨 마이그레이션 도중 소켓이
+    # 끊기고 앱 기동 자체가 실패한다(2026-08-12 V2 마이그레이션 실패 로그로 확인). Flyway 전용
+    # 커넥션은 같은 DB를 보되 소켓 타임아웃을 훨씬 넉넉하게 재정의한다.
+    url: ${SECURANCE_DB_URL:jdbc:mariadb://192.168.0.91:28030/securance_gate}?socketTimeout=120000&connectTimeout=3000
+    user: ${SECURANCE_DB_USER:dba}
+    password: ${SECURANCE_DB_PASSWORD:securance}
 
   thymeleaf:
     cache: false # 운영 프로필(application-prod.yml)에서 true로 재정의.

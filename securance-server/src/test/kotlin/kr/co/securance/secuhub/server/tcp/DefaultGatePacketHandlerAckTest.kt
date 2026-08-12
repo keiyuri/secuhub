@@ -5,7 +5,6 @@ import kotlinx.coroutines.runBlocking
 import kr.co.securance.secuhub.domain.repository.DataReceiveAckRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveAnalysisRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveFailRepository
-import kr.co.securance.secuhub.domain.repository.DataReceiveLogRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveRepository
 import kr.co.securance.secuhub.domain.repository.DataSendRepository
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
@@ -73,7 +72,6 @@ class DefaultGatePacketHandlerAckTest {
         mock(DataReceiveFailRepository::class.java),
         mock(DataReceiveAnalysisRepository::class.java),
         mock(GateFaultResolutionService::class.java),
-        mock(DataReceiveLogRepository::class.java),
     ) {
         var receiveCount = 0
         var ackCount = 0

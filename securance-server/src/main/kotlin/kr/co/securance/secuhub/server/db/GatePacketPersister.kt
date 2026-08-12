@@ -5,16 +5,12 @@ import kr.co.securance.secuhub.domain.entity.DataReceive
 import kr.co.securance.secuhub.domain.entity.DataReceiveAck
 import kr.co.securance.secuhub.domain.entity.DataReceiveAnalysis
 import kr.co.securance.secuhub.domain.entity.DataReceiveFail
-import kr.co.securance.secuhub.domain.entity.DataReceiveLog
 import kr.co.securance.secuhub.domain.repository.DataReceiveAckRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveAnalysisRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveFailRepository
-import kr.co.securance.secuhub.domain.repository.DataReceiveLogRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveRepository
-import kr.co.securance.secuhub.protocol.GateLogEntry
 import kr.co.securance.secuhub.protocol.GatePacket
 import kr.co.securance.secuhub.protocol.GateStatusAnalyzer
-import kr.co.securance.secuhub.protocol.SpeedGateLogCodec
 import kr.co.securance.secuhub.protocol.SpeedGateProtocolConstants
 import kr.co.securance.secuhub.server.connection.GateConnectionState
 import kr.co.securance.secuhub.server.control.GateFaultCategory
@@ -42,7 +38,6 @@ class GatePacketPersister(
     private val dataReceiveFailRepository: DataReceiveFailRepository,
     private val dataReceiveAnalysisRepository: DataReceiveAnalysisRepository,
     private val faultResolutionService: GateFaultResolutionService,
-    private val dataReceiveLogRepository: DataReceiveLogRepository,
 ) {
     private val logger = LoggerFactory.getLogger(GatePacketPersister::class.java)
 
@@ -73,14 +68,13 @@ class GatePacketPersister(
                 true
             }
 
-            // 게이트 로그(0x61) — 36바이트 고정 엔트리를 구조화 파싱해 tb_gate_log_event에 건별 적재한다
-            // (3차 스프린트, SpeedGate_Log_protocol_20260728_01.md). Data 구간은 다른 Object Code와
-            // 동일한 공통 봉투(Header+DataInfo+Data+Tail)를 쓴다고 보고 packet.dataCount/dataInfoLength로
-            // 위치를 계산한다 — Log 전용 봉투 규격이 문서에 별도로 없기 때문(코덱 KDoc 참고).
-            SpeedGateProtocolConstants.ObjectCode.GATE_LOG -> {
-                persistLogEntries(state, packet, laneNo)
-                true
-            }
+            // 게이트 로그(0x61)는 여기서 다루지 않는다 — DefaultGatePacketHandler가 GATE_STATUS에
+            // 내장된 로그 구간(핵심 경로) 또는 독립 GATE_LOG 패킷(하위 호환 경로) 모두를
+            // GateLogService로 직접 라우팅하고, 이 메서드(persistReceivedPacket)는 그 경우 아예
+            // 호출되지 않는다(DefaultGatePacketHandler.handle의 objectCode 분기 참고). 예전에는 이
+            // 클래스에도 별도의 GATE_LOG 처리 분기(persistLogEntries → tb_gate_log_event)가 있었지만,
+            // GateLogService 도입(2026-08-07 레이아웃 정정) 이후 도달 불가능한 죽은 코드로 남아있었다
+            // — 실사용되지 않는 중복 저장 경로였음을 2026-08-12에 확인하고 제거했다(작업일지 0011).
 
             else -> {
                 // 레거시 default 분기와 동일하게, 최소한 원본을 로그에 남겨 사후 수동 복구가 가능하게 한다.
@@ -91,65 +85,6 @@ class GatePacketPersister(
                 false
             }
         }
-    }
-
-    /** 0x61 로그 패킷의 Data 구간을 잘라내 [SpeedGateLogCodec]으로 파싱하고, 엔트리별로 적재를 큐잉한다. */
-    private fun persistLogEntries(state: GateConnectionState, packet: GatePacket, laneNo: Int) {
-        val raw = packet.raw
-        val dataStart = SpeedGateProtocolConstants.HEADER_LENGTH + packet.dataInfoLength
-        val dataEnd = minOf(
-            dataStart + packet.dataCount * SpeedGateProtocolConstants.LOG_ENTRY_LENGTH,
-            raw.size - SpeedGateProtocolConstants.TAIL_LENGTH,
-        )
-        if (dataEnd <= dataStart) {
-            logger.warn("커넥션[{}] 0x61 로그 패킷에 엔트리가 없습니다: dataCount={}, size={}", state.dtlIp, packet.dataCount, raw.size)
-            return
-        }
-        val entries = SpeedGateLogCodec.decodeEntries(raw.copyOfRange(dataStart, dataEnd), packet.dataCount)
-        if (entries.size < packet.dataCount) {
-            logger.warn(
-                "커넥션[{}] 0x61 로그 패킷이 손상/절단된 것으로 보입니다: 기대 {}건, 파싱 {}건",
-                state.dtlIp, packet.dataCount, entries.size,
-            )
-        }
-        entries.forEach { entry -> enqueueLogInsert(state, entry, laneNo) }
-    }
-
-    /** 로그 엔트리 1건을 `tb_gate_log_event`에 적재한다. */
-    private fun enqueueLogInsert(state: GateConnectionState, entry: GateLogEntry, laneNo: Int) {
-        val info = state.laneInfoOf(laneNo) ?: state.primaryLaneInfo
-        val now = LocalDateTime.now()
-        val entity = DataReceiveLog(
-            rcvDate = now.format(RCV_DATE_FORMAT),
-            sortDate = now.format(TIMESTAMP_FORMAT),
-            dtlIp = state.dtlIp,
-            dtlLaneNo = laneNo,
-            dtlType = info?.dtlType ?: state.gateTypeCode,
-            dtlId = info?.dtlId,
-            locId = info?.locId,
-            grpId = info?.grpId,
-            eventType = entry.eventType.toInt() and 0xFF,
-            objectCode = entry.objectCode.toInt() and 0xFF,
-            code = entry.code.toInt() and 0xFF,
-            errCode = entry.errCode.toInt() and 0xFF,
-            operationMode = entry.operationMode.toInt() and 0xFF,
-            readerType = entry.readerType.toInt() and 0xFF,
-            moduleNumber = entry.moduleNumber,
-            readerNumber = entry.readerNumber,
-            doorStatus = entry.doorStatus.toInt() and 0xFF,
-            functionCode = entry.functionCode,
-            eventTime = entry.eventTime,
-            userData1 = HexCodec.toHex(entry.userData1),
-            userData2 = HexCodec.toHex(entry.userData2),
-            logRaw = HexCodec.toHex(entry.raw),
-        )
-
-        dbWriteQueue.enqueue(
-            GateDbWriteTask(partitionKey = state.dtlIp, operationName = "InsertReceiveLog(${state.dtlIp},$laneNo)") {
-                dataReceiveLogRepository.save(entity)
-                Unit
-            },
-        )
     }
 
     /**

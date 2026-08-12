@@ -143,8 +143,17 @@ object SpeedGatePacketCodec {
         require(address.size == SpeedGateProtocolConstants.ADDRESS_LENGTH) {
             "address는 ${SpeedGateProtocolConstants.ADDRESS_LENGTH}바이트여야 합니다: ${address.size}"
         }
+        // 적대적 리뷰 지적(2026-08-13): 호출자가 헤더 필드 폭을 넘는 값을 넘기면 이 함수가 조용히
+        // 잘라서(overflow) 헤더와 실제 페이로드 길이가 어긋난 패킷을 만들어낼 수 있었다 — 수신측
+        // 프레이밍 손실/오해석으로 이어지는 조용한 실패라 여기서 명시적으로 막는다.
+        require(dataInfoLength in 0..0xFF) { "dataInfoLength는 0~255 범위여야 합니다(1바이트 필드): $dataInfoLength" }
+        require(dataCount in 0..0xFFFF) { "dataCount는 0~65535 범위여야 합니다(2바이트 필드): $dataCount" }
+        require(dataLength in 0..0xFFFF) { "dataLength는 0~65535 범위여야 합니다(2바이트 필드): $dataLength" }
 
         val totalLength = SpeedGateProtocolConstants.HEADER_LENGTH + payload.size + SpeedGateProtocolConstants.TAIL_LENGTH
+        require(totalLength <= 0xFFFF) {
+            "패킷 전체 길이가 Packet Length 필드 범위(0~65535)를 벗어납니다: $totalLength"
+        }
 
         val header = ByteArray(SpeedGateProtocolConstants.HEADER_LENGTH)
         header[HeaderOffset.STX] = SpeedGateProtocolConstants.STX

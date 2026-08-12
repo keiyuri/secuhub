@@ -4,6 +4,7 @@ import java.time.DayOfWeek
 import java.time.LocalDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class SpeedGatePacketCodecTest {
@@ -87,5 +88,58 @@ class SpeedGatePacketCodecTest {
         packet[10] = (packet[10] + 1).toByte() // 본문 한 바이트를 변조
 
         assertTrue(!SpeedGatePacketCodec.verifyChecksum(packet))
+    }
+
+    // 적대적 리뷰 지적(2026-08-13, FastGateMotorCodec 리뷰): buildPacket이 헤더 필드 폭을 넘는
+    // dataInfoLength/dataCount/dataLength/totalLength를 조용히 잘라(overflow) 헤더와 실제 페이로드
+    // 길이가 어긋난 패킷을 만들 수 있었다 — 모든 호출자(FastGateMotorCodec 포함)를 방어하도록
+    // 공통 buildPacket에 범위 검증을 추가했다. 아래는 그 경계 검증.
+
+    @Test
+    fun `buildPacket - dataCount가 65535을 넘으면 예외`() {
+        assertFailsWith<IllegalArgumentException> {
+            SpeedGatePacketCodec.buildPacket(
+                address = SpeedGatePacketCodec.ZERO_ADDRESS,
+                command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+                command2 = SpeedGateProtocolConstants.Command2.WRITE,
+                objectCode = SpeedGateProtocolConstants.ObjectCode.FAST_GATE_MOTOR,
+                dataInfoLength = 0,
+                dataCount = 0x10000,
+                dataLength = 0,
+                payload = ByteArray(0),
+            )
+        }
+    }
+
+    @Test
+    fun `buildPacket - dataInfoLength가 255를 넘으면 예외`() {
+        assertFailsWith<IllegalArgumentException> {
+            SpeedGatePacketCodec.buildPacket(
+                address = SpeedGatePacketCodec.ZERO_ADDRESS,
+                command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+                command2 = SpeedGateProtocolConstants.Command2.WRITE,
+                objectCode = SpeedGateProtocolConstants.ObjectCode.FAST_GATE_MOTOR,
+                dataInfoLength = 0x100,
+                dataCount = 0,
+                dataLength = 0,
+                payload = ByteArray(0),
+            )
+        }
+    }
+
+    @Test
+    fun `buildPacket - 전체 패킷 길이가 65535를 넘으면 예외`() {
+        assertFailsWith<IllegalArgumentException> {
+            SpeedGatePacketCodec.buildPacket(
+                address = SpeedGatePacketCodec.ZERO_ADDRESS,
+                command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+                command2 = SpeedGateProtocolConstants.Command2.WRITE,
+                objectCode = SpeedGateProtocolConstants.ObjectCode.FAST_GATE_MOTOR,
+                dataInfoLength = 0,
+                dataCount = 1,
+                dataLength = 0,
+                payload = ByteArray(0x10000), // Header(27)+65536+Tail(4) > 65535
+            )
+        }
     }
 }

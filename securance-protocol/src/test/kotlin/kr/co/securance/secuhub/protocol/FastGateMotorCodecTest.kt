@@ -134,6 +134,29 @@ class FastGateMotorCodecTest {
     }
 
     @Test
+    fun `Request 명령 - 레인 32개(MAX_LANE_COUNT)까지는 허용된다`() {
+        val lanes = (1..32).toList()
+        val packet = FastGateMotorCodec.buildRequestCommand(lanes)
+        // Header(27) + Data(32) + Tail(4) = 63
+        assertEquals(63, packet.size)
+        assertEquals(32, packet[24].toInt() and 0xFF) // DataCount low = 32
+    }
+
+    @Test
+    fun `Request 명령 - 레인 33개(MAX_LANE_COUNT 초과)면 예외`() {
+        // 값 자체는 1~32 범위 안에서 중복으로 채워, "개수 제한" 검증이 "값 범위" 검증과 별개로
+        // 동작하는지 확인한다(적대적 리뷰 지적 — 이전에는 개수를 제한하지 않아 중복을 채운 대량
+        // 목록이 buildPacket의 16비트 dataCount/dataLength를 오버플로할 수 있었다).
+        val lanes = List(33) { (it % 32) + 1 }
+        assertFailsWith<IllegalArgumentException> { FastGateMotorCodec.buildRequestCommand(lanes) }
+    }
+
+    @Test
+    fun `Request 명령 - 중복 레인 번호면 예외`() {
+        assertFailsWith<IllegalArgumentException> { FastGateMotorCodec.buildRequestCommand(listOf(1, 2, 1)) }
+    }
+
+    @Test
     fun `Request 명령 - 빈 목록이면 예외`() {
         assertFailsWith<IllegalArgumentException> { FastGateMotorCodec.buildRequestCommand(emptyList()) }
     }

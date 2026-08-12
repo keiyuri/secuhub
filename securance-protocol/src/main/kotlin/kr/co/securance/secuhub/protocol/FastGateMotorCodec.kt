@@ -156,6 +156,14 @@ object FastGateMotorCodec {
      */
     fun buildRequestCommand(laneNumbers: List<Int>): ByteArray {
         require(laneNumbers.isNotEmpty()) { "laneNumbers는 최소 1개 이상이어야 합니다" }
+        // 적대적 리뷰 지적(2026-08-13): 장비는 레인을 최대 MAX_LANE_COUNT개만 가지므로, 그보다 긴
+        // 목록(중복 포함)은 API 경계에서 거부한다 — 이전에는 범위(1~32) 검사만 하고 개수는 제한하지
+        // 않아, 중복을 채운 대량 목록이 buildPacket의 16비트 dataCount/dataLength를 오버플로해
+        // 헤더와 실제 본문 길이가 어긋나는 패킷을 만들 수 있었다.
+        require(laneNumbers.size <= SpeedGateProtocolConstants.MAX_LANE_COUNT) {
+            "laneNumbers는 최대 ${SpeedGateProtocolConstants.MAX_LANE_COUNT}개까지만 허용됩니다: ${laneNumbers.size}"
+        }
+        require(laneNumbers.toSet().size == laneNumbers.size) { "laneNumbers에 중복된 레인 번호가 있습니다: $laneNumbers" }
         for (lane in laneNumbers) {
             require(lane in 1..SpeedGateProtocolConstants.MAX_LANE_COUNT) { "laneNo 범위 오류: $lane" }
         }

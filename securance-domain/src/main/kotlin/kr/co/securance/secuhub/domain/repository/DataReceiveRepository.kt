@@ -3,7 +3,6 @@ package kr.co.securance.secuhub.domain.repository
 import kr.co.securance.secuhub.domain.entity.DataReceive
 import kr.co.securance.secuhub.domain.entity.DataReceiveAck
 import kr.co.securance.secuhub.domain.entity.DataReceiveFail
-import kr.co.securance.secuhub.domain.entity.DataReceiveLog
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
@@ -27,4 +26,5 @@ interface DataReceiveFailRepository : JpaRepository<DataReceiveFail, Long>
 
 interface DataReceiveAckRepository : JpaRepository<DataReceiveAck, Long>
 
-interface DataReceiveLogRepository : JpaRepository<DataReceiveLog, Long>
+// DataReceiveLogRepository(tb_gate_log_event)는 2026-08-12 제거됐다 — 자세한 경위는
+// DataReceive.kt의 관련 주석과 docs/작업일지.md 0011 참고.

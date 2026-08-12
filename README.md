@@ -114,8 +114,11 @@ Copy-Item securance-app\src\main\resources\application-local.yml.example `
 
 - ~~**로그(Log) 처리 전체**~~ — 레거시가 미구현이라 신규 설계가 필요했던 항목(계획서 3.8절).
   `LogEventCodec`(securance-protocol)과 `GateLogService`(securance-server)로 구현 완료.
-- **Turn Gate / Fast Gate 프로토콜 코덱** — 규격 문서 미확보. `GateProtocolCodecRegistry`
-  (securance-protocol)에 구현체만 추가하면 되는 확장 지점은 마련해 두었다.
+- ~~**Turn Gate / Fast Gate 프로토콜 코덱**~~ — `FastGate Protocol Ver1_2020102601_01.md`
+  (SmartGate Protocol) 규격 문서 확보 후 대조한 결과 Speed/Flap/Turn/Fast 4종 게이트가 완전히
+  동일한 봉투를 쓴다는 것을 확인했다(`SpeedFlapGateProtocolCodec.supportedGateTypes` 4종 지원이
+  이미 정답이었음). Fast Gate 전용 확장 Object Code `FAST_GATE_MOTOR`(0x50, 72바이트 Turn/Slide
+  모터 페이로드)도 `FastGateMotorCodec`으로 구현 완료(2026-08-13) — 화면/서비스 연동은 아직 없음.
 - **레거시 저장 프로시저 나머지**(holiday/timezone/motor push 등) — 핵심 흐름(수신→분석→집계)만 우선 이식.
 - **나머지 엔티티**(`tb_time`, `tb_calendar`, `tb_log`, `tb_data_rcv_motor/ctrl`, `tb_data_init` 등) —
   `V1__init_schema.sql`에 없음. `V2__...`로 동일 패턴 추가.

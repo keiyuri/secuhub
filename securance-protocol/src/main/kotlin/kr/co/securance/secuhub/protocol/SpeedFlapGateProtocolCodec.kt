@@ -15,8 +15,9 @@ import java.time.LocalDateTime
  * (decode/ack/상태요청/제어명령)에서는 추가 분기가 필요 없다(제어모드 필드에 Pause/Slide 값이
  * 늘어난 것뿐 — [SpeedGateControlCommand] 참고). 따라서 이 코덱 하나로 네 타입 모두 처리한다.
  *
- * Fast Gate 전용 확장인 `FAST_GATE_MOTOR(0x50)` Set/Request는 아직 구현하지 않았다
- * ([SpeedGateProtocolConstants.ObjectCode.FAST_GATE_MOTOR] 참고).
+ * Fast Gate 전용 확장인 `FAST_GATE_MOTOR(0x50)` Set/Request는 이 코덱이 다루는 공통 봉투 밖의
+ * 별도 오브젝트라 [GateProtocolCodec] 인터페이스에는 편입하지 않고, [FastGateMotorCodec]에서
+ * 독립적으로 제공한다(2026-08-13).
  */
 class SpeedFlapGateProtocolCodec : GateProtocolCodec {
 

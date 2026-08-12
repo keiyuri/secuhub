@@ -146,9 +146,9 @@ object SpeedGateProtocolConstants {
 
         /**
          * Fast Gate Motor Data — Fast Gate 전용 모터 설정/조회(`FastGate Protocol Ver1_2020102601_01.md`,
-         * Object Table 0x50 'P'). 이 상수만 정의해두고 Set/Request 페이로드(72바이트, Turn/Slide 모터
-         * 파라미터) 인코딩은 아직 구현하지 않았다 — 실제 Fast Gate 모터 제어 화면/기능 요구가 생기면
-         * 이 상수를 기준으로 전용 코덱을 추가한다.
+         * Object Table 0x50 'P'). Set/Request 페이로드(72바이트, Turn/Slide 모터 파라미터) 인코딩은
+         * [FastGateMotorCodec]에 구현되어 있다(2026-08-13). 화면/서비스 연동은 아직 없음 — 실제 Fast
+         * Gate 모터 제어 화면 요구가 생기면 이 코덱을 기준으로 배선한다.
          */
         const val FAST_GATE_MOTOR: Byte = 0x50
     }

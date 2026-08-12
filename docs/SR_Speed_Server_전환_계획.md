@@ -14,13 +14,13 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 
 | 구분 | 건수 | 비고 |
 | --- | --- | --- |
-| 완전 전환 | 17 | TCP 수신·분석·ACK·DB 파이프라인·Quartz 잡 3종 + 모터/스케줄/휴일 수신 저장 + **CLIENT 모드**(2026-08-11 신규) 등 |
-| 부분 전환 | 1 | `FAST_GATE_MOTOR`(0x50) 코덱 미구현(P11/P9 잔여분, 아래 참고) |
+| 완전 전환 | 18 | TCP 수신·분석·ACK·DB 파이프라인·Quartz 잡 3종 + 모터/스케줄/휴일 수신 저장 + **CLIENT 모드**(2026-08-11 신규) + **`FAST_GATE_MOTOR`(0x50) 코덱**(2026-08-13 신규) 등 |
+| 부분 전환 | 0 | — |
 | 미전환 | 0 | — |
 | 의도적 제외 | 3 | 메모리 GC 워치독, INI 설정, 서비스 인스톨러. UDP 에코(D2)도 제외 확정(3절 참고) |
 | 레거시 초과(신규) | 1 | `GATE_LOG`(0x61) 로그 파싱 — 레거시 미구현분을 신규 설계 |
 
-**전환률: 약 100%**(완전 17 + 부분 0.5 / 전체 17.5, 의도적 제외 4건은 분모에서 제외).
+**전환률: 100%**(완전 18 / 전체 18, 의도적 제외 4건은 분모에서 제외).
 
 > **2026-08-12 정정(D4/P9)**: `FastGate Protocol Ver1_2020102601_01.md`(SmartGate Protocol, 상위
 > 호환 규격 원본)를 직접 대조한 결과, Speed/Flap/Turn/Fast **4개 타입 모두 동일한 봉투**(Header
@@ -31,9 +31,9 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 > `GateTypeCodes.kt`/설계서 3.4절의 서술이 낡은 것이었고, `SpeedFlapGateProtocolCodec.
 > supportedGateTypes`가 4종 전부를 지원하는 **코드 쪽이 정답**이었다 — 현장에 Turn/Fast 게이트가
 > 있는지와 무관하게 규격 문서만으로 결론 낼 수 있는 문제였다(정정 전 "현장 확인 필요" 판단 철회).
-> `GateTypeCodes.kt` 주석을 갱신했다. 유일하게 실제로 미구현인 것은 Fast Gate 전용 모터 설정
-> Object Code `FAST_GATE_MOTOR`(0x50, 72바이트 TURN/SLIDE 모터 포지션·RPM·보정값 페이로드)뿐이며,
-> 이는 P11에서 이미 별도로 추적 중이던 항목이다.
+> `GateTypeCodes.kt` 주석을 갱신했다. 유일하게 실제로 미구현이던 Fast Gate 전용 모터 설정
+> Object Code `FAST_GATE_MOTOR`(0x50, 72바이트 TURN/SLIDE 모터 포지션·RPM·보정값 페이로드)는
+> P11에서 추적하다가 2026-08-13에 `FastGateMotorCodec.kt`로 구현 완료했다(아래 참고).
 
 > **2026-08-11 정정**: 최초 분석에서 R3(모터)/R4(스케줄)/R5(휴일) 수신 저장을 "미전환"으로
 > 잘못 판정했다(아래 정오표 참고). `GatePacketPersister.persistReceivedPacket`을 실제로
@@ -75,7 +75,7 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 | P8 | `SendAckData` | `SpeedServer.cs:1337` | 수신 패킷에 대한 ACK 응답 송신 | **완료** | `DefaultGatePacketHandler`(ACK 경로) |
 | P9 | 게이트 타입별 코덱 분리 | — | Speed/Flap 공용, Turn/Fast는 별도 규격(추정) | **완료(2026-08-12 정정)** | 규격 문서(`FastGate Protocol Ver1_2020102601_01.md`) 대조 결과 4종 모두 동일 봉투/객체코드를 쓰는 것으로 확인 — `SpeedFlapGateProtocolCodec`이 `supportedGateTypes`에 4종 전부를 등록한 것이 정답이었다. 설계서 3.4절의 "Turn/Fast 별도 규격" 추정이 규격 미확보 시점의 낡은 서술이었다(3절 D4 참고) |
 | P10 | Object Code 정의 범위 | `ClsConst.cs` | — | **부분** | `SpeedGateProtocolConstants.ObjectCode`에 **15종 상수**가 정의돼 있으나 실제 인코딩/파싱 구현이 있는 것은 **0x4D/0x4C/0x4B/0x46/0x54/0x61의 6종**뿐. 나머지 9종(0x4E/0x47/0x4F/0x52/0x55/0x48/0x57/0x50 등)은 **상수만 있고 빌더·파서 없음** |
-| P11 | `FAST_GATE_MOTOR`(0x50) | — | FastGate 모터 설정 | **미전환** | 상수만 정의, 페이로드 코덱 없음 |
+| P11 | `FAST_GATE_MOTOR`(0x50) | — | FastGate 모터 설정 | **완료(2026-08-13)** | `FastGateMotorCodec.kt` — Set/Request 페이로드(72바이트, Turn/Slide 모터 3단계+초기속도) 인코딩. 화면/서비스 연동은 아직 없음(코덱만 완성) |
 
 ### 2.3 수신 데이터 처리 — **가장 큰 누락 지점**
 
@@ -193,7 +193,9 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 - **Phase S3 — 대시보드 알림 팝업 ↔ 리셋 배선**: 서버 측이 아니라 웹 측 작업이지만, 서버의
   `GateControlService`/`GateFaultResolutionService`가 이미 완성돼 있는데 화면만 연결이 안 된
   상태라 여기 함께 적는다. 상세는 `SR_Speed_Client_전환_계획.md` 2절 #1/#17 항목 참고.
-- **Phase S4 — Turn/Fast 코덱(P9)**: 규격 문서 확보 후.
+- ~~**Phase S4 — Turn/Fast 코덱(P9)**~~: **완료(2026-08-12 D4, 2026-08-13 P11)** — 공통 봉투는
+  이미 4종 게이트가 공유하고 있었음을 규격 문서 대조로 확인(D4), Fast Gate 전용 `FAST_GATE_MOTOR`
+  (0x50) 코덱까지 구현(P11)해 잔여분 없음.
 - **Phase S5 — 부하 검증**: 설계서 3.7절의 동시 연결 1,000개 목표가 아직 실측 검증되지 않았다
   (설계서 8절에 검증 항목으로만 존재). 목 TCP 클라이언트로 실측 필요.
 
@@ -205,7 +207,7 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 | # | 위치 | 내용 | 심각도 |
 | --- | --- | --- | --- |
 | B1 | `securance-domain/src/main/resources/db/migration/` | **Flyway 버전 번호 중복** — `V2`(align_entity_schema / fix_dashboard_query_indexes), `V3`(add_timezone / data_snd_optimistic_lock), `V4`(add_data_snd_pending_index / gate_log_events)가 각각 2개씩. Flyway는 동일 버전 중복 시 `Found more than one migration with version N`으로 **기동 시점에 실패**한다. `spring.flyway.enabled: true`이므로 **클린 DB 기동이 불가능할 가능성이 높다**. 병합 커밋(`4b0f13d`)에서 두 라인이 합쳐지며 발생한 것으로 보인다 | **최상** |
-| B2 | `ServerModeConfig.kt` vs `application.yml` | 게이트 TCP 포트 기본값 불일치 — 코드 기본값 **28010**, yml **9000**. `client-port`도 코드 1005 vs yml 9000. yml이 있으면 yml이 이기지만, 기본값에 의존하는 테스트/배포에서 어긋난다 | 중 |
+| B2 | `ServerModeConfig.kt` vs `application.yml` | ~~게이트 TCP 포트 기본값 불일치~~ **수정 완료(2026-08-13)** — 2026-08-07(5)에서 `ServerModeConfig.kt` 기본값을 실제 게이트 장비 포트(28010/1005)로 고쳤지만 `application.yml`/`application-local.yml.example`이 그 이전 자리표시자 값(9000/9000)에 그대로 남아 있어, yml이 항상 코드 기본값을 덮어써 실제로는 계속 잘못된 포트로 SERVER 바인딩/CLIENT 접속을 시도하고 있었다. yml 쪽을 코드 기본값(28010/1005)에 맞춰 정정 | ~~중~~ 완료 |
 | B3 | `securance-web/realtime/DashboardPushService.kt:68` | ~~`alertType = if (error.descFireAlarm != null) "FIRE" else "FAULT"`~~ **수정 완료(2026-08-11, 커밋 941b403)** — `isNotBlank()` 판정으로 교체, 리셋 버튼도 함께 배선 | ~~상~~ 완료 |
 | B4 | `securance-web/templates/gates/location-map.html:105` | ~~`th:inline="javascript"` 누락으로 좌표가 항상 (0,0) 저장~~ **수정 완료(2026-08-11, 커밋 0d208d7)** | ~~상~~ 완료 |
 | B5 | `MenuProvider.kt`, `dashboard.html:19,21,23` | ~~죽은 링크 3건~~ **수정 완료(2026-08-11, 커밋 aee9f51)** — `/control/history` 신규 화면 제작, 나머지 2건은 기존 화면으로 재연결 | ~~중~~ 완료 |

@@ -97,8 +97,11 @@ securance:
   server:
     mode: SERVER               # SERVER | CLIENT — 백엔드↔게이트 TCP 연결 방향(계획서 3.1절)
     host: 0.0.0.0
-    port: 9000
-    client-port: 9000
+    # 버그 수정(2026-08-13, B2): 2026-08-07(5)에서 ServerModeConfig.kt 기본값을 실제 게이트 장비
+    # 포트(28010/1005)로 고쳤지만 이 yml은 그 이전 자리표시자 값(9000)에 머물러 있었다 — yml이
+    # 코드 기본값을 항상 덮어써 SERVER 바인딩/CLIENT 접속이 실제로는 계속 잘못된 포트를 썼다.
+    port: 28010
+    client-port: 1005
     accept-backlog: 2048
     actor-queue-capacity: 2000
     db-writer-shards: 8        # 1,000+ 디바이스 규모에서는 16~32 권장(계획서 3.7절)

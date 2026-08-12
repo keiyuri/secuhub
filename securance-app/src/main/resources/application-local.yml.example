@@ -25,4 +25,5 @@ spring:
 securance:
   server:
     mode: SERVER
-    port: 9000
+    # 버그 수정(2026-08-13, B2): 실제 게이트 장비 포트(base application.yml과 동일)로 정정.
+    port: 28010

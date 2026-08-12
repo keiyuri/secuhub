@@ -24,7 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest
         "spring.datasource.driver-class-name=org.h2.Driver",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.flyway.enabled=false",
-        // 실제 게이트/포트 9000을 점유하지 않도록 임의 포트를 쓴다(GateTcpServer.boundPort 참고).
+        // 실제 게이트 포트(28010)를 점유하지 않도록 임의 포트를 쓴다(GateTcpServer.boundPort 참고).
         "securance.server.port=0",
     ],
 )

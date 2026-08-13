@@ -170,7 +170,18 @@ class GatePacketPersister(
             if (!info.analysisYn) continue
 
             if (analysis.errType == GateStatusAnalyzer.ErrorCheck.ERROR) {
-                enqueueAnalysisInsert(state, analysis, info.locId, info.grpId, info.dtlId, info.dtlType, analDate, rawHex, laneCount)
+                enqueueAnalysisInsert(
+                    state,
+                    analysis,
+                    info.locId,
+                    info.grpId,
+                    info.dtlId,
+                    info.dtlType,
+                    info.dtlName,
+                    analDate,
+                    rawHex,
+                    laneCount,
+                )
             } else {
                 enqueueRecovery(state, analysis)
             }
@@ -185,6 +196,7 @@ class GatePacketPersister(
         grpId: Long,
         dtlId: Long?,
         dtlType: Int,
+        dtlName: String?,
         analDate: String,
         rawHex: String,
         laneCount: Int,
@@ -202,6 +214,12 @@ class GatePacketPersister(
             rcvRaw = rawHex,
             analData = analysis.operationStatusHex,
             objCd = "%02X".format(SpeedGateProtocolConstants.ObjectCode.GATE_STATUS),
+            // desc_data_info_length/desc_gate_name/desc_gate_ip는 레거시 트리거가 항상 채우던 필드인데
+            // 이 엔티티 도입 초기에는 매핑이 누락돼 빈 문자열로만 저장되고 있었다(2026-08-14 실 DB
+            // 조회로 확인 — anal_id=856773 등 secuhub가 쓴 행만 이 세 컬럼이 비어 있었다).
+            descDataInfoLength = SpeedGateProtocolConstants.DATA_INFO_LENGTH.toString(),
+            descGateName = dtlName ?: "",
+            descGateIp = state.dtlIp,
             descGateLaneCount = laneCount.toString(),
             descGateLaneNumber = analysis.laneNumber.toString(),
             descGateType = GateStatusAnalyzer.describeGateType(analysis.gateType),

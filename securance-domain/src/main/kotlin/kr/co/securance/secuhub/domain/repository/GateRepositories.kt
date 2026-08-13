@@ -23,6 +23,8 @@ data class GateLaneInfo(
     val dtlType: Int,
     /** 분석/제어 대상 여부 — false면 상세 저장/제어 전송에서 제외한다. */
     val analysisYn: Boolean,
+    /** `tb_gate_dtl.dtl_nm` — `tb_data_rcv_anal.desc_gate_name` 적재에 쓴다(2026-08-14 매핑 누락 수정). */
+    val dtlName: String? = null,
 )
 
 interface GateLocationRepository : JpaRepository<GateLocation, Long>
@@ -104,7 +106,7 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
     @Query(
         """
         SELECT new kr.co.securance.secuhub.domain.repository.GateLaneInfo(
-            d.location.locId, d.group.grpId, d.dtlId, d.dtlLaneNo, d.dtlType, d.analysisYn
+            d.location.locId, d.group.grpId, d.dtlId, d.dtlLaneNo, d.dtlType, d.analysisYn, d.dtlName
         )
         FROM GateDetail d
         WHERE d.dtlIp = :dtlIp AND d.useYn = true

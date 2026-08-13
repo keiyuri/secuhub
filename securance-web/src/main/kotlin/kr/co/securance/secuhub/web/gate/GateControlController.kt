@@ -4,11 +4,13 @@ import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
+import kr.co.securance.secuhub.common.gate.GateTypeCodes
 import kr.co.securance.secuhub.common.util.HexCodec
 import kr.co.securance.secuhub.domain.entity.DataSend
 import kr.co.securance.secuhub.domain.entity.GateDetail
 import kr.co.securance.secuhub.domain.repository.DataSendRepository
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
+import kr.co.securance.secuhub.protocol.FastGateMotorCodec
 import kr.co.securance.secuhub.protocol.GateControlCommandBuilder
 import kr.co.securance.secuhub.protocol.SpeedGateControlCommand
 import kr.co.securance.secuhub.web.menu.MenuProvider
@@ -100,6 +102,21 @@ class GateControlService(
         return true
     }
 
+    /**
+     * Fast Gate 전용 모터 설정(P11, [FastGateMotorCodec]) — 신규 게이트 타입([GateTypeCodes.FAST_GATE])
+     * 전용 명령이라 레거시 대응이 없다(코덱 KDoc 참고). 다른 게이트 타입에 이 명령을 보내면 장비가
+     * 이해하지 못하는 Object Code를 받게 되므로, 호출자([GateControlController.fastMotorForm]/
+     * [GateControlController.fastMotorSubmit])가 `dtlType == FAST_GATE`를 먼저 확인해야 한다 —
+     * 이 서비스 메서드 자체는 그 가드를 반복하지 않는다(다른 sendXxx 메서드들과 동일하게 얇게 유지).
+     */
+    @Transactional
+    fun sendFastGateMotorSetup(dtlId: Long, params: FastGateMotorCodec.Params, requestedBy: String): Boolean {
+        val detail = findDetailOrNull(dtlId) ?: return false
+        val packet = FastGateMotorCodec.buildSetCommand(detail.dtlLaneNo, params)
+        enqueue(detail, packet, "FAST_MOTOR_SET", requestedBy)
+        return true
+    }
+
     private fun enqueue(detail: GateDetail, packet: ByteArray, typeCd: String, requestedBy: String, dataTp: String = "") {
         dataSendRepository.save(
             DataSend(
@@ -157,6 +174,65 @@ data class MotorSetupForm(
 ) {
     fun toMain() = GateControlCommandBuilder.MotorParams(mInitSpeed, mInitCount, mOpenSpeed, mOpenCount, mCloseSpeed, mCloseCount)
     fun toSub() = GateControlCommandBuilder.MotorParams(sInitSpeed, sInitCount, sOpenSpeed, sOpenCount, sCloseSpeed, sCloseCount)
+}
+
+/**
+ * Fast Gate 전용 모터 설정 폼 — [FastGateMotorCodec.Params]를 그대로 반영한다(Turn/Slide 모터
+ * 각 3단계(Position/Rpm/Compensation) + 초기속도, Master/Slave 구분, Auto Close/Test Time,
+ * Loof Exit 사용여부, Open Turn/Closed Slide Delay). 필드 접두사 `t`=Turn, `s`=Slide.
+ */
+data class FastGateMotorForm(
+    @field:NotBlank @field:Pattern(regexp = "MASTER|SLAVE", message = "Master/Slave를 선택하세요")
+    var masterSlave: String = "MASTER",
+
+    @field:Min(0) @field:Max(65535) var tPos1: Int = 0,
+    @field:Min(0) @field:Max(65535) var tRpm1: Int = 0,
+    @field:Min(0) @field:Max(65535) var tComp1: Int = 0,
+    @field:Min(0) @field:Max(65535) var tPos2: Int = 0,
+    @field:Min(0) @field:Max(65535) var tRpm2: Int = 0,
+    @field:Min(0) @field:Max(65535) var tComp2: Int = 0,
+    @field:Min(0) @field:Max(65535) var tPos3: Int = 0,
+    @field:Min(0) @field:Max(65535) var tRpm3: Int = 0,
+    @field:Min(0) @field:Max(65535) var tComp3: Int = 0,
+    @field:Min(-32768) @field:Max(32767) var tInitSpeed: Int = 0,
+
+    @field:Min(0) @field:Max(65535) var sPos1: Int = 0,
+    @field:Min(0) @field:Max(65535) var sRpm1: Int = 0,
+    @field:Min(0) @field:Max(65535) var sComp1: Int = 0,
+    @field:Min(0) @field:Max(65535) var sPos2: Int = 0,
+    @field:Min(0) @field:Max(65535) var sRpm2: Int = 0,
+    @field:Min(0) @field:Max(65535) var sComp2: Int = 0,
+    @field:Min(0) @field:Max(65535) var sPos3: Int = 0,
+    @field:Min(0) @field:Max(65535) var sRpm3: Int = 0,
+    @field:Min(0) @field:Max(65535) var sComp3: Int = 0,
+    @field:Min(-32768) @field:Max(32767) var sInitSpeed: Int = 0,
+
+    @field:Min(0) @field:Max(65535) var autoCloseTimeMs10: Int = 0,
+    @field:Min(0) @field:Max(65535) var autoTestTimeMs10: Int = 0,
+    var loofExitUsed: Boolean = false,
+    @field:Min(0) @field:Max(65535) var openTurnDelayTimeMs10: Int = 0,
+    @field:Min(0) @field:Max(65535) var closedSlideDelayTimeMs10: Int = 0,
+) {
+    fun toParams() = FastGateMotorCodec.Params(
+        masterSlave = FastGateMotorCodec.MasterSlave.valueOf(masterSlave),
+        turn = FastGateMotorCodec.MotorAxis(
+            stage1 = FastGateMotorCodec.MotorStage(tPos1, tRpm1, tComp1),
+            stage2 = FastGateMotorCodec.MotorStage(tPos2, tRpm2, tComp2),
+            stage3 = FastGateMotorCodec.MotorStage(tPos3, tRpm3, tComp3),
+            initSpeed = tInitSpeed,
+        ),
+        slide = FastGateMotorCodec.MotorAxis(
+            stage1 = FastGateMotorCodec.MotorStage(sPos1, sRpm1, sComp1),
+            stage2 = FastGateMotorCodec.MotorStage(sPos2, sRpm2, sComp2),
+            stage3 = FastGateMotorCodec.MotorStage(sPos3, sRpm3, sComp3),
+            initSpeed = sInitSpeed,
+        ),
+        autoCloseTimeMs10 = autoCloseTimeMs10,
+        autoTestTimeMs10 = autoTestTimeMs10,
+        loofExitUsed = loofExitUsed,
+        openTurnDelayTimeMs10 = openTurnDelayTimeMs10,
+        closedSlideDelayTimeMs10 = closedSlideDelayTimeMs10,
+    )
 }
 
 @Controller
@@ -220,6 +296,49 @@ class GateControlController(
         redirectAttributes.addFlashAttribute(
             "message",
             "모터 설정 명령을 전송 대기열에 등록했습니다. IP=${detail.dtlIp}, 레인=${detail.dtlLaneNo}",
+        )
+        return "redirect:/gates/details?grpId=${detail.group.grpId}"
+    }
+
+    /**
+     * Fast Gate 전용 모터 설정([FastGateMotorCodec], P11) — [GateTypeCodes.FAST_GATE]가 아닌
+     * 레인은 이 화면에 들어올 수 없다(장비가 이해하지 못하는 Object Code라 아예 진입을 막는다).
+     * `/gates/details.html`도 dtlType==FAST_GATE인 행에만 진입 버튼을 노출하지만, URL을 직접 입력해
+     * 들어오는 경로도 있으므로 여기서 다시 한번 검사한다.
+     */
+    @GetMapping("/fast-motor")
+    fun fastMotorForm(@PathVariable dtlId: Long, model: Model, redirectAttributes: RedirectAttributes): String {
+        val detail = gateControlService.findDetailOrNull(dtlId) ?: return "redirect:/gates/details"
+        if (detail.dtlType != GateTypeCodes.FAST_GATE) {
+            redirectAttributes.addFlashAttribute("message", "Fast Gate 전용 화면입니다. 대상 레인의 타입이 다릅니다.")
+            return "redirect:/gates/details?grpId=${detail.group.grpId}"
+        }
+        populateCommon(model, detail, "Fast Gate 모터 설정")
+        model.addAttribute("form", FastGateMotorForm())
+        return "gates/fast-motor-setup"
+    }
+
+    @PostMapping("/fast-motor")
+    fun fastMotorSubmit(
+        @PathVariable dtlId: Long,
+        @Validated @ModelAttribute("form") form: FastGateMotorForm,
+        binding: BindingResult,
+        model: Model,
+        redirectAttributes: RedirectAttributes,
+    ): String {
+        val detail = gateControlService.findDetailOrNull(dtlId) ?: return "redirect:/gates/details"
+        if (detail.dtlType != GateTypeCodes.FAST_GATE) {
+            redirectAttributes.addFlashAttribute("message", "Fast Gate 전용 화면입니다. 대상 레인의 타입이 다릅니다.")
+            return "redirect:/gates/details?grpId=${detail.group.grpId}"
+        }
+        if (binding.hasErrors()) {
+            populateCommon(model, detail, "Fast Gate 모터 설정")
+            return "gates/fast-motor-setup"
+        }
+        gateControlService.sendFastGateMotorSetup(dtlId, form.toParams(), currentUsername())
+        redirectAttributes.addFlashAttribute(
+            "message",
+            "Fast Gate 모터 설정 명령을 전송 대기열에 등록했습니다. IP=${detail.dtlIp}, 레인=${detail.dtlLaneNo}",
         )
         return "redirect:/gates/details?grpId=${detail.group.grpId}"
     }

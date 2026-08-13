@@ -50,6 +50,10 @@
                   <!--/* #12/#13(계획서 Phase 4) — 개별 게이트 제어 팝업 진입점 */-->
                   <a class="btn btn-sm btn-outline-primary" th:href="@{/gates/details/{id}/mode(id=${dtl.dtlId})}">모드변경</a>
                   <a class="btn btn-sm btn-outline-warning" th:href="@{/gates/details/{id}/motor(id=${dtl.dtlId})}">모터설정</a>
+                  <!--/* Fast Gate(dtlType=4)만 전용 모터 설정(P11, FastGateMotorCodec)이 있다 — 다른 타입 장비는
+                       이 Object Code(0x50)를 이해하지 못하므로 진입 버튼 자체를 숨긴다(GateControlController.fastMotorForm의
+                       서버측 재검증과 이중 방어). */-->
+                  <a th:if="${dtl.dtlType == 4}" class="btn btn-sm btn-outline-info" th:href="@{/gates/details/{id}/fast-motor(id=${dtl.dtlId})}">Fast모터</a>
                   <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/details/{id}/edit(id=${dtl.dtlId})}">수정</a>
                   <form th:action="@{/gates/details/{id}/delete(id=${dtl.dtlId})}" method="post" class="d-inline"
                         onsubmit="return confirm('삭제하시겠습니까?');">

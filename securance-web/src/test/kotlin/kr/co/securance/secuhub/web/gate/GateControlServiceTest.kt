@@ -5,6 +5,7 @@ import kr.co.securance.secuhub.domain.entity.GateGroup
 import kr.co.securance.secuhub.domain.entity.GateLocation
 import kr.co.securance.secuhub.domain.repository.DataSendRepository
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
+import kr.co.securance.secuhub.protocol.FastGateMotorCodec
 import kr.co.securance.secuhub.protocol.GateControlCommandBuilder
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.mock
@@ -129,5 +130,46 @@ class GateControlServiceTest {
         val captor = ArgumentCaptor.forClass(kr.co.securance.secuhub.domain.entity.DataSend::class.java)
         verify(dataSendRepository, org.mockito.Mockito.times(2)).save(captor.capture())
         assertEquals(listOf("MOTOR_INIT", "MOTOR_CHANGE"), captor.allValues.map { it.sndTypeCd })
+    }
+
+    @Test
+    fun `sendFastGateMotorSetup은 FAST_MOTOR_SET 타입으로 FastGateMotorCodec 패킷을 적재한다`() {
+        val detailRepository = mock(GateDetailRepository::class.java)
+        val dataSendRepository = mock(DataSendRepository::class.java)
+        val service = GateControlService(detailRepository, dataSendRepository)
+        val d = detail(dtlId = 1L, laneNo = 5)
+        `when`(detailRepository.findById(1L)).thenReturn(Optional.of(d))
+        val stage = FastGateMotorCodec.MotorStage(position = 10, rpm = 20, compensation = 30)
+        val axis = FastGateMotorCodec.MotorAxis(stage, stage, stage, initSpeed = 7)
+        val params = FastGateMotorCodec.Params(
+            masterSlave = FastGateMotorCodec.MasterSlave.MASTER,
+            turn = axis,
+            slide = axis,
+        )
+
+        assertTrue(service.sendFastGateMotorSetup(1L, params, "admin"))
+
+        val captor = ArgumentCaptor.forClass(kr.co.securance.secuhub.domain.entity.DataSend::class.java)
+        verify(dataSendRepository).save(captor.capture())
+        assertEquals("FAST_MOTOR_SET", captor.value.sndTypeCd)
+        assertEquals(d.dtlIp, captor.value.dtlIp)
+        assertEquals(d.dtlLaneNo, captor.value.dtlLaneNo)
+        assertEquals("admin", captor.value.sndUser)
+        val expected = FastGateMotorCodec.buildSetCommand(d.dtlLaneNo, params)
+        assertEquals(kr.co.securance.secuhub.common.util.HexCodec.toHex(expected), captor.value.sndRaw)
+    }
+
+    @Test
+    fun `sendFastGateMotorSetup도 존재하지 않는 dtlId면 false를 반환하고 큐에 적재하지 않는다`() {
+        val detailRepository = mock(GateDetailRepository::class.java)
+        val dataSendRepository = mock(DataSendRepository::class.java)
+        val service = GateControlService(detailRepository, dataSendRepository)
+        `when`(detailRepository.findById(99L)).thenReturn(Optional.empty())
+        val stage = FastGateMotorCodec.MotorStage(0, 0, 0)
+        val axis = FastGateMotorCodec.MotorAxis(stage, stage, stage)
+        val params = FastGateMotorCodec.Params(FastGateMotorCodec.MasterSlave.MASTER, axis, axis)
+
+        assertFalse(service.sendFastGateMotorSetup(99L, params, "admin"))
+        verify(dataSendRepository, never()).save(org.mockito.ArgumentMatchers.any())
     }
 }

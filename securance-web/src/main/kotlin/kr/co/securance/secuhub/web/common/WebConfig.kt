@@ -40,6 +40,7 @@ class WebConfig(
                 "/api/gate-control/**",
                 "/gates/details/*/mode",
                 "/gates/details/*/motor",
+                "/gates/details/*/fast-motor",
                 "/gates/reset/execute",
             )
     }

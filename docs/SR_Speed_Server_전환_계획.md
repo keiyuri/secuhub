@@ -75,7 +75,7 @@ Framework 4.8, 총 8,975줄)의 기능을 신규 `secuhub`(Kotlin/Spring Boot �
 | P8 | `SendAckData` | `SpeedServer.cs:1337` | 수신 패킷에 대한 ACK 응답 송신 | **완료** | `DefaultGatePacketHandler`(ACK 경로) |
 | P9 | 게이트 타입별 코덱 분리 | — | Speed/Flap 공용, Turn/Fast는 별도 규격(추정) | **완료(2026-08-12 정정)** | 규격 문서(`FastGate Protocol Ver1_2020102601_01.md`) 대조 결과 4종 모두 동일 봉투/객체코드를 쓰는 것으로 확인 — `SpeedFlapGateProtocolCodec`이 `supportedGateTypes`에 4종 전부를 등록한 것이 정답이었다. 설계서 3.4절의 "Turn/Fast 별도 규격" 추정이 규격 미확보 시점의 낡은 서술이었다(3절 D4 참고) |
 | P10 | Object Code 정의 범위 | `ClsConst.cs` | — | **부분** | `SpeedGateProtocolConstants.ObjectCode`에 **15종 상수**가 정의돼 있으나 실제 인코딩/파싱 구현이 있는 것은 **0x4D/0x4C/0x4B/0x46/0x54/0x61의 6종**뿐. 나머지 9종(0x4E/0x47/0x4F/0x52/0x55/0x48/0x57/0x50 등)은 **상수만 있고 빌더·파서 없음** |
-| P11 | `FAST_GATE_MOTOR`(0x50) | — | FastGate 모터 설정 | **완료(2026-08-13)** | `FastGateMotorCodec.kt` — Set/Request 페이로드(72바이트, Turn/Slide 모터 3단계+초기속도) 인코딩. 화면/서비스 연동은 아직 없음(코덱만 완성) |
+| P11 | `FAST_GATE_MOTOR`(0x50) | — | FastGate 모터 설정 | **완료(2026-08-13, 화면 연동 2026-08-13)** | `FastGateMotorCodec.kt` — Set/Request 페이로드(72바이트, Turn/Slide 모터 3단계+초기속도) 인코딩. `securance-web.GateControlController`에 `/gates/details/{id}/fast-motor` 화면 신규 추가로 코덱-화면 연동까지 완료(작업일지 0017 참고) |
 
 ### 2.3 수신 데이터 처리 — **가장 큰 누락 지점**
 

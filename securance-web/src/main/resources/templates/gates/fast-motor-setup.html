@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<!--/*
+  Fast Gate 전용 모터 설정(P11, FastGateMotorCodec, Object Code 0x50) — 레거시에 대응 화면이
+  없는 신규 게이트 타입 전용 기능(FastGateMotorCodec.kt KDoc 참고). Turn/Slide 모터 각각
+  3단계(Position/Rpm/Compensation) + 초기속도, Master/Slave, Auto Close/Test Time, Loof Exit
+  사용여부, Open Turn/Closed Slide Delay를 입력한다.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/dashboard-layout}">
+<head><title>Fast Gate 모터 설정</title></head>
+<body>
+<div layout:fragment="content">
+
+  <div class="card card-outline card-info" style="max-width: 900px;">
+    <div class="card-header">
+      <h3 class="card-title">Fast Gate 모터 설정 — <span th:text="${detail.dtlIp}">IP</span> / 레인 <span th:text="${detail.dtlLaneNo}">0</span></h3>
+    </div>
+    <div class="card-body">
+      <p class="text-muted" th:text="${detail.dtlName}">게이트 이름</p>
+      <p class="text-muted small">
+        실장비로 검증되지 않은 명령입니다 — 3단계 값의 "변화 없음" 센티널이 문서상 애매합니다
+        (FastGateMotorCodec KDoc 참고). 값을 비워두면 0으로 전송됩니다.
+      </p>
+
+      <form id="fastMotorForm" th:action="@{/gates/details/{id}/fast-motor(id=${detail.dtlId})}" th:object="${form}" method="post">
+
+        <div class="mb-3">
+          <label class="form-label">Master / Slave</label>
+          <select class="form-select form-select-sm" style="max-width: 200px;" th:field="*{masterSlave}">
+            <option value="MASTER">Master</option>
+            <option value="SLAVE">Slave</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div class="col-md-6">
+            <fieldset class="mb-3">
+              <legend class="fs-6 fw-bold">Turn 모터</legend>
+              <table class="table table-sm">
+                <thead><tr><th>단계</th><th>Position</th><th>Rpm</th><th>Compensation</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tPos1}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tRpm1}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tComp1}"/></td>
+                  </tr>
+                  <tr>
+                    <td>2</td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tPos2}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tRpm2}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tComp2}"/></td>
+                  </tr>
+                  <tr>
+                    <td>3</td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tPos3}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tRpm3}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{tComp3}"/></td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="mb-2">
+                <label class="form-label">초기속도 (+:CW / -:CCW)</label>
+                <input type="number" min="-32768" max="32767" class="form-control form-control-sm" th:field="*{tInitSpeed}"/>
+              </div>
+            </fieldset>
+          </div>
+
+          <div class="col-md-6">
+            <fieldset class="mb-3">
+              <legend class="fs-6 fw-bold">Slide 모터</legend>
+              <table class="table table-sm">
+                <thead><tr><th>단계</th><th>Position</th><th>Rpm</th><th>Compensation</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sPos1}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sRpm1}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sComp1}"/></td>
+                  </tr>
+                  <tr>
+                    <td>2</td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sPos2}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sRpm2}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sComp2}"/></td>
+                  </tr>
+                  <tr>
+                    <td>3</td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sPos3}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sRpm3}"/></td>
+                    <td><input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{sComp3}"/></td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="mb-2">
+                <label class="form-label">초기속도 (+:CW / -:CCW)</label>
+                <input type="number" min="-32768" max="32767" class="form-control form-control-sm" th:field="*{sInitSpeed}"/>
+              </div>
+            </fieldset>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-md-3 mb-2">
+            <label class="form-label">Auto Close Time (x10ms, 0=끔)</label>
+            <input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{autoCloseTimeMs10}"/>
+          </div>
+          <div class="col-md-3 mb-2">
+            <label class="form-label">Auto Test Time (x10ms, 0=끔)</label>
+            <input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{autoTestTimeMs10}"/>
+          </div>
+          <div class="col-md-3 mb-2">
+            <label class="form-label">Open Turn Delay (x10ms)</label>
+            <input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{openTurnDelayTimeMs10}"/>
+          </div>
+          <div class="col-md-3 mb-2">
+            <label class="form-label">Closed Slide Delay (x10ms)</label>
+            <input type="number" min="0" max="65535" class="form-control form-control-sm" th:field="*{closedSlideDelayTimeMs10}"/>
+          </div>
+        </div>
+
+        <div class="form-check mb-3">
+          <input type="checkbox" class="form-check-input" id="loofExitUsed" th:field="*{loofExitUsed}"/>
+          <label class="form-check-label" for="loofExitUsed">Loof Exit 사용</label>
+        </div>
+
+        <div th:replace="~{fragments/widgets/reauth-field :: reauthField()}"></div>
+
+        <button type="submit" class="btn btn-primary">설정 전송</button>
+        <a class="btn btn-secondary" th:href="@{/gates/details(grpId=${detail.group.grpId})}">취소</a>
+      </form>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

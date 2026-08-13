@@ -280,7 +280,12 @@ class GateControlDispatcher(
                 // 인코딩 자체가 깨진 명령은 몇 번을 재시도해도 성공하지 않는다 — 즉시 실패 확정.
                 command.sndYn = DataSend.YES
                 command.chkYn = DataSend.FAILED
-                trySave(command, "인코딩오류")
+                // 다른 갱신 경로(confirmAckedCommands/reapAckTimeouts)와 동일하게 낙관적 잠금
+                // 충돌 시(다른 인스턴스가 먼저 이 행을 갱신) clearTracking을 건너뛴다 — 저장이
+                // 실패했는데도 로컬 추적을 지우면, DB에는 여전히 sndYn='N'으로 남아 다음 폴링에서
+                // 다시 집히는데 로컬 상태만 지워져 동일한 인코딩 오류가 매 주기 반복된다
+                // (2026-08-13 코드 리뷰).
+                if (!trySave(command, "인코딩오류")) continue
                 clearTracking(sndId)
                 logger.error("제어 명령의 원시 데이터가 유효한 16진 문자열이 아닙니다: snd_id={}", sndId, ex)
                 continue
@@ -288,7 +293,7 @@ class GateControlDispatcher(
             if (packet.isEmpty()) {
                 command.sndYn = DataSend.YES
                 command.chkYn = DataSend.FAILED
-                trySave(command, "빈데이터")
+                if (!trySave(command, "빈데이터")) continue
                 clearTracking(sndId)
                 logger.error("제어 명령의 원시 데이터가 비어 있습니다: snd_id={}", sndId)
                 continue

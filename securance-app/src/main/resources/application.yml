@@ -144,6 +144,18 @@ securance:
     web-login-required: true          # false면 웹 화면 전체가 로그인 없이 열린다(admin/control/게이트 제어 API 규칙은 예외 없이 그대로 적용)
     gate-control-reauth-required: false  # true면 리셋/모드변경/모터설정 등 게이트 제어 실행마다 비밀번호 재입력을 요구
 
+# 헬스체크/메트릭(2026-08-13 코드 리뷰 지적) — 게이트 TCP 연결/DB 쓰기 큐 적체 등 장애를
+# 로그 파일 육안 확인 없이도 외부 모니터링(Prometheus 등)에서 감지할 수 있게 최소한만 노출한다.
+# /actuator/health는 SecurityConfig에서 permitAll, 나머지 액추에이터 경로는 ROLE_ADMIN 필요.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
 server:
   port: 8080
   servlet:
@@ -160,3 +172,8 @@ server:
 logging:
   level:
     kr.co.securance.secuhub: INFO
+  # 요청 상관관계 ID(RequestCorrelationFilter, 2026-08-13 코드 리뷰 지적)를 로그 라인에 포함시킨다.
+  # requestId가 없는 로그(TCP 게이트 처리, 스케줄러 잡 등)에서는 빈 문자열로 찍힌다.
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId}] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId}] %logger{36} - %msg%n"

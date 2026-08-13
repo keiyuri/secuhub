@@ -154,50 +154,12 @@ object SpeedGateProtocolConstants {
     }
 
     /**
-     * 게이트 로그(0x61) 엔트리 이벤트 대분류값(`SpeedGate_Log_protocol_20260728_01.md`).
-     * `SpeedGateLogCodec`가 이 상수로 [kr.co.securance.secuhub.protocol.GateLogEntry.eventType]을 해석한다.
+     * 게이트 로그(0x61) 엔트리 이벤트 대분류/Door Status 값, 36바이트 필드 오프셋은
+     * [LogEventCodec]가 실제 운영 경로에서 자체 상수(`LogEventCodec.EventType`,
+     * `LogEventCodec.DoorStatus`, `LogEventCodec.Offset`)로 정의한다 — 과거 이 위치에 있던
+     * 중복 정의(`LogEventType`/`LogDoorStatus`/`LogEntryOffset`, 미사용 `SpeedGateLogCodec`
+     * 전용)는 죽은 코드라 제거했다(2026-08-13 코드 리뷰).
      */
-    object LogEventType {
-        const val ACCESS: Byte = 0x01
-        const val PARKING: Byte = 0x08
-        const val DATA_OBJECT: Byte = 0x10
-        const val SYSTEM: Byte = 0x18
-        const val COMMUNICATION: Byte = 0x20
-    }
-
-    /** 게이트 로그(0x61) 엔트리의 Door Status 값. */
-    object LogDoorStatus {
-        const val ACTIVE: Byte = 0x01 // Open
-        const val INACTIVE: Byte = 0x02 // Close
-    }
-
-    /** 게이트 로그(0x61) 엔트리 36바이트 내부 필드 오프셋(엔트리 시작 기준). */
-    object LogEntryOffset {
-        const val EVENT_TYPE = 0
-        const val OBJECT_CODE = 1
-        const val CODE = 2
-        const val ERR_CODE = 3
-        const val OPERATION_MODE = 4
-
-        /** 문서상 "security mode/Reader Type" — Not Used로 명시되어 있으나 원본 바이트는 보존한다. */
-        const val READER_TYPE = 5
-        const val MODULE_NUMBER = 6
-        const val READER_NUMBER = 7
-        const val DOOR_STATUS = 8
-        const val FUNCTION_CODE = 9
-
-        /** 6바이트 BCD(Year,Month,Day,Hour,Min,Sec) — Weekday 없이 시분초까지만 포함한다. */
-        const val EVENT_TIME = 10
-        const val EVENT_TIME_LENGTH = 6
-
-        /** User ID(8)+User Revision(4) 또는 Card ID(8). */
-        const val USER_DATA1 = 16
-        const val USER_DATA1_LENGTH = 12
-
-        /** Old User ID(8). */
-        const val USER_DATA2 = 28
-        const val USER_DATA2_LENGTH = 8
-    }
 
     /** ACK 응답 결과 값(다수의 오브젝트 응답에서 공통으로 쓰인다). */
     object AckResult {

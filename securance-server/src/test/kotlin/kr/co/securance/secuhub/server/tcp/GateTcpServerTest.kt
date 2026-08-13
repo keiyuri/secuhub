@@ -15,8 +15,10 @@ import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.db.GateDbWriteQueue
 import kr.co.securance.secuhub.server.db.GatePacketPersister
+import org.mockito.Mockito
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
+import org.springframework.data.domain.Pageable
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.time.LocalDateTime
@@ -98,7 +100,8 @@ class GateTcpServerTest {
         // 회귀 방지 테스트: 예전에는 gateDetail==null이어도 connection.dispose()를 호출하지 않아
         // 미등록 IP의 소켓이 무한정 열린 채로 방치됐다(파일 디스크립터 누수).
         val gateDetailRepository = mock(GateDetailRepository::class.java)
-        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo("127.0.0.1")).thenReturn(null)
+        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(eqOf("127.0.0.1"), anyPageable()))
+            .thenReturn(emptyList())
 
         val server = newServer(gateDetailRepository).also { this.server = it; it.start() }
         val port = requireNotNull(server.boundPort)
@@ -118,7 +121,8 @@ class GateTcpServerTest {
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 3, // FakeCodec은 1만 지원 — 3은 미지원.
         )
         val gateDetailRepository = mock(GateDetailRepository::class.java)
-        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo("127.0.0.1")).thenReturn(gateDetail)
+        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(eqOf("127.0.0.1"), anyPageable()))
+            .thenReturn(listOf(gateDetail))
 
         val server = newServer(gateDetailRepository).also { this.server = it; it.start() }
         val port = requireNotNull(server.boundPort)
@@ -138,7 +142,8 @@ class GateTcpServerTest {
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 1,
         )
         val gateDetailRepository = mock(GateDetailRepository::class.java)
-        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo("127.0.0.1")).thenReturn(gateDetail)
+        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(eqOf("127.0.0.1"), anyPageable()))
+            .thenReturn(listOf(gateDetail))
 
         val handled = CountDownLatch(1)
         var receivedBytes: ByteArray? = null
@@ -178,7 +183,8 @@ class GateTcpServerTest {
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 1,
         )
         val gateDetailRepository = mock(GateDetailRepository::class.java)
-        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo("127.0.0.1")).thenReturn(gateDetail)
+        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(eqOf("127.0.0.1"), anyPageable()))
+            .thenReturn(listOf(gateDetail))
 
         val firstHandlerStarted = CountDownLatch(1)
         val releaseFirstHandler = CountDownLatch(1)
@@ -243,7 +249,8 @@ class GateTcpServerTest {
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 1,
         )
         val gateDetailRepository = mock(GateDetailRepository::class.java)
-        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo("127.0.0.1")).thenReturn(gateDetail)
+        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(eqOf("127.0.0.1"), anyPageable()))
+            .thenReturn(listOf(gateDetail))
 
         val server = newServer(gateDetailRepository, idleTimeoutSeconds = 1)
             .also { this.server = it; it.start() }
@@ -267,7 +274,8 @@ class GateTcpServerTest {
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 1,
         )
         val gateDetailRepository = mock(GateDetailRepository::class.java)
-        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo("127.0.0.1")).thenReturn(gateDetail)
+        `when`(gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(eqOf("127.0.0.1"), anyPageable()))
+            .thenReturn(listOf(gateDetail))
 
         val handled = CountDownLatch(1)
         val server = newServer(gateDetailRepository) { _, _ -> handled.countDown() }
@@ -285,4 +293,24 @@ class GateTcpServerTest {
             socket.assertClosedByServer()
         }
     }
+}
+
+// Mockito의 Java any(Class)는 null을 반환하는데, Kotlin에서 선언된 파라미터 타입(Pageable, 비-null)에
+// 그대로 대입되면 즉시 null 체크 예외("any(...) must not be null")를 던진다 — 이 프로젝트는
+// mockito-kotlin을 쓰지 않으므로 제네릭 소거를 이용한 표준 우회법을 쓴다(AccessReportControllerTest의
+// anyOf()와 동일한 패턴).
+private fun <T> anyOf(): T {
+    Mockito.any<T>()
+    @Suppress("UNCHECKED_CAST")
+    return null as T
+}
+private fun anyPageable(): Pageable = anyOf()
+
+// eq(value)도 Mockito 내부적으로는 null을 반환한다(매처를 기록만 하고 실제 스텁 값은 실인자를 그대로
+// 씀) — Pageable 매처와 섞어 쓰려면 String 인자도 매처로 감싸야 하는데, ArgumentMatchers.eq는
+// 구체 타입(String) 반환이라 위와 동일한 CHECKCAST/null-체크 문제가 난다. 제네릭 T로 우회한다.
+private fun <T> eqOf(value: T): T {
+    Mockito.eq(value)
+    @Suppress("UNCHECKED_CAST")
+    return null as T
 }

@@ -155,6 +155,17 @@ object SpeedGatePacketCodec {
             "패킷 전체 길이가 Packet Length 필드 범위(0~65535)를 벗어납니다: $totalLength"
         }
 
+        // Header의 PACKET_LENGTH/DATA_COUNT/DATA_LENGTH는 2바이트(0~65535), DATA_INFO_LENGTH는
+        // 1바이트(0~255) 필드다. 이 상한을 넘는 값을 그대로 잘라 넣으면(랩어라운드) 헤더에 기록된
+        // 길이가 실제 패킷 크기와 달라져 수신측(재조립기/실장비) 프레이밍이 깨진다 — 조용히
+        // 잘리기 전에 명시적으로 막는다.
+        require(totalLength in 0..0xFFFF) {
+            "패킷 전체 길이가 헤더 필드(2바이트) 표현 범위를 벗어났습니다: $totalLength (payload=${payload.size}바이트)"
+        }
+        require(dataInfoLength in 0..0xFF) { "dataInfoLength는 0~255 범위여야 합니다: $dataInfoLength" }
+        require(dataCount in 0..0xFFFF) { "dataCount는 0~65535 범위여야 합니다: $dataCount" }
+        require(dataLength in 0..0xFFFF) { "dataLength는 0~65535 범위여야 합니다: $dataLength" }
+
         val header = ByteArray(SpeedGateProtocolConstants.HEADER_LENGTH)
         header[HeaderOffset.STX] = SpeedGateProtocolConstants.STX
         header[HeaderOffset.PACKET_LENGTH] = ((totalLength ushr 8) and 0xFF).toByte()
@@ -239,7 +250,11 @@ object SpeedGatePacketCodec {
      * 레거시의 Moon 보드(구형, `0x5B/0x53/0x6E` 헤더)는 이식 대상에서 제외했다 — 현행 장비는
      * 전부 Brian 보드이며, 클라이언트 코드도 `sDtlBoardType = "B"`로 하드코딩되어 있었다.
      *
-     * @param laneNo 대상 레인 번호(1~32). 바이트 값 그대로 인코딩한다(레인 10 → 0x0A).
+     * @param laneNo 대상 레인 번호(1~32, [SpeedGateProtocolConstants.MAX_LANE_COUNT] 기준). 바이트
+     *   값 그대로 인코딩한다(레인 10 → 0x0A). **주의**: `GateControlCommandBuilder.buildModeChangeCommand`/
+     *   `buildMotorSetupCommand`는 같은 "레인 번호" 개념에 0~255 범위를 허용한다 — 별개의 레거시 재현
+     *   경로(2026-07-28 확정 규칙, 웹 모드변경/모터설정 화면 전용)라 범위가 다르다. 두 빌더를 섞어
+     *   laneNo 검증 기대치를 맞바꾸지 않는다.
      * @param payload 명령/보안등급/스케줄 시간 데이터 묶음([SpeedGateControlPayload]).
      */
     fun buildControlCommand(

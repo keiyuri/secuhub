@@ -94,6 +94,9 @@ object GateControlCommandBuilder {
      * #12 GateModeChange 명령을 만든다(레거시 `GenerateCmdBody`, 93바이트 바디).
      *
      * @param laneNo 레인 번호(0~255) — 2026-07-28 확정 규칙대로 바이트 값 그대로 인코딩한다.
+     *   **주의**: [SpeedGatePacketCodec.buildControlCommand]는 같은 "레인 번호" 개념에 1~32
+     *   ([SpeedGateProtocolConstants.MAX_LANE_COUNT])만 허용한다 — 이쪽(레거시 모드변경/모터설정
+     *   화면 재현 경로)과는 범위가 다르니 두 빌더의 laneNo 검증 기대치를 섞지 않는다.
      * @param controlType 레거시 `sUserMode + sSecuMode` 조합 문자열(예: "CCLM"). 앞 2글자가 운영모드
      *   코드(CC/CF/FC/FF/OP/RP/CL/CS/CX/XC/FX/XF, 그 외는 Normal), 문자열 어디든 "LM"/"MM"/"HM"이
      *   포함되면 보안모드로 반영된다(레거시와 동일하게 `Contains` 기반 판정).

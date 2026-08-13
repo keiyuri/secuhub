@@ -58,6 +58,12 @@ class SecurityConfig {
                 // 403 처리 중에 또 인가 예외가 발생하거나 비로그인 사용자는 /login으로 리다이렉트되어
                 // 정작 만들어둔 에러 페이지가 절대 보이지 않는다.
                 authorize("/error", permitAll)
+                // 헬스체크(2026-08-13 코드 리뷰 지적 — Actuator 도입)는 외부 모니터링/로드밸런서가
+                // 인증 없이 주기적으로 찔러야 하므로 별도로 허용한다. 그 외 액추에이터 엔드포인트
+                // (/actuator/metrics 등)는 내부 상태(스레드/DB 풀 등)를 노출하므로 ADMIN만 허용한다.
+                authorize("/actuator/health", permitAll)
+                authorize("/actuator/health/**", permitAll)
+                authorize("/actuator/**", hasRole("ADMIN"))
                 // 사용자별 auth_view/auth_ctrl/auth_admin(Y/N)이 ROLE_VIEW/ROLE_CONTROL/ROLE_ADMIN으로
                 // 매핑된다(SecurityUserDetailsService). 인증만으로는 부족하고, 경로별 권한 등급을
                 // 명시해야 한다 — 그렇지 않으면 ROLE_VIEW만 가진 사용자도 관리자/제어 화면에
@@ -71,9 +77,21 @@ class SecurityConfig {
                 // 전혀 보호되지 않고 ROLE_VIEW만 있어도 제어 명령을 실행할 수 있었다. 상태를 변경하는
                 // HTTP 메서드(POST/PUT/DELETE)만 별도로 ROLE_CONTROL 이상을 요구하도록 경로보다 먼저
                 // 매칭시킨다 — GET(화면 조회)은 기존과 동일하게 ROLE_VIEW로 충분하다.
-                authorize(HttpMethod.POST, "/gates/**", hasAnyRole("CONTROL", "ADMIN"))
-                authorize(HttpMethod.PUT, "/gates/**", hasAnyRole("CONTROL", "ADMIN"))
-                authorize(HttpMethod.DELETE, "/gates/**", hasAnyRole("CONTROL", "ADMIN"))
+                //
+                // [2026-08-13 코드 리뷰 수정] 위 의도(실제 게이트 제어 명령 보호)와 달리 "/gates/**"
+                // POST/PUT/DELETE 전체를 ROLE_CONTROL로 열어두면, 같은 경로 트리 아래 있는
+                // GateGroupController/GateLocationController/GateDetailController/LocationMapController의
+                // 마스터 데이터 CRUD(위치/그룹/게이트 등록·수정·삭제, 배치도 업로드)까지 ROLE_CONTROL
+                // 계정에게 새어나간다 — "운영(제어)"만 부여된 계정이 실제로는 ADMIN급 등록/삭제 권한을
+                // 갖게 되는 셈이다. 실제 제어 엔드포인트(모드변경/모터설정/리셋 실행)만 좁게 먼저
+                // 매칭시키고, 나머지 "/gates/**" 상태변경 요청(=마스터 데이터 CRUD)은 ROLE_ADMIN으로
+                // 좁힌다. Spring Security는 먼저 매칭되는 규칙을 적용하므로 순서가 중요하다.
+                authorize(HttpMethod.POST, "/gates/details/*/mode", hasAnyRole("CONTROL", "ADMIN"))
+                authorize(HttpMethod.POST, "/gates/details/*/motor", hasAnyRole("CONTROL", "ADMIN"))
+                authorize(HttpMethod.POST, "/gates/reset/execute", hasAnyRole("CONTROL", "ADMIN"))
+                authorize(HttpMethod.POST, "/gates/**", hasRole("ADMIN"))
+                authorize(HttpMethod.PUT, "/gates/**", hasRole("ADMIN"))
+                authorize(HttpMethod.DELETE, "/gates/**", hasRole("ADMIN"))
                 authorize(HttpMethod.POST, "/schedule/**", hasAnyRole("CONTROL", "ADMIN"))
                 authorize(HttpMethod.PUT, "/schedule/**", hasAnyRole("CONTROL", "ADMIN"))
                 authorize(HttpMethod.DELETE, "/schedule/**", hasAnyRole("CONTROL", "ADMIN"))

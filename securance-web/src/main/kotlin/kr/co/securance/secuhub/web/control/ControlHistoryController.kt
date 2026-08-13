@@ -76,13 +76,17 @@ class ControlHistoryController(
         model: Model,
     ): String {
         val today = LocalDate.now()
+        // 다른 리포트 컨트롤러(EventReportController 등)와 동일하게 파싱 실패를 흡수한다
+        // (2026-08-13 코드 리뷰) — 이 컨트롤러만 LocalDate::parse를 그대로 써서, 잘못된 형식의
+        // 쿼리 파라미터(오타/봇 스캔 등)가 들어오면 DateTimeParseException이 그대로 올라가 500
+        // 에러 페이지가 노출됐다.
         val filter = ControlHistoryFilter(
             dtlIp = dtlIp,
             sndTypeCd = sndTypeCd,
             sndYn = sndYn,
             chkYn = chkYn,
-            fromDate = fromDate?.let(LocalDate::parse) ?: today.minusDays(7),
-            toDate = toDate?.let(LocalDate::parse) ?: today,
+            fromDate = fromDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: today.minusDays(7),
+            toDate = toDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: today,
         )
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "제어 명령 이력")

@@ -56,4 +56,20 @@ class LogEventCodecTest {
             LogEventCodec.decode(ByteArray(10))
         }
     }
+
+    @Test
+    fun `BCD 시각 값이 달력 범위를 벗어나면 IllegalArgumentException으로 변환해 던진다`() {
+        // month 바이트(offset 11)를 유효 범위를 벗어난 BCD 값(13월)으로 변조 — 손상/조작된
+        // TCP 원시 바이트를 흉내낸다. 회귀 대상: LocalDateTime.of가 던지는 DateTimeException이
+        // IllegalArgumentException의 하위 타입이 아니라서 그대로 전파되면 GateLogService의
+        // catch(IllegalArgumentException)를 빠져나가 커넥션 처리가 죽는다.
+        val invalidMonthHex =
+            "1801050B0500000001FF2513051500250000000000000000000000000000000000000000"
+        val entry = HexCodec.fromHex(invalidMonthHex)
+
+        val ex = org.junit.jupiter.api.assertThrows<IllegalArgumentException> {
+            LogEventCodec.decode(entry)
+        }
+        assertEquals(java.time.DateTimeException::class.java, ex.cause?.javaClass)
+    }
 }

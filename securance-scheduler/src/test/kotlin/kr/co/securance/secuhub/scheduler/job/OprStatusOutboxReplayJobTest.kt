@@ -5,6 +5,7 @@ import kr.co.securance.secuhub.domain.repository.OprStatusOutboxRepository
 import kr.co.securance.secuhub.scheduler.config.SchedulerProperties
 import kr.co.securance.secuhub.server.db.OprStatusPersister
 import org.mockito.Mockito
+import org.mockito.Mockito.anyInt
 import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
@@ -25,6 +26,12 @@ private fun <T> anyKt(): T {
     Mockito.any<T>()
     @Suppress("UNCHECKED_CAST")
     return null as T
+}
+
+/** 위 [anyKt]와 동일한 이유로 필요한 `eq()` 우회 — 값 자체가 non-null이라 그대로 반환해도 안전하다. */
+private fun <T> eqKt(value: T): T {
+    Mockito.eq(value)
+    return value
 }
 
 /**
@@ -73,13 +80,13 @@ class OprStatusOutboxReplayJobTest {
 
         job.execute(context)
 
-        verify(outboxRepository, never()).findByProcessedFalseOrderByOutboxIdAsc(anyKt())
+        verify(outboxRepository, never()).findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(anyInt(), anyKt())
     }
 
     @Test
     fun `미처리 행이 없으면 아무것도 하지 않는다`() {
         val outboxRepository = mock(OprStatusOutboxRepository::class.java)
-        `when`(outboxRepository.findByProcessedFalseOrderByOutboxIdAsc(anyKt())).thenReturn(emptyList())
+        `when`(outboxRepository.findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(anyInt(), anyKt())).thenReturn(emptyList())
         val persister = mock(OprStatusPersister::class.java)
 
         val job = buildJob(outboxRepository = outboxRepository, oprStatusPersister = persister)
@@ -92,7 +99,7 @@ class OprStatusOutboxReplayJobTest {
     fun `재처리에 성공하면 processed를 true로 표시한다`() {
         val outboxRepository = mock(OprStatusOutboxRepository::class.java)
         val target = entry(id = 1L)
-        `when`(outboxRepository.findByProcessedFalseOrderByOutboxIdAsc(anyKt())).thenReturn(listOf(target))
+        `when`(outboxRepository.findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(anyInt(), anyKt())).thenReturn(listOf(target))
         val persister = mock(OprStatusPersister::class.java)
 
         val job = buildJob(outboxRepository = outboxRepository, oprStatusPersister = persister)
@@ -107,7 +114,7 @@ class OprStatusOutboxReplayJobTest {
     fun `재처리가 실패하면 retryCount만 올리고 processed는 그대로 둔다`() {
         val outboxRepository = mock(OprStatusOutboxRepository::class.java)
         val target = entry(id = 2L, retryCount = 0)
-        `when`(outboxRepository.findByProcessedFalseOrderByOutboxIdAsc(anyKt())).thenReturn(listOf(target))
+        `when`(outboxRepository.findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(anyInt(), anyKt())).thenReturn(listOf(target))
         val persister = mock(OprStatusPersister::class.java)
         doThrow(RuntimeException("DB 장애")).`when`(persister).replayOutboxEntry(target)
 
@@ -127,7 +134,7 @@ class OprStatusOutboxReplayJobTest {
     fun `재시도 상한에 도달하면 더 이상 처리되지 않은 채로 남긴다`() {
         val outboxRepository = mock(OprStatusOutboxRepository::class.java)
         val target = entry(id = 3L, retryCount = 9) // 이번 실패로 10회째 — 상한 도달
-        `when`(outboxRepository.findByProcessedFalseOrderByOutboxIdAsc(anyKt())).thenReturn(listOf(target))
+        `when`(outboxRepository.findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(anyInt(), anyKt())).thenReturn(listOf(target))
         val persister = mock(OprStatusPersister::class.java)
         doThrow(RuntimeException("DB 장애")).`when`(persister).replayOutboxEntry(target)
 
@@ -145,12 +152,27 @@ class OprStatusOutboxReplayJobTest {
     @Test
     fun `한 번에 조회하는 배치 크기는 설정을 따른다`() {
         val outboxRepository = mock(OprStatusOutboxRepository::class.java)
-        `when`(outboxRepository.findByProcessedFalseOrderByOutboxIdAsc(anyKt())).thenReturn(emptyList())
+        `when`(outboxRepository.findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(anyInt(), anyKt())).thenReturn(emptyList())
         val properties = SchedulerProperties(oprStatusOutboxBatchSize = 77)
 
         val job = buildJob(outboxRepository = outboxRepository, properties = properties)
         job.execute(context)
 
-        verify(outboxRepository).findByProcessedFalseOrderByOutboxIdAsc(PageRequest.of(0, 77))
+        verify(outboxRepository).findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(anyInt(), eqKt(PageRequest.of(0, 77)))
+    }
+
+    @Test
+    fun `조회 시 설정된 재시도 상한을 그대로 전달해 포기한 행을 다시 집지 않는다`() {
+        // 회귀 대상: 예전에는 재시도 상한(gaveUp) 도달 행도 processed=false로 남는다는 이유만으로
+        // 다음 실행에서 무한정 다시 조회돼 재시도됐다 — retryCount < maxRetries 조건이 쿼리에
+        // 반영되는지를 직접 검증한다.
+        val outboxRepository = mock(OprStatusOutboxRepository::class.java)
+        `when`(outboxRepository.findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(anyInt(), anyKt())).thenReturn(emptyList())
+        val properties = SchedulerProperties(oprStatusOutboxMaxRetries = 5)
+
+        val job = buildJob(outboxRepository = outboxRepository, properties = properties)
+        job.execute(context)
+
+        verify(outboxRepository).findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(5, PageRequest.of(0, properties.oprStatusOutboxBatchSize))
     }
 }

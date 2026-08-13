@@ -24,6 +24,7 @@ import kr.co.securance.secuhub.server.connection.GateConnectionActor
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.connection.GateConnectionState
 import org.slf4j.LoggerFactory
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Mono
 import reactor.netty.Connection
@@ -182,7 +183,10 @@ class GateTcpServer(
 
         return mono {
             val gateDetail = withContext(Dispatchers.IO) {
-                gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(remoteIp)
+                // Pageable로 1건만 요청 — 동일 IP에 활성 레인이 여러 개여도
+                // IncorrectResultSizeDataAccessException 없이 대표 레인 하나만 받는다.
+                gateDetailRepository.findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(remoteIp, PageRequest.of(0, 1))
+                    .firstOrNull()
             }
             if (gateDetail == null) {
                 logger.warn("등록되지 않은 게이트 IP[{}]의 연결을 거부합니다.", remoteIp)

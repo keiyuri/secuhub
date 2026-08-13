@@ -12,11 +12,14 @@ import org.springframework.context.annotation.Import
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.test.context.support.WithMockUser
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.context.WebApplicationContext
 
@@ -35,6 +38,11 @@ class SecurityTestFixtureController {
     @GetMapping("/vendor/probe") fun vendor() = "vendor-ok"
     @GetMapping("/js/probe") fun js() = "js-ok"
     @GetMapping("/css/probe") fun css() = "css-ok"
+
+    // Major #10(2026-08-13 코드 리뷰) 회귀 방지용 — 실제 GateControlController(/gates/details/{id}/mode)
+    // 와 마스터 데이터 컨트롤러(GateGroupController, /gates/groups)의 경로 형태를 그대로 흉내낸다.
+    @PostMapping("/gates/details/{dtlId}/mode") fun gateMode(): String = "gate-mode-ok"
+    @PostMapping("/gates/groups") fun gateGroupCreate(): String = "gate-group-ok"
 }
 
 // securance-web 모듈에는 @SpringBootApplication 메인 클래스가 없다(그건 securance-app에 있다).
@@ -131,5 +139,26 @@ class SecurityConfigTest {
     fun `ROLE_ADMIN만으로는 control 경로에 접근할 수 없다`() {
         // 두 역할은 독립적이다 — admin 권한이 자동으로 control 권한을 포함하지 않는다.
         mockMvc.get("/control/probe").andExpect { status { isForbidden() } }
+    }
+
+    @Test
+    @WithMockUser(roles = ["CONTROL"])
+    fun `ROLE_CONTROL 사용자는 실제 게이트 제어 엔드포인트를 호출할 수 있다`() {
+        mockMvc.post("/gates/details/1/mode") { with(csrf()) }.andExpect { status { isOk() } }
+    }
+
+    @Test
+    @WithMockUser(roles = ["CONTROL"])
+    fun `ROLE_CONTROL 사용자는 마스터 데이터(게이트 그룹) CRUD에는 접근할 수 없다`() {
+        // 회귀 방지 테스트(2026-08-13 코드 리뷰 Major #10): "/gates/**" POST 전체가 ROLE_CONTROL로
+        // 열려 있던 시절에는 제어 권한만 가진 계정도 마스터 데이터(위치/그룹/게이트 등록)를
+        // 만들거나 지울 수 있었다. 이제는 마스터 데이터 CRUD에 ROLE_ADMIN이 필요하다.
+        mockMvc.post("/gates/groups") { with(csrf()) }.andExpect { status { isForbidden() } }
+    }
+
+    @Test
+    @WithMockUser(roles = ["ADMIN"])
+    fun `ROLE_ADMIN 사용자는 마스터 데이터(게이트 그룹) CRUD에 접근할 수 있다`() {
+        mockMvc.post("/gates/groups") { with(csrf()) }.andExpect { status { isOk() } }
     }
 }

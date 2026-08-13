@@ -1,6 +1,7 @@
 package kr.co.securance.secuhub.protocol
 
 import kr.co.securance.secuhub.common.util.HexCodec
+import java.time.DateTimeException
 import java.time.LocalDateTime
 
 /**
@@ -105,6 +106,19 @@ object LogEventCodec {
         val minute = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 4])
         val second = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 5])
 
+        // 로그 엔트리는 신뢰할 수 없는 TCP 원시 바이트에서 온다 — 노이즈/손상/조작된 패킷이면
+        // 시각 필드가 달력 범위를 벗어날 수 있다(월=0/13, 일=32 등). LocalDateTime.of가 던지는
+        // DateTimeException은 IllegalArgumentException의 하위 타입이 아니라서 호출측
+        // (GateLogService.decodeEntries)의 catch(IllegalArgumentException)를 그대로 빠져나가
+        // 커넥션 처리 자체가 죽는다. 여기서 IllegalArgumentException으로 감싸 기존 catch 경로가
+        // 이 실패도 흡수하도록 한다.
+        val eventTime = try {
+            // 문서 예시("0x20 → 2020")와 동일하게 두 자리 BCD 연도에 2000을 더한다.
+            LocalDateTime.of(2000 + year, month, day, hour, minute, second)
+        } catch (ex: DateTimeException) {
+            throw IllegalArgumentException("로그 엔트리 시각이 달력 범위를 벗어났습니다: year=$year, month=$month, day=$day, hour=$hour, minute=$minute, second=$second", ex)
+        }
+
         return LogEvent(
             eventType = entry[Offset.EVENT_TYPE],
             objectCode = entry[Offset.OBJECT_CODE],
@@ -116,8 +130,7 @@ object LogEventCodec {
             readerNumber = entry[Offset.READER_NUMBER].toInt() and 0xFF,
             doorStatus = entry[Offset.DOOR_STATUS],
             functionCode = entry[Offset.FUNCTION_CODE].toInt() and 0xFF,
-            // 문서 예시("0x20 → 2020")와 동일하게 두 자리 BCD 연도에 2000을 더한다.
-            eventTime = LocalDateTime.of(2000 + year, month, day, hour, minute, second),
+            eventTime = eventTime,
             userData1Hex = HexCodec.toHex(entry.copyOfRange(Offset.USER_DATA1, Offset.USER_DATA1 + USER_DATA1_LENGTH)),
             userData2Hex = HexCodec.toHex(entry.copyOfRange(Offset.USER_DATA2, Offset.USER_DATA2 + USER_DATA2_LENGTH)),
         )

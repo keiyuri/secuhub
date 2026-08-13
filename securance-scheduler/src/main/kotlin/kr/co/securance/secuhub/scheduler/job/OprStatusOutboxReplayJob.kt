@@ -43,7 +43,8 @@ class OprStatusOutboxReplayJob : QuartzJobBean() {
             return
         }
 
-        val pending = outboxRepository.findByProcessedFalseOrderByOutboxIdAsc(
+        val pending = outboxRepository.findByProcessedFalseAndRetryCountLessThanOrderByOutboxIdAsc(
+            properties.oprStatusOutboxMaxRetries,
             PageRequest.of(0, properties.oprStatusOutboxBatchSize),
         )
         if (pending.isEmpty()) return

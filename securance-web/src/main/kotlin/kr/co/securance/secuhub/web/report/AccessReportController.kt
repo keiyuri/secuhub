@@ -8,6 +8,7 @@ import kr.co.securance.secuhub.web.gate.GateLocationService
 import kr.co.securance.secuhub.web.menu.MenuProvider
 import org.springframework.stereotype.Controller
 import org.springframework.stereotype.Service
+import org.springframework.ui.ExtendedModelMap
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
@@ -62,7 +63,7 @@ class AccessReportController(
         @RequestParam(required = false) toDate: String?,
         model: Model,
     ): String {
-        val range = resolveRange(fromDate, toDate)
+        val range = resolveRange(fromDate, toDate, model)
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "이용자 통계 조회")
         model.addAttribute("allLocations", locationService.findAll())
@@ -85,7 +86,9 @@ class AccessReportController(
         @RequestParam(required = false) toDate: String?,
         response: HttpServletResponse,
     ) {
-        val range = resolveRange(fromDate, toDate)
+        // 엑셀 다운로드 응답에는 안내 메시지를 실을 화면이 없다(LogReportController.exportExcel과
+        // 동일한 이유로 Model을 요구하지 않는 대신 빈 Model을 넘긴다).
+        val range = resolveRange(fromDate, toDate, ExtendedModelMap())
         val result = accessReportService.search(locId, grpId, range.first, range.second)
         excelExportService.export(
             response = response,
@@ -97,9 +100,17 @@ class AccessReportController(
         )
     }
 
-    private fun resolveRange(fromDate: String?, toDate: String?): Pair<LocalDate, LocalDate> {
+    private fun resolveRange(fromDate: String?, toDate: String?, model: Model): Pair<LocalDate, LocalDate> {
         val to = toDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now()
-        val from = fromDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: to.minusDays(6)
+        var from = fromDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: to.minusDays(6)
+
+        // 다른 리포트(LogReportController)와 동일하게 조회기간 상한을 둔다(2026-08-13 코드 리뷰) —
+        // 이 화면만 상한이 없어 넓은 기간을 선택하면 tb_opr_status 전체 로우를 페이지 없이 한 번에
+        // 조회해 메모리/응답 지연 위험이 있었다.
+        if (from.isBefore(to.minusMonths(3))) {
+            model.addAttribute("error", "최근 3개월까지만 조회 가능합니다.")
+            from = to.minusMonths(3)
+        }
         return from to to
     }
 }

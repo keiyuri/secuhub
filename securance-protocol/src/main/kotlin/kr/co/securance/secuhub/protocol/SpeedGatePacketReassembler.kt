@@ -14,7 +14,14 @@ package kr.co.securance.secuhub.protocol
 class SpeedGatePacketReassembler(
     private val maxBufferSize: Int = SpeedGateProtocolConstants.MAX_REASSEMBLY_BUFFER_SIZE,
 ) : PacketReassembler {
-    private var buffer: ByteArray = ByteArray(0)
+    // 누적 버퍼를 매 append마다 `buffer + chunk`로 통째로 재할당하던 이전 구현은, 한 패킷이 여러
+    // 작은 조각(극단적으로는 1바이트씩)으로 나뉘어 도착하는 스트리밍 시나리오에서 매번 지금까지
+    // 쌓인 전체 바이트를 복사해 사실상 O(n²) 비용을 냈다(2026-08-13 코드 리뷰). capacity를
+    // 배수로 늘리는 성장형 배열(`data`/`size`, ArrayList와 동일한 상환 비용 전략)로 교체해
+    // append당 상수 분할상환 비용으로 낮춘다 — 파싱 로직(STX 스캔/길이 검증/Tail 검증)은
+    // `buffer[i]`/`buffer.size` 참조를 `data[i]`/`size`로 바꾼 것 외에 동일하다.
+    private var data: ByteArray = ByteArray(0)
+    private var size: Int = 0
 
     /**
      * 새로 수신한 바이트를 누적 버퍼에 더하고, 그 결과 완성된 패킷들을 순서대로 반환한다.
@@ -22,11 +29,10 @@ class SpeedGatePacketReassembler(
      */
     @Synchronized
     override fun append(chunk: ByteArray): List<ByteArray> {
-        if (chunk.isEmpty() && buffer.isEmpty()) return emptyList()
-        // 버퍼가 비어있을 때도 chunk를 복사 없이 그대로 참조하면 안 된다(적대적 리뷰 지적) — 지금의
-        // 유일한 호출부(asByteArray())는 매번 새 배열이라 우연히 안전하지만, 호출자가 풀링된/재사용되는
-        // 배열(예: Netty ByteBuf 기반 경로)을 넘기게 되면 계약 위반으로 조용히 데이터가 오염된다.
-        buffer = if (buffer.isEmpty()) chunk.copyOf() else buffer + chunk
+        if (chunk.isEmpty() && size == 0) return emptyList()
+        ensureCapacity(size + chunk.size)
+        System.arraycopy(chunk, 0, data, size, chunk.size)
+        size += chunk.size
 
         val packets = mutableListOf<ByteArray>()
         var cursor = 0
@@ -35,7 +41,7 @@ class SpeedGatePacketReassembler(
             val stxIndex = findStx(cursor) ?: break
 
             // 길이 필드(2바이트)를 읽기에 데이터가 부족하면 다음 append를 기다린다.
-            if (buffer.size - stxIndex < 3) {
+            if (size - stxIndex < 3) {
                 cursor = stxIndex
                 break
             }
@@ -50,28 +56,28 @@ class SpeedGatePacketReassembler(
             }
 
             // 패킷 전체가 아직 도착하지 않았으면 다음 append를 기다린다.
-            if (buffer.size - stxIndex < declaredLength) {
+            if (size - stxIndex < declaredLength) {
                 cursor = stxIndex
                 break
             }
 
             val tailXorPos = stxIndex + declaredLength - 2
             val tailChecksumPos = tailXorPos + 1
-            val tailValid = buffer[tailXorPos] == SpeedGateProtocolConstants.PACKET_CHECKSUM_FIXED &&
-                buffer[tailChecksumPos] == SpeedGateProtocolConstants.ETX
+            val tailValid = data[tailXorPos] == SpeedGateProtocolConstants.PACKET_CHECKSUM_FIXED &&
+                data[tailChecksumPos] == SpeedGateProtocolConstants.ETX
             if (!tailValid) {
                 // Tail(0x08,0x03) 불일치 — STX 오탐. 1바이트만 버리고 재탐색.
                 cursor = stxIndex + 1
                 continue
             }
 
-            packets += buffer.copyOfRange(stxIndex, stxIndex + declaredLength)
+            packets += data.copyOfRange(stxIndex, stxIndex + declaredLength)
             cursor = stxIndex + declaredLength
         }
 
-        buffer = if (cursor in 1..buffer.size) buffer.copyOfRange(cursor, buffer.size) else buffer
+        compact(cursor)
 
-        if (buffer.size > maxBufferSize) {
+        if (size > maxBufferSize) {
             // 하드 캡 초과(적대적 리뷰 지적): 예전에는 buffer 전체를 폐기했다 — 노이즈 바이트 하나가
             // 우연히 "유효 범위 내" 길이 필드로 읽혀 대기 상태에 들어가면, 그 뒤에 이미 도착해있던
             // 정상 패킷들까지 함께 날아갔다. 이제는 현재 버퍼의 첫 바이트(대기 중이던 STX 후보,
@@ -79,25 +85,47 @@ class SpeedGatePacketReassembler(
             // 재동기화를 시도한다 — 다음 append() 호출 때 그 지점부터 다시 파싱되어 파묻혀 있던
             // 정상 패킷을 살릴 수 있다. 재동기화할 STX가 전혀 없으면(순수 잡음) 그때는 전량 폐기한다.
             val resyncIndex = findStx(1)
-            buffer = if (resyncIndex != null) buffer.copyOfRange(resyncIndex, buffer.size) else ByteArray(0)
+            compact(resyncIndex ?: size)
         }
 
         return packets
     }
 
     /** 현재 누적 버퍼에 남아있는(아직 완성되지 않은) 바이트 수. 테스트/모니터링용. */
-    fun pendingByteCount(): Int = buffer.size
+    fun pendingByteCount(): Int = size
 
     private fun findStx(from: Int): Int? {
-        for (i in from until buffer.size) {
-            if (buffer[i] == SpeedGateProtocolConstants.STX) return i
+        for (i in from until size) {
+            if (data[i] == SpeedGateProtocolConstants.STX) return i
         }
         return null
     }
 
     private fun readPacketLength(stxIndex: Int): Int {
-        val hi = buffer[stxIndex + 1].toInt() and 0xFF
-        val lo = buffer[stxIndex + 2].toInt() and 0xFF
+        val hi = data[stxIndex + 1].toInt() and 0xFF
+        val lo = data[stxIndex + 2].toInt() and 0xFF
         return (hi shl 8) or lo
+    }
+
+    /** [data]의 앞 [consumed]바이트를 버리고 나머지를 배열 앞으로 당겨온다(제자리 압축, 재할당 없음). */
+    private fun compact(consumed: Int) {
+        if (consumed <= 0) return
+        val remaining = size - consumed
+        if (remaining > 0) {
+            System.arraycopy(data, consumed, data, 0, remaining)
+        }
+        size = remaining
+    }
+
+    /** [data]가 최소 [required]바이트를 담을 수 있도록 필요 시 배수(x2)로 키운다(ArrayList와 동일한 상환 비용 전략). */
+    private fun ensureCapacity(required: Int) {
+        if (data.size >= required) return
+        var newCapacity = if (data.size == 0) INITIAL_CAPACITY else data.size * 2
+        while (newCapacity < required) newCapacity *= 2
+        data = data.copyOf(newCapacity)
+    }
+
+    companion object {
+        private const val INITIAL_CAPACITY = 256
     }
 }

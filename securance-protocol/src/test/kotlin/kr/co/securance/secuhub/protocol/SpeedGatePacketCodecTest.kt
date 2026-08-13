@@ -4,6 +4,7 @@ import java.time.DayOfWeek
 import java.time.LocalDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class SpeedGatePacketCodecTest {
@@ -87,5 +88,42 @@ class SpeedGatePacketCodecTest {
         packet[10] = (packet[10] + 1).toByte() // 본문 한 바이트를 변조
 
         assertTrue(!SpeedGatePacketCodec.verifyChecksum(packet))
+    }
+
+    @Test
+    fun `payload가 헤더 길이 필드(2바이트) 표현 범위를 넘으면 buildPacket이 예외를 던진다`() {
+        // totalLength = HEADER_LENGTH(27) + payload.size + TAIL_LENGTH(4)가 0xFFFF(65535)를
+        // 넘도록 payload를 크게 잡는다 — 검증이 없으면 헤더의 PACKET_LENGTH 필드가 랩어라운드되어
+        // 실제 패킷 크기와 다른 값을 담게 된다.
+        val oversizedPayload = ByteArray(0xFFFF)
+
+        assertFailsWith<IllegalArgumentException> {
+            SpeedGatePacketCodec.buildPacket(
+                address = SpeedGatePacketCodec.ZERO_ADDRESS,
+                command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+                command2 = SpeedGateProtocolConstants.Command2.WRITE,
+                objectCode = SpeedGateProtocolConstants.ObjectCode.GATE_SETTING,
+                dataInfoLength = 0,
+                dataCount = 1,
+                dataLength = oversizedPayload.size,
+                payload = oversizedPayload,
+            )
+        }
+    }
+
+    @Test
+    fun `dataCount가 2바이트 표현 범위를 넘으면 buildPacket이 예외를 던진다`() {
+        assertFailsWith<IllegalArgumentException> {
+            SpeedGatePacketCodec.buildPacket(
+                address = SpeedGatePacketCodec.ZERO_ADDRESS,
+                command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+                command2 = SpeedGateProtocolConstants.Command2.WRITE,
+                objectCode = SpeedGateProtocolConstants.ObjectCode.GATE_SETTING,
+                dataInfoLength = 0,
+                dataCount = 0x10000,
+                dataLength = 0,
+                payload = ByteArray(0),
+            )
+        }
     }
 }

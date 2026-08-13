@@ -23,6 +23,11 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-amqp")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
 
+    // 헬스체크/메트릭 엔드포인트(2026-08-13 코드 리뷰 지적) — 이전까지 운영자가 게이트 TCP
+    // 연결/DB 쓰기 큐 적체 등 장애를 알 수 있는 유일한 경로가 로그 파일 육안 확인뿐이었다.
+    // /actuator/health, /actuator/metrics를 노출해 최소한의 외부 모니터링 연동 지점을 만든다.
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     // 컨텍스트 로드 스모크 테스트(Opus 리뷰 지적 — securance-app에 테스트가 전무했음)용 임베디드 DB.
     // 운영 DB(MariaDB)를 대신해 H2로 전체 빈 조립을 검증한다(Flyway는 MariaDB 전용 문법을 쓰므로

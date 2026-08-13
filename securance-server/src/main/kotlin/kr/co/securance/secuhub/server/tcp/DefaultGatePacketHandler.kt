@@ -112,10 +112,13 @@ class DefaultGatePacketHandler(
                 val newlyOnlineLanes = currentLaneSet - state.onlineLanesRecorded
                 val newlyOfflineLanes = state.onlineLanesRecorded - currentLaneSet
                 if (newlyOnlineLanes.isNotEmpty()) {
-                    newlyOnlineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state.dtlIp, lane, online = true) }
+                    // state를 이미 들고 있으므로 캐시 조회 오버로드로 넘긴다 — dtlIp만 넘기면 매 레인마다
+                    // tb_gate_dtl을 재조회하는 오버로드로 빠져, 캐시를 만든 취지(레거시 M-8 N+1 제거)가
+                    // 무색해진다(2026-08-13 Opus 전체 리뷰 지적).
+                    newlyOnlineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = true) }
                 }
                 if (newlyOfflineLanes.isNotEmpty()) {
-                    newlyOfflineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state.dtlIp, lane, online = false) }
+                    newlyOfflineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = false) }
                 }
                 if (newlyOnlineLanes.isNotEmpty() || newlyOfflineLanes.isNotEmpty()) {
                     state.onlineLanesRecorded = currentLaneSet

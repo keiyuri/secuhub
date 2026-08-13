@@ -89,8 +89,10 @@ CREATE TABLE tb_data_rcv (
     rcv_tail    VARCHAR(20) NULL
 );
 
--- `DataSendRepositoryTest`(@DataJpaTest) 전용 최소 스키마. 운영 마이그레이션(V1 + V4 + V5)의
--- 컬럼 중 이 리포지토리의 JPQL이 실제로 참조하는 컬럼만 재현한다.
+-- `DataSendRepositoryTest`(@DataJpaTest) 전용 최소 스키마. [DataSend] 엔티티가 NOT NULL로 매핑한
+-- 컬럼은 전부 채워야 Hibernate INSERT/UPDATE가 실제로 성공하는지 검증할 수 있어 전 컬럼을 재현한다
+-- (claimForSend의 상관 서브쿼리 UPDATE를 실제 JPA 프로바이더 위에서 검증하기 위함 — 2026-08-13
+-- Opus 전체 리뷰 지적).
 CREATE TABLE tb_data_snd (
     snd_id          BIGINT AUTO_INCREMENT PRIMARY KEY,
     snd_date        VARCHAR(20) NOT NULL,
@@ -99,9 +101,19 @@ CREATE TABLE tb_data_snd (
     next_attempt_at TIMESTAMP NULL,
     dtl_ip          VARCHAR(20) NOT NULL,
     dtl_lane_no     TINYINT     NOT NULL,
-    snd_user        VARCHAR(20) NULL,
-    snd_type_cd     VARCHAR(20) NULL,
-    snd_raw         CLOB NULL
+    dtl_type        TINYINT     NOT NULL DEFAULT 1,
+    dtl_id          BIGINT      NOT NULL DEFAULT 0,
+    loc_id          BIGINT      NOT NULL DEFAULT 0,
+    grp_id          BIGINT      NOT NULL DEFAULT 0,
+    snd_user        VARCHAR(20) NOT NULL DEFAULT '',
+    snd_server      VARCHAR(20) NOT NULL DEFAULT '',
+    snd_type_cd     VARCHAR(20) NOT NULL DEFAULT '',
+    snd_data_tp     VARCHAR(20) NOT NULL DEFAULT '',
+    snd_raw         CLOB        NOT NULL,
+    snd_header      VARCHAR(100) NOT NULL DEFAULT '',
+    snd_data        CLOB        NOT NULL,
+    snd_tail        VARCHAR(20) NOT NULL DEFAULT '',
+    version         BIGINT      NOT NULL DEFAULT 0
 );
 
 -- `GateLogRepositoryTest`(@DataJpaTest) 전용 최소 스키마. 운영 마이그레이션(V7__add_gate_log.sql)의

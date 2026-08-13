@@ -7,14 +7,20 @@ spring:
   thymeleaf:
     cache: true
 
-  # 기본 application.yml은 로컬 개발 편의를 위해 SECURANCE_DB_PASSWORD 빈 값을 기본값으로 허용한다.
-  # 운영 프로필에서는 그 기본값을 덮어써 fallback 없이 강제하여, 운영자가 환경변수 설정을 빠뜨리면
-  # 앱이 (조용히 빈 비밀번호로 뜨는 대신) 기동 시점에 바로 실패하게 한다.
+  # 기본 application.yml은 로컬 개발 편의를 위해 SECURANCE_DB_URL/USER/PASSWORD에 실 개발 DB
+  # 주소·자격증명을 기본값으로 박아둔다(2026-08-13 Opus 전체 리뷰 지적 — 운영 프로필에서 이 기본값을
+  # 덮어쓰지 않으면, 환경변수 하나만 빠뜨려도 조용히 개발 DB에 붙어버리거나 개발 DB 비밀번호로 운영이
+  # 뜰 수 있었다). 운영 프로필에서는 URL/계정/비밀번호 전부 fallback 없이 강제하여, 운영자가 환경변수
+  # 설정을 빠뜨리면 앱이 (조용히 잘못된 DB에 붙는 대신) 기동 시점에 바로 실패하게 한다.
+  # spring.flyway.*는 spring.datasource.*와 별도 프로퍼티라(application.yml:54-56 주석 참고) datasource만
+  # 덮어쓰면 Flyway가 여전히 개발 DB 기본값으로 마이그레이션을 시도할 수 있다 — 반드시 함께 덮어쓴다.
   # RabbitMQ의 guest:guest 기본값은 여기서 강제하지 않는다 — securance.messaging.rabbitmq.enabled가
   # 기본 false라 아직 실제 연결을 시도하지 않는 배포도 있고, 스프링은 이 기동 플래그와 무관하게
   # spring.rabbitmq.* 프로퍼티를 바인딩 시점에 해석하므로 여기서 강제하면 RabbitMQ 미사용 배포까지
   # 기동이 막힌다. RabbitMQ를 실제로 켤 때는 반드시 SECURANCE_RABBITMQ_USER/PASSWORD를 명시할 것.
   datasource:
+    url: ${SECURANCE_DB_URL}
+    username: ${SECURANCE_DB_USER}
     password: ${SECURANCE_DB_PASSWORD}
 
   # 기본 application.yml의 baseline-on-migrate=true는 로컬 개발 편의용이다(적대적 리뷰 지적) —
@@ -23,6 +29,9 @@ spring:
   # 것 자체가 이례적인 상황이므로, 반드시 실패시켜 운영자가 무슨 일이 있었는지 확인하게 한다 —
   # 신규 운영 DB를 처음 구축할 때는 이 값을 일시적으로 true로 켜고 기동한 뒤 다시 꺼둘 것.
   flyway:
+    url: ${SECURANCE_DB_URL}?socketTimeout=600000&connectTimeout=3000
+    user: ${SECURANCE_DB_USER}
+    password: ${SECURANCE_DB_PASSWORD}
     baseline-on-migrate: false
 
 logging:

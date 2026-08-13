@@ -93,16 +93,16 @@ class DefaultGatePacketHandlerTest {
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 3) { 0x01 })
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 1, true)
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 2, true)
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 3, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 1, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 2, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 3, true)
 
         // 센서 바이트가 바뀌어(레인 2) 패킷 전체는 "변경됨"으로 잡히지만, 이미 온라인인 레인 1/2/3은
         // 다시 net_state에 큐잉되면 안 된다.
         handler.handle(state, fakeStatusPacket(laneCount = 3) { lane -> if (lane == 2) 0x02 else 0x01 })
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 1, true)
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 2, true)
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 3, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 1, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 2, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 3, true)
     }
 
     @Test
@@ -112,14 +112,14 @@ class DefaultGatePacketHandlerTest {
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 2))
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 1, true)
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 2, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 1, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 2, true)
 
         // 레인 3이 새로 추가된 상태 패킷 — 레인 3만 새로 큐잉되어야 한다.
         handler.handle(state, fakeStatusPacket(laneCount = 3))
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 3, true)
-        verify(registry, never()).enqueueNetStateUpdate("192.168.0.30", 1, false)
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 1, true) // 여전히 1회만.
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 3, true)
+        verify(registry, never()).enqueueNetStateUpdate(state, 1, false)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 1, true) // 여전히 1회만.
     }
 
     @Test
@@ -134,17 +134,17 @@ class DefaultGatePacketHandlerTest {
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 3))
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 3, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 3, true)
 
         // 레인 3이 사라진 상태 패킷 — 사라진 레인은 오프라인으로 큐잉되어야 한다.
         handler.handle(state, fakeStatusPacket(laneCount = 2))
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 3, false)
-        verify(registry, never()).enqueueNetStateUpdate("192.168.0.30", 1, false)
-        verify(registry, never()).enqueueNetStateUpdate("192.168.0.30", 2, false)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 3, false)
+        verify(registry, never()).enqueueNetStateUpdate(state, 1, false)
+        verify(registry, never()).enqueueNetStateUpdate(state, 2, false)
 
         // 레인 3이 다시 나타나면 "새로 나타난 레인"으로 인식되어 다시 온라인으로 큐잉되어야 한다.
         handler.handle(state, fakeStatusPacket(laneCount = 3))
-        verify(registry, times(2)).enqueueNetStateUpdate("192.168.0.30", 3, true)
+        verify(registry, times(2)).enqueueNetStateUpdate(state, 3, true)
     }
 
     @Test
@@ -159,8 +159,8 @@ class DefaultGatePacketHandlerTest {
         // 레인 2의 센서 바이트를 0으로 둬 "미연결" 상태로 만든다.
         handler.handle(state, fakeStatusPacket(laneCount = 2) { lane -> if (lane == 2) 0x00 else 0x01 })
 
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 1, true)
-        verify(registry, never()).enqueueNetStateUpdate("192.168.0.30", 2, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 1, true)
+        verify(registry, never()).enqueueNetStateUpdate(state, 2, true)
     }
 
     @Test
@@ -176,7 +176,7 @@ class DefaultGatePacketHandlerTest {
 
         handler.handle(state, fakeStatusPacket(laneCount = 1) { 0x00 })
 
-        verify(registry, never()).enqueueNetStateUpdate("192.168.0.30", 1, true)
+        verify(registry, never()).enqueueNetStateUpdate(state, 1, true)
     }
 
     @Test
@@ -186,12 +186,12 @@ class DefaultGatePacketHandlerTest {
         val state = newState()
 
         handler.handle(state, fakeStatusPacket(laneCount = 2))
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 2, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 2, true)
 
         // 레인 2의 센서 값이 이후 패킷에서 전부 0으로 바뀜(물리 센서 분리) — 레인 자체는 여전히
         // 보고되므로 라우팅 대상에서는 빠지지 않지만, net_state는 오프라인으로 전이돼야 한다.
         handler.handle(state, fakeStatusPacket(laneCount = 2) { lane -> if (lane == 2) 0x00 else 0x01 })
-        verify(registry, times(1)).enqueueNetStateUpdate("192.168.0.30", 2, false)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 2, false)
     }
 
     @Test
@@ -214,7 +214,7 @@ class DefaultGatePacketHandlerTest {
         handler.handle(state, packet)
 
         verify(gateLogService, times(1)).handle("192.168.0.30", packet)
-        verify(registry, never()).enqueueNetStateUpdate(anyKtString(), anyKtInt(), org.mockito.ArgumentMatchers.anyBoolean())
+        verify(registry, never()).enqueueNetStateUpdate(anyKtState(), anyKtInt(), org.mockito.ArgumentMatchers.anyBoolean())
     }
 
     @Test
@@ -265,9 +265,12 @@ class DefaultGatePacketHandlerTest {
     }
 }
 
-private fun anyKtString(): String {
-    Mockito.any<String>()
-    return ""
+@Suppress("UNCHECKED_CAST")
+private fun <T> uninitialized(): T = null as T
+
+private fun anyKtState(): GateConnectionState {
+    Mockito.any<GateConnectionState>()
+    return uninitialized()
 }
 
 private fun anyKtInt(): Int {

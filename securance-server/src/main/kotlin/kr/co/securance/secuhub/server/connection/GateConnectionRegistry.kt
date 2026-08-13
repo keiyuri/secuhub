@@ -42,6 +42,12 @@ interface GateConnectionRegistry {
      * 않으면 전송을 거부한다 — 제어 명령처럼 특정 레인을 대상으로 하는 전송에 쓴다. 패킷 내용이
      * 레인에 종속되지 않는 전체 커넥션 대상 요청(예: 상태 조회)에는 [sendToConnection]을 쓴다.
      *
+     * **반환값 주의(2026-08-13 Opus 전체 리뷰 지적)**: 이 메서드는 [sendToConnection]과 달리
+     * 실제 소켓 쓰기 완료를 기다리지 않는다 — `true`는 "액터 큐에 넣는 데 성공했다(대기열이
+     * 가득 차지 않았다)"는 뜻일 뿐, 물리 전송이 실제로 끝났거나 성공했다는 보장이 아니다. 호출자가
+     * "전송 완료"를 전제로 후속 상태를 기록하면(예: 확인 대기 타임스탬프), 그 시점에 실제 소켓
+     * write는 아직 일어나지 않았을 수 있다.
+     *
      * @param trackForAck 전송한 레인을 ACK 상관관계 FIFO([GateConnectionState.recordSentLane])에
      *   기록할지 여부(Codex 어드버서리얼 리뷰 대응). 장비 ACK를 기다려 상관시켜야 하는 **제어
      *   명령** 전송만 `true`(기본값)를 쓴다. ACK 상관관계가 필요 없는 전송이 이 큐를 오염시키면,
@@ -51,7 +57,8 @@ interface GateConnectionRegistry {
 
     /**
      * 레인 소유권 검사 없이, 커넥션(디바이스 IP) 하나에 패킷을 전송하고 실제 소켓 쓰기가 완료될
-     * 때까지 대기한다(반환값의 의미는 [sendToLane]과 동일 — 큐잉이 아니라 물리 전송 결과).
+     * 때까지 대기한다 — [sendToLane]과 달리 반환값이 "큐잉 성공"이 아니라 "물리 전송 성공"을
+     * 의미한다(위 [sendToLane] 반환값 주의 참고 — 두 메서드의 계약이 다르다).
      *
      * `ReqStatusJob`의 상태 조회 요청처럼 패킷이 특정 레인이 아니라 커넥션(장치) 전체를 대상으로
      * 할 때 쓴다. `sendToLane`은 `hasAuthoritativeLaneInfo=true`인데 레인 집합이 비어 있는(예:

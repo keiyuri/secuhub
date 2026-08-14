@@ -13,6 +13,7 @@ import kr.co.securance.secuhub.protocol.GatePacket
 import kr.co.securance.secuhub.protocol.GateProtocolCodec
 import kr.co.securance.secuhub.protocol.PacketReassembler
 import kr.co.securance.secuhub.protocol.SpeedGateControlPayload
+import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.db.GateDbWriteQueue
 import kr.co.securance.secuhub.server.db.GateDbWriteTask
 import org.mockito.Mockito
@@ -87,7 +88,7 @@ class GateConnectionRegistryImplTest {
         netStateRepository: NetStateRepository = mock(NetStateRepository::class.java),
         dbWriteQueue: GateDbWriteQueue = mock(GateDbWriteQueue::class.java),
         gateDetailRepository: GateDetailRepository = mock(GateDetailRepository::class.java),
-    ) = GateConnectionRegistryImpl(netStateRepository, dbWriteQueue, gateDetailRepository)
+    ) = GateConnectionRegistryImpl(netStateRepository, dbWriteQueue, gateDetailRepository, ServerModeConfig())
 
     @Test
     fun `register는 새 커넥션을 조회 가능하게 만든다`() {

@@ -69,6 +69,7 @@ class GateTcpServerTest {
             mock(NetStateRepository::class.java),
             mock(GateDbWriteQueue::class.java),
             gateDetailRepository,
+            ServerModeConfig(),
         )
         return GateTcpServer(
             config = config,

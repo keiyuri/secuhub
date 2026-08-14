@@ -34,6 +34,7 @@ import reactor.netty.Connection
 import reactor.netty.NettyInbound
 import reactor.netty.NettyOutbound
 import reactor.netty.tcp.TcpClient
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -86,6 +87,20 @@ class GateTcpClient(
     )
     private var monitorJob: Job? = null
 
+    /**
+     * 코드 리뷰 지적(2026-08-14): [connectToAllDevices]의 "이미 연결됨" 필터(`registry.findConnection
+     * (ip) == null`)와 [onConnected]의 "연결 경쟁 감지" 재확인은 둘 다 TOCTOU다 — 느린 핸드셰이크로
+     * 이전 재확인 사이클의 연결 시도가 여전히 진행 중일 때 다음 사이클이 시작되면, 두 시도 모두
+     * 이 두 검사 시점에는 아직 registry에 아무것도 없어 둘 다 통과해버린다(그중 하나가 나중에
+     * `registry.register`를 호출하며 다른 하나를 그냥 덮어써 조용히 고아 소켓으로 만든다).
+     *
+     * `Set.add`가 "이미 있으면 false"를 원자적으로 돌려주는 성질을 이용해, 실제 연결 시도를
+     * 시작하기 *전에* 이 IP를 원자적으로 예약한다 — 같은 IP에 대한 동시 시도는 둘 중 하나만
+     * 예약에 성공한다. 예약은 연결이 등록되거나(성공) 실패/경쟁 감지로 포기할 때 해제한다
+     * ([releaseConnecting] 참고).
+     */
+    private val connectingIps = ConcurrentHashMap.newKeySet<String>()
+
     @PostConstruct
     fun start() {
         if (config.mode != GatewayMode.CLIENT) {
@@ -135,13 +150,21 @@ class GateTcpClient(
         }
 
         // IP로 먼저 그룹핑 — 같은 IP의 여러 레인이 중복 연결을 시도하지 않도록(클래스 KDoc 참고).
+        // connectingIps.add(ip)까지 이 필터 안에서 원자적으로 함께 수행해야, "연결됨도 아니고
+        // 예약도 안 된" 상태를 검사와 예약 사이에 다른 사이클이 비집고 들어갈 여지를 없앤다
+        // (connectingIps KDoc 참고 — TOCTOU 레이스 가드).
         val targets = devices.groupBy { it.dtlIp.trim() }
-            .filterKeys { ip -> registry.findConnection(ip) == null }
+            .filter { (ip, _) -> registry.findConnection(ip) == null && connectingIps.add(ip) }
         if (targets.isEmpty()) return
 
         targets.forEach { (deviceIp, laneRows) ->
             clientScope.launch { connectToDevice(deviceIp, laneRows) }
         }
+    }
+
+    /** [connectingIps] 예약을 해제한다 — 연결이 등록되거나(성공) 실패/경쟁 감지로 포기할 때 호출. */
+    private fun releaseConnecting(deviceIp: String) {
+        connectingIps.remove(deviceIp)
     }
 
     /** 단일 디바이스에 아웃바운드 연결을 시도한다. 레거시 `ConnectToDevice`에 대응. */
@@ -151,6 +174,7 @@ class GateTcpClient(
             codecRegistry.resolve(representative.dtlType)
         } catch (ex: UnsupportedGateTypeException) {
             logger.warn("[CLIENT 모드] 게이트[{}] 연결 건너뜀: {}", deviceIp, ex.message)
+            releaseConnecting(deviceIp)
             return
         }
 
@@ -166,7 +190,12 @@ class GateTcpClient(
             .connect()
             .subscribe(
                 { },
-                { ex -> logger.warn("[CLIENT 모드] 디바이스 연결 실패: {}:{} - {}", deviceIp, config.clientPort, ex.toString()) },
+                { ex ->
+                    // TCP 커넥트 자체가 실패하면 onConnected(mono)가 아예 호출되지 않으므로,
+                    // 예약 해제는 여기서 직접 해야 한다(connectingIps KDoc 참고).
+                    releaseConnecting(deviceIp)
+                    logger.warn("[CLIENT 모드] 디바이스 연결 실패: {}:{} - {}", deviceIp, config.clientPort, ex.toString())
+                },
             )
     }
 
@@ -192,6 +221,7 @@ class GateTcpClient(
             if (registry.findConnection(deviceIp) != null) {
                 logger.warn("[CLIENT 모드] 연결 경쟁 감지 — 방금 연 소켓을 닫습니다: {}", deviceIp)
                 connection.dispose()
+                releaseConnecting(deviceIp)
                 return@mono
             }
 
@@ -211,6 +241,10 @@ class GateTcpClient(
                 laneInfo = laneInfo,
             )
             registry.register(state)
+            // 이 시점부터는 registry.findConnection(deviceIp) != null이 다음 재확인 사이클의
+            // 필터 역할을 대신하므로 예약을 해제한다 — 연결이 끊길 때까지 계속 들고 있을 필요가
+            // 없다(connectingIps KDoc 참고).
+            releaseConnecting(deviceIp)
             connection.onDispose {
                 clientScope.launch { registry.closeConnectionIfCurrent(deviceIp, state, updateNetState = true) }
             }
@@ -227,6 +261,9 @@ class GateTcpClient(
 
             inbound.receive().asByteArray().asFlow().collect { chunk -> inboundProcessor.onChunkReceived(state, chunk) }
         }.doOnError { ex ->
+            // register() 이전 단계(예: DB 조회)에서 예외가 나면 위의 명시적 releaseConnecting 지점을
+            // 거치지 않으므로 여기서도 한 번 더 해제한다 — 이미 해제됐다면 remove()는 안전한 no-op.
+            releaseConnecting(deviceIp)
             logger.error("[CLIENT 모드] 커넥션[{}] 인바운드 처리 중 처리되지 않은 예외로 소켓을 닫습니다.", deviceIp, ex)
         }.then()
     }

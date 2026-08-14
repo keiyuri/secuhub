@@ -34,6 +34,12 @@ class WebConfig(
 
     // Phase 10 후속 — 게이트 제어 재인증(2026-08-12 사용자 확인). 컨트롤러마다 검증을 반복하지
     // 않도록 상태 변경 경로에만 인터셉터 하나로 일괄 적용한다(GateControlReauthInterceptor KDoc 참고).
+    //
+    // 코드 리뷰 지적(2026-08-14): ScheduleController(`/schedule/apply`, `/schedule/reset`,
+    // `/schedule/timezones`, `/schedule/timezones/sync`)도 실제로 게이트에 제어 명령(모드 변경/
+    // 리셋/타임존 배포)을 큐에 적재하는 상태 변경 엔드포인트라 다른 게이트 제어 경로와 동일하게
+    // 재인증 대상이어야 한다 — 컨트롤러가 "스캐폴드 단계"라 제외했던 이전 주석은 더 이상 맞지
+    // 않으므로 대상에 포함한다.
     override fun addInterceptors(registry: InterceptorRegistry) {
         registry.addInterceptor(GateControlReauthInterceptor(securitySettingsProperties, gateControlReauthService, objectMapper))
             .addPathPatterns(
@@ -41,6 +47,10 @@ class WebConfig(
                 "/gates/details/*/mode",
                 "/gates/details/*/motor",
                 "/gates/reset/execute",
+                "/schedule/apply",
+                "/schedule/reset",
+                "/schedule/timezones",
+                "/schedule/timezones/sync",
             )
     }
 }

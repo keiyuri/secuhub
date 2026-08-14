@@ -14,6 +14,7 @@ import kr.co.securance.secuhub.protocol.SpeedGateControlCommand
 import kr.co.securance.secuhub.protocol.SpeedGatePacketCodec
 import kr.co.securance.secuhub.protocol.SpeedGateProtocolConstants
 import kr.co.securance.secuhub.protocol.SpeedGateSecurityMode
+import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.connection.GateConnectionActor
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.connection.GateConnectionState
@@ -46,6 +47,7 @@ class QueuedControlAndResolutionTest {
             mock(NetStateRepository::class.java),
             GateDbWriteQueue(shardCount = 1),
             mock(GateDetailRepository::class.java),
+            ServerModeConfig(),
         )
         if (dtlIp != null) {
             registry.register(

@@ -118,12 +118,21 @@ class GateLogService(
     }
 
     private fun saveIfAbsent(dtlIp: String, entry: LogEventCodec.LogEvent) {
+        val eventTime = entry.eventTime
+        if (eventTime == null) {
+            // BCD 시각이 달력 범위를 벗어난 손상/노이즈 엔트리 — eventTime이 멱등성 확인의 자연키
+            // 일부이자 event_time 컬럼이 NOT NULL이라 저장할 수 없다. 예외로 배치 전체를 막는 대신
+            // 이 엔트리만 건너뛴다(LogEventCodec.decode KDoc 참고).
+            logger.warn("커넥션[{}] 로그 엔트리의 이벤트 시각이 유효하지 않아 저장을 건너뜁니다: {}", dtlIp, entry)
+            return
+        }
+
         val eventType = entry.eventType.toInt() and 0xFF
         val code = entry.code.toInt() and 0xFF
         val errCode = entry.errCode.toInt() and 0xFF
 
         val exists = gateLogRepository.existsByDtlIpAndDtlLaneNoAndEventTimeAndEventTypeAndCodeAndErrCodeAndFunctionCode(
-            dtlIp, entry.moduleNumber, entry.eventTime, eventType, code, errCode, entry.functionCode,
+            dtlIp, entry.moduleNumber, eventTime, eventType, code, errCode, entry.functionCode,
         )
         if (exists) {
             logger.debug("커넥션[{}] 이미 저장된 로그 엔트리라 건너뜁니다: {}", dtlIp, entry)
@@ -143,7 +152,7 @@ class GateLogService(
                 readerNumber = entry.readerNumber,
                 doorStatus = entry.doorStatus.toInt() and 0xFF,
                 functionCode = entry.functionCode,
-                eventTime = entry.eventTime,
+                eventTime = eventTime,
                 userData1 = entry.userData1Hex,
                 userData2 = entry.userData2Hex,
             ),

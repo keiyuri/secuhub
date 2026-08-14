@@ -56,4 +56,29 @@ class LogEventCodecTest {
             LogEventCodec.decode(ByteArray(10))
         }
     }
+
+    @Test
+    fun `decodeAll은 entryCount가 실제 데이터로 커버 가능한 개수보다 크면 예외 대신 커버 가능한 만큼만 반환한다`() {
+        val entry = HexCodec.fromHex(sampleHex)
+        // 완전한 엔트리 1건 + 미완성 엔트리(10바이트)만 있는 손상 데이터.
+        val truncated = entry + ByteArray(10)
+
+        val events = LogEventCodec.decodeAll(truncated, entryCount = 2)
+
+        assertEquals(1, events.size)
+        assertEquals(LocalDateTime.of(2025, 8, 5, 15, 0, 25), events[0].eventTime)
+    }
+
+    @Test
+    fun `BCD 시각이 달력 범위를 벗어나면 예외 대신 null을 반환한다`() {
+        // month 바이트를 0x13(BCD상 13월, 존재하지 않는 달)으로 손상시킨 샘플.
+        val corrupted = HexCodec.fromHex(
+            "1801050B0500000001FF2513051500250000000000000000000000000000000000000000",
+        )
+        assertEquals(36, corrupted.size)
+
+        val event = LogEventCodec.decode(corrupted)
+
+        assertEquals(null, event.eventTime)
+    }
 }

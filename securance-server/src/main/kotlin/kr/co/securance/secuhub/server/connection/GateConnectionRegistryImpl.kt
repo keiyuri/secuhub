@@ -6,13 +6,16 @@ import kr.co.securance.secuhub.domain.entity.NetState
 import kr.co.securance.secuhub.domain.entity.NetStateId
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
+import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.db.GateDbWriteQueue
 import kr.co.securance.secuhub.server.db.GateDbWriteTask
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Mono
+import java.time.Duration
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 
@@ -28,10 +31,12 @@ class GateConnectionRegistryImpl(
     private val netStateRepository: NetStateRepository,
     private val dbWriteQueue: GateDbWriteQueue,
     private val gateDetailRepository: GateDetailRepository,
+    private val serverModeConfig: ServerModeConfig,
 ) : GateConnectionRegistry {
 
     private val logger = LoggerFactory.getLogger(GateConnectionRegistryImpl::class.java)
     private val connections = ConcurrentHashMap<String, GateConnectionState>()
+    private val writeTimeout: Duration get() = Duration.ofSeconds(serverModeConfig.writeTimeoutSeconds)
 
     // 적대적 리뷰(codex) 지적: GateDbWriteQueue는 타임아웃된 시도를 백그라운드에 "버려둔 채" 다음
     // 시도/작업으로 넘어간다(GateDbWriteQueue.kt KDoc 참고) — 그 버려진 실행이 뒤늦게 실제로 DB에
@@ -158,13 +163,33 @@ class GateConnectionRegistryImpl(
     fun sendRaw(state: GateConnectionState, packet: ByteArray): Boolean =
         try {
             state.actor.submit {
-                state.outbound.sendByteArray(Mono.just(packet)).then().awaitFirstOrNull()
+                awaitWrite(state, packet)
             }
             true
         } catch (ex: GateTaskRejectedException) {
             logger.warn("커넥션[{}] 전송 거부(대기열 초과)", state.dtlIp, ex)
             false
         }
+
+    /**
+     * 실제 소켓 쓰기 1건을 수행하고, [writeTimeout] 안에 끝나지 않으면 커넥션을 닫는다.
+     *
+     * 코드 리뷰 지적(2026-08-14): 원격이 응답 없이 멈추거나 TCP 송신 버퍼가 계속 가득 차 있으면
+     * `sendByteArray(...)`가 영원히 완료되지 않아, 이 write가 실행 중인 [GateConnectionActor]의
+     * 워커 코루틴이 무기한 블로킹되고 뒤이은 ACK/제어 명령 전송이 전부 밀린다(head-of-line
+     * blocking). [ServerModeConfig.writeTimeoutSeconds] 안에 끝나지 않으면 타임아웃 예외를
+     * 던지는 대신 여기서 잡아 커넥션을 dispose한다 — dispose는 `GateTcpServer`의 `onDispose`
+     * 가드를 트리거해 registry/net_state 정리를 기존 경로 그대로 따라가게 한다.
+     */
+    private suspend fun awaitWrite(state: GateConnectionState, packet: ByteArray) {
+        try {
+            state.outbound.sendByteArray(Mono.just(packet)).then().timeout(writeTimeout).awaitFirstOrNull()
+        } catch (ex: TimeoutException) {
+            logger.warn("커넥션[{}] 소켓 쓰기가 {}초 안에 끝나지 않아 연결을 닫습니다.", state.dtlIp, writeTimeout.seconds, ex)
+            if (!state.connection.isDisposed) state.connection.dispose()
+            throw ex
+        }
+    }
 
     override fun sendToLane(dtlIp: String, dtlLaneNo: Int, packet: ByteArray, trackForAck: Boolean): Boolean {
         val state = connections[dtlIp] ?: return false
@@ -201,7 +226,7 @@ class GateConnectionRegistryImpl(
     private suspend fun enqueueSend(state: GateConnectionState, packet: ByteArray, logContext: String): Boolean =
         try {
             state.actor.submitAndAwait {
-                state.outbound.sendByteArray(Mono.just(packet)).then().awaitFirstOrNull()
+                awaitWrite(state, packet)
             }
         } catch (ex: GateTaskRejectedException) {
             logger.warn("커넥션[{}] 전송 거부(대기열 초과): {}", state.dtlIp, logContext, ex)

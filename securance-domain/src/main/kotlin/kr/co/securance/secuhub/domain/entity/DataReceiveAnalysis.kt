@@ -50,9 +50,17 @@ class DataReceiveAnalysis(
     @Column(name = "dtl_lane_no", nullable = false)
     var dtlLaneNo: Int,
 
-    /** 게이트 종류(1:Speed, 2:Flap, 3:Turn, 4:Fast). */
-    @Column(name = "dtl_type", nullable = false)
-    var dtlType: Int = 1,
+    /**
+     * 게이트 종류(1:Speed, 2:Flap, 3:Turn, 4:Fast).
+     *
+     * 코드 리뷰 지적(2026-08-14): `tb_data_rcv_anal.dtl_type` 컬럼은 V8 마이그레이션이 명시적으로
+     * `NULL` 허용으로 정합화했다(레거시 데이터 중 NULL 행이 실제로 존재) — 앱 코드는 항상 채워
+     * 넣지만, 과거 데이터를 조회할 때 이 필드가 `nullable=false`였다면 hydration 시점에 예외가
+     * 났다. 스키마를 강제로 NOT NULL로 되돌리는 대신(운영 데이터의 기존 NULL 행을 깨뜨릴 위험)
+     * 엔티티를 실제 스키마에 맞춘다.
+     */
+    @Column(name = "dtl_type")
+    var dtlType: Int? = 1,
 
     @Column(name = "dtl_no", nullable = false)
     var dtlNo: Int = 1,
@@ -219,9 +227,14 @@ class DataReceiveAnalysis(
     @Column(name = "desc_gate_status12", nullable = false, length = 50)
     var descGateStatus12: String = "",
 
-    /** ERROR CHECK 값 — 3이면 장애, 1 Active, 2 Inactive, 9 Event. */
-    @Column(name = "err_type", nullable = false)
-    var errType: Int = 0,
+    /**
+     * ERROR CHECK 값 — 3이면 장애, 1 Active, 2 Inactive, 9 Event.
+     *
+     * [dtlType]과 동일한 이유(코드 리뷰 지적, 2026-08-14)로 `tb_data_rcv_anal.err_type`도
+     * V8부터 `NULL` 허용이라 nullable로 맞춘다.
+     */
+    @Column(name = "err_type")
+    var errType: Int? = 0,
 
     @Column(name = "resolve_yn", nullable = false, length = 1)
     var resolveYn: String = "N",

@@ -13,8 +13,11 @@ data class CodeMasterId(
     @Column(name = "code_grp", length = 10)
     val codeGroup: String = "",
 
+    // 코드 리뷰 지적(2026-08-14): 이 필드(code_cd, 코드값 자체 — 예: "1")와 CodeMaster.codeValue
+    // (code_val, 프로토콜 매핑용 별도 값)가 이전에는 둘 다 "codeValue"라는 동일한 Kotlin 이름을
+    // 써서 서로 다른 컬럼인데도 헷갈렸다. DB 컬럼명(code_cd)에 맞춰 이름을 구분한다.
     @Column(name = "code_cd", length = 20)
-    val codeValue: String = "",
+    val codeCd: String = "",
 ) : Serializable
 
 /**

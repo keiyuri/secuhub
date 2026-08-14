@@ -7,6 +7,8 @@ import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.invoke
 import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.core.session.SessionRegistry
+import org.springframework.security.core.session.SessionRegistryImpl
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.session.HttpSessionEventPublisher
@@ -44,8 +46,23 @@ class SecurityConfig {
     @Bean
     fun httpSessionEventPublisher(): HttpSessionEventPublisher = HttpSessionEventPublisher()
 
+    /**
+     * sessionConcurrency에 명시적으로 연결해 애플리케이션 컨텍스트의 빈으로 노출한다 — DSL에
+     * 넘기지 않으면 `SessionManagementConfigurer`가 내부적으로 자기만의 `SessionRegistryImpl`을
+     * 만들어버려, [ConcurrentLoginAuditListener]가 주입받는 레지스트리와 실제로 세션을 등록/조회하는
+     * 레지스트리가 서로 다른 인스턴스가 된다(= 감사 로그가 항상 "기존 세션 없음"으로만 보임).
+     */
     @Bean
-    fun securityFilterChain(http: HttpSecurity, securitySettings: SecuritySettingsProperties): SecurityFilterChain {
+    fun sessionRegistry(): SessionRegistry = SessionRegistryImpl()
+
+    @Bean
+    fun securityFilterChain(
+        http: HttpSecurity,
+        securitySettings: SecuritySettingsProperties,
+        // DSL 람다 안의 SessionConcurrencyDsl.sessionRegistry 프로퍼티와 이름이 겹치면 셰도잉으로
+        // 자기 자신에게 대입하는 실수를 하기 쉬워, 파라미터명을 의도적으로 다르게 둔다.
+        sharedSessionRegistry: SessionRegistry,
+    ): SecurityFilterChain {
         http {
             authorizeHttpRequests {
                 authorize("/login", permitAll)
@@ -124,12 +141,27 @@ class SecurityConfig {
             sessionManagement {
                 sessionCreationPolicy = SessionCreationPolicy.IF_REQUIRED
                 // 동시 세션 제한(적대적 리뷰 지적) — 게이트 제어 권한을 가진 관리 콘솔이라, 세션이
-                // 탈취되면 정상 사용자 몰래 계속 살아있을 수 있다. 새 로그인이 기존 세션을 밀어내게
-                // 한다(세션 고정 공격 자체는 Spring Security 기본 전략인 changeSessionId()로 이미
-                // 방어된다 — 별도 설정 불필요).
+                // 탈취되면 정상 사용자 몰래 계속 살아있을 수 있다(세션 고정 공격 자체는 Spring
+                // Security 기본 전략인 changeSessionId()로 이미 방어된다 — 별도 설정 불필요).
+                //
+                // [2026-08-14 사용자 요청 → Codex 적대적 리뷰로 재조정] 한때 새 로그인 자체를 막는
+                // maxSessionsPreventsLogin = true를 시도했으나, 세션이 탈취되었거나 브라우저 비정상
+                // 종료로 세션이 방치된 경우 정상 사용자가 올바른 비밀번호를 갖고 있어도 세션 만료
+                // 전까지 완전히 잠기는 부작용이 지적되었다(High). 그래서 새 로그인이 기존 세션을
+                // 밀어내는 기본 동작(maxSessionsPreventsLogin = false)으로 되돌린다.
+                //
+                // [2026-08-14 재검토] 밀려나는(만료되는) 세션이 "다음 요청"을 보낼 때만 감사 로그를
+                // 남기는 방식([EvictedSessionRedirectStrategy]만으로는 충분치 않았다 — 로그에
+                // 공격자가 아니라 피해자의 IP만 남고, 피해자가 재요청을 안 보내면 로그 자체가 남지
+                // 않는다. 그래서 새로 로그인하는 시점에 기존 세션 존재 여부를 확인해 공격자 쪽 IP로
+                // 경고를 남기는 [ConcurrentLoginAuditListener]를 별도로 둔다(sessionRegistry 공유 필요
+                // — 아래 참고). [EvictedSessionRedirectStrategy]는 밀려난 사용자에게 "다른 곳에서
+                // 로그인했다"는 화면 안내(운영 UX)만 담당하도록 역할을 좁혔다.
                 sessionConcurrency {
                     maximumSessions = 1
                     maxSessionsPreventsLogin = false
+                    sessionRegistry = sharedSessionRegistry
+                    expiredSessionStrategy = EvictedSessionRedirectStrategy()
                 }
             }
         }

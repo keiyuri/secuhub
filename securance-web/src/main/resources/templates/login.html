@@ -17,6 +17,9 @@
         <p class="login-box-msg">계정으로 로그인하세요</p>
         <div class="alert alert-danger py-2" th:if="${param.error}">아이디 또는 비밀번호가 올바르지 않습니다.</div>
         <div class="alert alert-success py-2" th:if="${param.logout}">로그아웃되었습니다.</div>
+        <!--/* SecurityConfig의 sessionConcurrency(EvictedSessionRedirectStrategy)가 다른 위치의
+             새 로그인으로 세션이 밀려났을 때 이 파라미터와 함께 로그인 화면으로 돌려보낸다. */-->
+        <div class="alert alert-warning py-2" th:if="${param.expired}">다른 위치에서 로그인하여 세션이 만료되었습니다.</div>
         <form th:action="@{/login}" method="post">
           <div class="mb-3">
             <input type="text" name="username" class="form-control" placeholder="아이디" required autofocus/>

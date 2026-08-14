@@ -73,6 +73,7 @@ class DefaultGatePacketHandlerAckTest {
         mock(DataReceiveAckRepository::class.java),
         mock(DataReceiveFailRepository::class.java),
         mock(DataReceiveAnalysisRepository::class.java),
+        mock(GateDetailRepository::class.java),
         mock(GateFaultResolutionService::class.java),
     ) {
         var receiveCount = 0

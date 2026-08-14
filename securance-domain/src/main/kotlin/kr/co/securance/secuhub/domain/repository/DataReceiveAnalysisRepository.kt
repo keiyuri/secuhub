@@ -166,4 +166,12 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "DELETE FROM tb_data_rcv_anal WHERE anal_date < :cutoff LIMIT :batchSize", nativeQuery = true)
     fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
+
+    /**
+     * 레인 1개의 "당일 전체 상태 데이터 upsert"(2026-08-14) — [GatePacketPersister.persistStatusAnalysis]가
+     * 매 상태 패킷마다 이 레인의 최신 행을 조회해, 오늘 날짜의 동일 데이터면 `rcv_date`만 갱신하고
+     * 아니면 새 행을 INSERT한다. `IDX_ANAL_LANE_LATEST(dtl_ip, dtl_lane_no, anal_id)`([V25__add_anal_lane_latest_index.sql])
+     * 로 정렬까지 인덱스로 커버한다.
+     */
+    fun findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(dtlIp: String, dtlLaneNo: Int): DataReceiveAnalysis?
 }

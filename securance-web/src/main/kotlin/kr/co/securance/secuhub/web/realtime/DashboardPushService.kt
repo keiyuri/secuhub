@@ -5,8 +5,7 @@ import kr.co.securance.secuhub.domain.entity.DataReceiveAnalysis
 import kr.co.securance.secuhub.domain.repository.DataReceiveAnalysisRepository
 import kr.co.securance.secuhub.web.dashboard.DashboardService
 import org.slf4j.LoggerFactory
-import org.springframework.data.domain.Sort
-import org.springframework.data.jpa.domain.Specification
+import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import java.util.concurrent.atomic.AtomicLong
@@ -59,7 +58,7 @@ class DashboardPushService(
                 initializeBaseline()
                 return@runCatching
             }
-            val newErrors = analysisRepository.findAll(newUnresolvedErrorsSpec(baselineId), Sort.by(Sort.Direction.ASC, "analId"))
+            val newErrors = analysisRepository.findNewUnresolvedErrors(baselineId, PageRequest.of(0, NEW_ALERTS_BATCH_LIMIT))
             if (newErrors.isEmpty()) return@runCatching
 
             newErrors.forEach { error ->
@@ -82,11 +81,7 @@ class DashboardPushService(
     }
 
     private fun initializeBaseline() {
-        val currentMax = analysisRepository.findAll(
-            newUnresolvedErrorsSpec(sinceExclusive = -1),
-            Sort.by(Sort.Direction.DESC, "analId"),
-        ).firstOrNull()?.analId ?: 0L
-        lastSeenAnalId.set(currentMax)
+        lastSeenAnalId.set(analysisRepository.findMaxUnresolvedErrorAnalId() ?: 0L)
     }
 
     private fun alertDescription(error: DataReceiveAnalysis): String =
@@ -95,24 +90,15 @@ class DashboardPushService(
         listOf(error.descFireAlarm, error.descMainMotorError, error.descSlaveMotorError)
             .firstOrNull { it.isNotBlank() } ?: "오류 상세 미확인"
 
-    /** [kr.co.securance.secuhub.web.dashboard.DashboardService]/[DataReceiveAnalysisRepository.findRecentUnresolvedErrors]
-     * 의 미해결 오류 조건과 동일(errType=3, hasErrorEvent=true, resolveYn='N', analType IN ('PLM','STA')) + analId 하한.
-     *
-     * Opus 전체 리뷰 지적: 예전에는 analType 조건이 빠져 있었다 — 대시보드 위젯(개수/목록)에는 절대
-     * 나타나지 않는 analType의 오류가 실시간 팝업으로는 튀어나오는 불일치가 있었다. */
-    private fun newUnresolvedErrorsSpec(sinceExclusive: Long): Specification<DataReceiveAnalysis> =
-        Specification { root, _, cb ->
-            cb.and(
-                cb.greaterThan(root.get("analId"), sinceExclusive),
-                cb.equal(root.get<Int>("errType"), 3),
-                cb.equal(root.get<Boolean>("hasErrorEvent"), true),
-                cb.equal(root.get<String>("resolveYn"), "N"),
-                root.get<String>("analType").`in`("PLM", "STA"),
-            )
-        }
-
     private companion object {
         const val SUMMARY_INTERVAL_MS = 5_000L
         const val ALERT_POLL_INTERVAL_MS = 3_000L
+
+        // 버그 수정(2026-08-14): 이 조회는 원래 웹 계층 Specification에서 파티션 키 `anal_tp`
+        // 대신 이름이 비슷한 `anal_type`(레거시가 항상 'B'만 넣는 무관한 컬럼)을 잘못 참조해
+        // 실제로는 한 건도 매치하지 못했다 — 자세한 경위는
+        // [DataReceiveAnalysisRepository.findNewUnresolvedErrors] KDoc 참고. 장기간 다운타임 뒤
+        // 재기동 시 밀린 오류가 한꺼번에 몰리는 것을 막기 위한 폴링 1회당 상한.
+        const val NEW_ALERTS_BATCH_LIMIT = 200
     }
 }

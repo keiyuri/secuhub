@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.time.LocalDateTime
 
+
 /**
  * `tb_data_rcv_anal` 리포지토리.
  *
@@ -174,4 +175,50 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
      * 로 정렬까지 인덱스로 커버한다.
      */
     fun findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(dtlIp: String, dtlLaneNo: Int): DataReceiveAnalysis?
+
+    /**
+     * `DashboardPushService.pushNewAlerts`가 3초마다 폴링하는 "새로 생긴 미해결 오류" 조회.
+     *
+     * 버그 수정(2026-08-14): 기존에는 이 조건을 웹 계층의 `Specification`으로 즉석 조립하면서
+     * 파티션 키인 `anal_tp`(NOR/EVT/PLM/STA) 대신 이름이 비슷한 `anal_type`(레거시 트리거가 항상
+     * `'B'`만 넣는, 전혀 다른 의미의 컬럼)을 잘못 참조했다. 그 결과 `anal_type IN ('PLM','STA')`가
+     * 전체 686,848행 중 단 한 건도 매치하지 못해 (1) 실시간 장애/화재 팝업(#1/#17)이 한 번도 뜨지
+     * 않았고, (2) `initializeBaseline()`도 동일한 이유로 항상 빈 결과 → `lastSeenAnalId`가 0에
+     * 영원히 고정돼, 매 폴링마다 `anal_id > 0` 조건으로 미해결 오류(err_type=3 AND
+     * has_error_event AND resolve_yn='N') 전체(스냅샷 시점 327,804행 추정)를 다시 스캔하고
+     * 있었다. 이 무의미한 전체 스캔이 3초마다 반복되며 테이블이 계속 자라 결국 `20260814-01.txt`의
+     * `SocketTimeoutException`(Hikari 커넥션 강제 종료 및 후속 롤백 실패까지 연쇄)으로 이어졌다.
+     *
+     * 올바른 컬럼(`anal_tp`)으로 고치면 정상 동작 시 `anal_id > baseline` 범위가 "직전 폴링 이후
+     * 새로 생긴 몇 건"으로 좁혀져, 기존 `IDX_ANAL_ERR3_SCAN(err_type, has_error_event, anal_id)`
+     * 만으로도 충분히 빠르다(개발 DB에서 최근 anal_id 기준 EXPLAIN 시 rows=1) — 별도 인덱스 추가는
+     * 불필요했다. 장기간 다운타임 이후 재기동 시 밀린 오류가 한꺼번에 몰리는 상황을 대비해 `limit`로
+     * 상한을 둔다(한 번에 못 따라잡은 나머지는 baseline이 그 배치의 최대값으로 전진하므로 다음
+     * 폴링에서 이어서 처리된다).
+     */
+    @Query(
+        """
+        SELECT a FROM DataReceiveAnalysis a
+        WHERE a.analId > :sinceExclusive
+          AND a.errType = 3
+          AND a.hasErrorEvent = true
+          AND a.resolveYn = 'N'
+          AND a.analTp IN ('PLM', 'STA')
+        ORDER BY a.analId ASC
+        """,
+    )
+    fun findNewUnresolvedErrors(@Param("sinceExclusive") sinceExclusive: Long, limit: Pageable): List<DataReceiveAnalysis>
+
+    /** [findNewUnresolvedErrors]와 동일 조건의 현재 최댓값 — 앱 기동 시 `lastSeenAnalId` 기준선을
+     * 잡을 때 전체 목록을 메모리에 올리지 않고 인덱스만으로 값 하나를 얻기 위해 별도로 둔다. */
+    @Query(
+        """
+        SELECT MAX(a.analId) FROM DataReceiveAnalysis a
+        WHERE a.errType = 3
+          AND a.hasErrorEvent = true
+          AND a.resolveYn = 'N'
+          AND a.analTp IN ('PLM', 'STA')
+        """,
+    )
+    fun findMaxUnresolvedErrorAnalId(): Long?
 }

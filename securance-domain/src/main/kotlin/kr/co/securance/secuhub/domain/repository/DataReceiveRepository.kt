@@ -20,6 +20,18 @@ interface DataReceiveRepository : JpaRepository<DataReceive, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "DELETE FROM tb_data_rcv WHERE rcv_date < :cutoff LIMIT :batchSize", nativeQuery = true)
     fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
+
+    /**
+     * 레인 1개의 최신 원시 수신 행 — [kr.co.securance.secuhub.server.db.GatePacketPersister]가
+     * `tb_data_rcv_anal.rcv_id`(원본 `tb_data_rcv` 행의 PK)를 채우기 위해 조회한다(2026-08-14
+     * 코드 리뷰 지적 대응: 이전에는 항상 0으로 고정되어 두 테이블 간 FK 추적이 불가능했다).
+     *
+     * 같은 파티션 키(dtlIp)로 큐잉되는 원시 INSERT 작업이 분석 INSERT 작업보다 먼저 enqueue되고
+     * [kr.co.securance.secuhub.server.db.GateDbWriteQueue]가 파티션 내 실행 순서를 보장하므로,
+     * 정상 경로(타임아웃 없음)에서는 분석 작업 실행 시점에 이 조회가 방금 저장된 원시 행을
+     * 찾는다. 못 찾으면(레코드가 아직 없거나 재시도 경합) 호출부가 0으로 폴백한다.
+     */
+    fun findTopByDtlIpAndDtlLaneNoOrderByRcvIdDesc(dtlIp: String, dtlLaneNo: Int): DataReceive?
 }
 
 interface DataReceiveFailRepository : JpaRepository<DataReceiveFail, Long>

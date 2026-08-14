@@ -1,6 +1,7 @@
 package kr.co.securance.secuhub.server.db
 
 import kotlinx.coroutines.Dispatchers
+import kr.co.securance.secuhub.domain.entity.DataReceive
 import kr.co.securance.secuhub.domain.entity.DataReceiveAnalysis
 import kr.co.securance.secuhub.domain.entity.GateDetail
 import kr.co.securance.secuhub.domain.entity.GateGroup
@@ -81,9 +82,10 @@ class GatePacketPersisterTest {
     private fun newPersister(
         analysisRepository: DataReceiveAnalysisRepository,
         gateDetailRepository: GateDetailRepository = mock(GateDetailRepository::class.java),
+        dataReceiveRepository: DataReceiveRepository = mock(DataReceiveRepository::class.java),
     ): GatePacketPersister = GatePacketPersister(
         GateDbWriteQueue(shardCount = 1),
-        mock(DataReceiveRepository::class.java),
+        dataReceiveRepository,
         mock(DataReceiveAckRepository::class.java),
         mock(DataReceiveFailRepository::class.java),
         analysisRepository,
@@ -104,6 +106,86 @@ class GatePacketPersisterTest {
         verify(analysisRepository, timeout(5_000)).save(captor.capture())
         assertEquals("NOR", captor.value.analTp)
         assertEquals("100", captor.value.descTotalCount)
+    }
+
+    @Test
+    fun `anal_header와 anal_tail을 원시 패킷의 Header Tail 구간으로 채운다`() {
+        // 회귀 방지(2026-08-14) — DataReceiveAnalysis 엔티티에 매핑은 있었지만 실제로 채우는
+        // 코드가 없어 늘 NULL로 저장되던 문제.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val persister = newPersister(analysisRepository)
+        val state = newState("192.168.0.205")
+        val packet = statusPacket(laneBlock(laneNo = 1, totalCount = 100))
+
+        persister.persistStatusAnalysis(state, packet)
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        val headerHex = kr.co.securance.secuhub.common.util.HexCodec.toHex(
+            packet.copyOfRange(0, SpeedGateProtocolConstants.HEADER_LENGTH),
+        )
+        val tailHex = kr.co.securance.secuhub.common.util.HexCodec.toHex(
+            packet.copyOfRange(packet.size - SpeedGateProtocolConstants.TAIL_LENGTH, packet.size),
+        )
+        assertEquals(headerHex, captor.value.analHeader)
+        assertEquals(tailHex, captor.value.analTail)
+    }
+
+    @Test
+    fun `rcv_id는 같은 레인의 최신 원시 수신 행 PK로 채운다`() {
+        // 회귀 방지(2026-08-14) — 이전에는 항상 0으로 고정되어 tb_data_rcv와의 FK 추적이 불가능했다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpAndDtlLaneNoOrderByRcvIdDesc("192.168.0.205", 1)).thenReturn(
+            DataReceive(rcvId = 4242L, rcvDate = "202608141200", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
+        val state = newState("192.168.0.205")
+
+        persister.persistStatusAnalysis(state, statusPacket(laneBlock(laneNo = 1, totalCount = 100)))
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        assertEquals(4242L, captor.value.rcvId)
+    }
+
+    @Test
+    fun `anal_data_ 헤더 파생 컬럼들을 패킷 헤더에서 채운다`() {
+        // 회귀 방지(2026-08-14) — DataReceiveAnalysis에 새로 매핑한 anal_data_* 33개 컬럼 중
+        // 헤더 바이트에서 뽑을 수 있는 11개가 실제로 채워지는지 검증한다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val persister = newPersister(analysisRepository)
+        val state = newState("192.168.0.205")
+
+        persister.persistStatusAnalysis(state, statusPacket(laneBlock(laneNo = 1, totalCount = 100)))
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        val saved = captor.value
+        assertEquals("02", saved.analDataStx) // SpeedGateProtocolConstants.STX
+        assertEquals("4D", saved.analDataObjectCode) // ObjectCode.GATE_STATUS
+        assertEquals("캐시된이름", saved.analDataGateName)
+        assertEquals("192.168.0.205", saved.analDataIp)
+        assertTrue(saved.analDataAddress.isNotEmpty())
+    }
+
+    @Test
+    fun `같은 레인의 원시 수신 행을 찾지 못하면 rcv_id는 0으로 폴백한다`() {
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpAndDtlLaneNoOrderByRcvIdDesc(anyString(), anyInt())).thenReturn(null)
+        val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
+        val state = newState("192.168.0.205")
+
+        persister.persistStatusAnalysis(state, statusPacket(laneBlock(laneNo = 1, totalCount = 100)))
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        assertEquals(0L, captor.value.rcvId)
     }
 
     @Test

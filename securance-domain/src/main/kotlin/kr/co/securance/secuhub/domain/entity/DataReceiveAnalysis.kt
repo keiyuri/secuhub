@@ -101,6 +101,87 @@ class DataReceiveAnalysis(
     @Column(name = "obj_cd", nullable = false, length = 10)
     var objCd: String = "",
 
+    // ── 레거시 `anal_data_*` 33개 컬럼(2026-08-14 코드 리뷰 지적 대응) ──────────────────
+    //
+    // 이 컬럼들은 이 리포지토리의 Flyway 마이그레이션이 만든 적이 없다 — 애플리케이션이 실제로
+    // 연결하는 운영 DB(application.yml의 하드코딩된 URL, `baseline-on-migrate: true` +
+    // 기본 baselineVersion=1 설정)는 Flyway 도입 이전부터 이미 이 컬럼들을 갖고 있던 레거시
+    // 스키마이며, V23__default_legacy_anal_data_columns.sql이 그 경위를 기록한다: 레거시
+    // GateControl(SR_Speed_Server, C#/.NET)의 저장 프로시저 `usp_process_analysis`가 게이트
+    // 패킷을 받을 때마다 이 33개 컬럼 전부에 실시간으로 값을 채워 넣고, `anal_data_object_code`는
+    // GateControl 대시보드가 지금도 `obj_cd` 대신 조회하는 컬럼이다.
+    //
+    // secuhub(Kotlin) 엔티티가 이 컬럼들을 매핑하지 않고 있던 탓에, JPA가 만드는 INSERT 문에는
+    // 이 컬럼들이 아예 빠졌고 항상 DEFAULT ''(V23 이후)로만 남아 있었다 — GateControl이 채운 값과
+    // secuhub가 채운 값이 뒤섞여, secuhub가 저장한 행만 이 컬럼들이 비어 있는 상태였다.
+    //
+    // 값 자체는 [SpeedGateProtocolConstants.HeaderOffset] 필드(패킷 헤더 27바이트)를 1:1로
+    // 옮긴 것이다 — `usp_process_analysis`의 정확한 파싱 로직(원본 프로시저 SQL)은 이 저장소에
+    // 없으므로, 이미 이 코드베이스가 신뢰하는 유일한 소스(SpeedGate 프로토콜 헤더 스펙)로 채울 수
+    // 있는 필드만 채운다. `anal_data_gate_name`/`anal_data_ip`는 패킷 바이트가 아니라
+    // `desc_gate_name`/`desc_gate_ip`와 동일한 소스(연결 IP/DB 조회 게이트명)로 채운다 — 패킷
+    // DataInfo(45바이트) 안에서 이 두 필드가 정확히 어느 오프셋인지는 프로토콜 문서에 없다.
+    // `anal_data_mac`은 이 코드베이스 어디에도 게이트 MAC 주소를 추적하는 경로가 없어(연결은
+    // IP로만 식별) 값을 채울 수 없으므로 DEFAULT ''로 남긴다 — 잘못된 추측값을 넣는 대신
+    // GateControl이 채운 값이 그대로 보존되게(secuhub가 UPDATE가 아니라 별도 행을 INSERT하므로
+    // 실질적 영향은 없지만) 빈 문자열을 명시한다.
+
+    /** 헤더 STX(고정 `0x02`) — [SpeedGateProtocolConstants.HeaderOffset.STX]. */
+    @Column(name = "anal_data_stx", nullable = false, length = 10)
+    var analDataStx: String = "",
+
+    /** 헤더 패킷 전체 길이(2바이트) — [SpeedGateProtocolConstants.HeaderOffset.PACKET_LENGTH]. */
+    @Column(name = "anal_data_packet_len", nullable = false, length = 10)
+    var analDataPacketLen: String = "",
+
+    /** 헤더 프로토콜 버전(고정 `0x04`) — [SpeedGateProtocolConstants.HeaderOffset.PROTOCOL_VERSION]. */
+    @Column(name = "anal_data_protocol_ver", nullable = false, length = 10)
+    var analDataProtocolVer: String = "",
+
+    /** 헤더 프레임 옵션(2바이트) — [SpeedGateProtocolConstants.HeaderOffset.FRAME_OPTION]. */
+    @Column(name = "anal_data_frame_option", nullable = false, length = 10)
+    var analDataFrameOption: String = "",
+
+    /** 헤더 주소(13바이트) — [SpeedGateProtocolConstants.HeaderOffset.ADDRESS]. */
+    @Column(name = "anal_data_address", nullable = false, length = 40)
+    var analDataAddress: String = "",
+
+    /** 헤더 CMD1(명령 대분류) — [SpeedGateProtocolConstants.HeaderOffset.COMMAND1]. */
+    @Column(name = "anal_data_command", nullable = false, length = 10)
+    var analDataCommand: String = "",
+
+    /** 헤더 CMD2(명령 세부) — [SpeedGateProtocolConstants.HeaderOffset.COMMAND2]. */
+    @Column(name = "anal_data_subcommand", nullable = false, length = 10)
+    var analDataSubcommand: String = "",
+
+    /** 헤더 오브젝트 코드 — [SpeedGateProtocolConstants.HeaderOffset.OBJECT_CODE]. `obj_cd`와 동일 바이트. */
+    @Column(name = "anal_data_object_code", nullable = false, length = 10)
+    var analDataObjectCode: String = "",
+
+    /** 헤더 DataInfo 길이(1바이트) — [SpeedGateProtocolConstants.HeaderOffset.DATA_INFO_LENGTH]. */
+    @Column(name = "anal_data_info_length", nullable = false, length = 10)
+    var analDataInfoLength: String = "",
+
+    /** 헤더 Data Count(2바이트) — [SpeedGateProtocolConstants.HeaderOffset.DATA_COUNT]. */
+    @Column(name = "anal_data_count", nullable = false, length = 10)
+    var analDataCount: String = "",
+
+    /** 헤더 Data Length(2바이트) — [SpeedGateProtocolConstants.HeaderOffset.DATA_LENGTH]. */
+    @Column(name = "anal_data_length", nullable = false, length = 10)
+    var analDataLength: String = "",
+
+    /** 게이트 이름 — `desc_gate_name`과 동일 소스(DB 조회, 패킷 바이트 아님). */
+    @Column(name = "anal_data_gate_name", nullable = false, length = 80)
+    var analDataGateName: String = "",
+
+    /** 게이트 IP — `desc_gate_ip`와 동일 소스(연결 IP, 패킷 바이트 아님). */
+    @Column(name = "anal_data_ip", nullable = false, length = 20)
+    var analDataIp: String = "",
+
+    /** 게이트 MAC 주소 — 이 코드베이스는 MAC을 추적하지 않아 채우지 않는다(위 KDoc 참고). */
+    @Column(name = "anal_data_mac", nullable = false, length = 20)
+    var analDataMac: String = "",
+
     // ── 헤더/정보 영역 해석값 ────────────────────────────────────────
     @Column(name = "desc_data_info_length", nullable = false, length = 10)
     var descDataInfoLength: String = "",

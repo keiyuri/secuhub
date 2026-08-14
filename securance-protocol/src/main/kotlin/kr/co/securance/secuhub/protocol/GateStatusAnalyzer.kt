@@ -157,7 +157,9 @@ object GateStatusAnalyzer {
 
     /** 지정한 오프셋의 레인 블록 1개를 분석한다. 범위를 벗어나면 null. */
     fun analyzeLane(packet: ByteArray, blockOffset: Int): LaneStatusAnalysis? {
-        if (blockOffset < 0 || blockOffset + SpeedGateProtocolConstants.STATUS_DATA_LENGTH > packet.size) return null
+        // [Codex 리뷰 지적] blockOffset이 Int.MAX_VALUE 근처면 `blockOffset + STATUS_DATA_LENGTH`가
+        // 오버플로되어 음수가 되고, 검증을 통과해버린다. 뺄셈 형태로 바꿔 오버플로 없이 검증한다.
+        if (blockOffset < 0 || blockOffset > packet.size - SpeedGateProtocolConstants.STATUS_DATA_LENGTH) return null
 
         fun u8(relative: Int): Int = packet[blockOffset + relative].toInt() and 0xFF
         fun u32(relative: Int): Long {
@@ -220,8 +222,22 @@ object GateStatusAnalyzer {
     /**
      * `anal_tp` 분류 — 레거시 통합 INSERT(`utrg_data_rcv_anlz`)의 `CASE` 식을 **평가 순서까지
      * 그대로** 옮겼다. 앞선 조건이 뒤 조건을 가리는 구조라 순서가 곧 우선순위다.
+     *
+     * 코드 리뷰 지적(2026-08-14): 현재 유일한 호출부인 [analyzeLane]은 호출 전에 이미
+     * [blockOffset]을 검증하지만, 이 함수 자체는 모듈의 공개 API라 범위를 벗어난 오프셋이
+     * 들어오면(짧거나 손상된 상태 패킷을 다른 경로에서 직접 넘기는 경우 등) 방어 없이
+     * `ArrayIndexOutOfBoundsException`을 던졌다. [analyzeLane]과 동일한 기준으로 검증해,
+     * 범위를 벗어나면 예외 대신 안전한 기본값([AnalysisType.NOR])을 반환한다.
+     *
+     * [Codex 리뷰 지적] `blockOffset + STATUS_DATA_LENGTH > packet.size` 형태의 덧셈 비교는
+     * blockOffset이 Int.MAX_VALUE 근처인 극단값일 때 오버플로로 음수가 되어 검증을 우회한다.
+     * 뺄셈 형태(`blockOffset > packet.size - STATUS_DATA_LENGTH`)로 바꿔 오버플로 없이 검증한다.
      */
     fun classify(packet: ByteArray, blockOffset: Int): AnalysisType {
+        if (blockOffset < 0 || blockOffset > packet.size - SpeedGateProtocolConstants.STATUS_DATA_LENGTH) {
+            return AnalysisType.NOR
+        }
+
         fun u8(relative: Int): Int = packet[blockOffset + relative].toInt() and 0xFF
 
         // 1순위: 센서 12채널 중 하나라도 장애(3) → PLM

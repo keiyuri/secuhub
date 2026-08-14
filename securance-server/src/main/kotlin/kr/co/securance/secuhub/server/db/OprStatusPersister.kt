@@ -1,5 +1,6 @@
 package kr.co.securance.secuhub.server.db
 
+import kotlinx.coroutines.CompletableDeferred
 import kr.co.securance.secuhub.domain.entity.OprStatus
 import kr.co.securance.secuhub.domain.entity.OprStatusId
 import kr.co.securance.secuhub.domain.entity.OprStatusOutbox
@@ -176,16 +177,32 @@ class OprStatusPersister(
     /**
      * [OprStatusOutboxReplayJob][kr.co.securance.secuhub.scheduler.job.OprStatusOutboxReplayJob]이
      * outbox의 미처리 행 하나를 재처리할 때 호출한다 — [upsert]를 그대로 재사용해 라이브 경로와
-     * 재처리 경로의 UPSERT 로직이 갈라지지 않게 한다. `GateDbWriteQueue`를 다시 거치지 않고
-     * 호출 스레드(스케줄러 잡 스레드)에서 직접 실행한다 — 재처리는 이미 저빈도 배치 작업이라
-     * 큐의 파티셔닝/타임아웃 이점이 필요 없다.
+     * 재처리 경로의 UPSERT 로직이 갈라지지 않게 한다.
+     *
+     * 코드 리뷰 지적(2026-08-14): 예전에는 `GateDbWriteQueue`를 거치지 않고 호출 스레드(스케줄러
+     * 잡 스레드)에서 직접 [upsert]를 실행했는데, 같은 `(dtlIp, dtlLaneNo)`에 대한 라이브 상태 패킷
+     * 처리([persistOprStatus])는 여전히 큐를 통해 파티션별로 직렬화되어 들어오므로, 재처리 스레드가
+     * 그 직렬화를 우회해 같은 분(分) 버킷 행을 락 없이 동시에 findById→save할 수 있었다(유실/갱신
+     * 손실 위험). 재처리도 동일 파티션키([OprStatusOutbox.dtlIp])로 큐에 태워, 라이브 쓰기와 순서가
+     * 보장되게 한다 — 재처리는 저빈도라 큐를 한 단계 더 거치는 지연은 문제되지 않는다.
      */
-    fun replayOutboxEntry(entry: OprStatusOutbox) {
-        upsert(
-            entry.dtlIp, entry.dtlLaneNo, entry.dtlId, entry.dtlType, entry.locId, entry.grpId,
-            entry.oprDate, entry.sinceDate, entry.currTotal, entry.currDoor, entry.currIn,
-            entry.gateTypeRaw, entry.userModeRaw, entry.securityModeRaw, entry.inoutTime,
+    suspend fun replayOutboxEntry(entry: OprStatusOutbox): Boolean {
+        val result = CompletableDeferred<Boolean>()
+        dbWriteQueue.enqueue(
+            GateDbWriteTask(
+                partitionKey = entry.dtlIp,
+                operationName = "ReplayOprStatus(${entry.dtlIp},${entry.dtlLaneNo})",
+                onDropOrFinalFailure = { result.complete(false) },
+            ) {
+                upsert(
+                    entry.dtlIp, entry.dtlLaneNo, entry.dtlId, entry.dtlType, entry.locId, entry.grpId,
+                    entry.oprDate, entry.sinceDate, entry.currTotal, entry.currDoor, entry.currIn,
+                    entry.gateTypeRaw, entry.userModeRaw, entry.securityModeRaw, entry.inoutTime,
+                )
+                result.complete(true)
+            },
         )
+        return result.await()
     }
 
     private fun upsert(

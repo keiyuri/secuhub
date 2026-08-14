@@ -146,27 +146,68 @@ class GateControlDispatcher(
         return summary
     }
 
-    /** ACK가 도착한 (IP, 레인)의 미확인 명령을 확인 처리하고, 리셋 명령이면 장애 해제까지 수행한다. */
+    /**
+     * ACK가 도착한 (IP, 레인)의 미확인 명령을 확인 처리하고, 리셋 명령이면 장애 해제까지 수행한다.
+     *
+     * 코드 리뷰 지적(2026-08-14): 예전에는 [ackedLanes]를 스냅샷 뜨자마자 무조건 비운 뒤,
+     * `findAwaitingAck`의 첫 페이지(`batchSize`행)에서만 매칭을 시도했다 — 동시에 ACK 대기 중인
+     * 명령이 `batchSize`를 넘는 극단적 상황(다수 장비 동시 재접속 등)에서는, 그 페이지 밖에 있는
+     * 명령에 대한 정상 ACK가 이미 비워진 키를 찾지 못해 조용히 버려졌다. 그 명령은 실제로는
+     * 장비가 수행했는데도 [reapAckTimeouts]가 결국 타임아웃으로 재전송해버려, 리셋/개폐처럼
+     * 비멱등인 명령이 중복 실행될 위험이 있었다.
+     *
+     * 이제 매칭에 성공한 키만 그 자리에서 제거한다 — 이번 페이지에 없던 키는 [ackedLanes]에
+     * 남아 다음 폴링 주기에 다시 시도된다(그 사이 도착한 새 ACK와 합쳐질 뿐 안전하다). 끝내 어떤
+     * 대기 명령과도 매칭되지 않는 키(스퓨리어스 ACK 등)가 무한정 쌓이지 않도록 [purgeStaleAcks]로
+     * 오래된 항목만 별도로 정리한다.
+     *
+     * [Codex 리뷰 지적] `trySave`가 DB에 쓰는 동안(코루틴 서스펜션 지점) 같은 (IP, 레인)에 대한
+     * *다음* 명령의 ACK가 [onDeviceControlAck]로 도착하면 [ackedLanes]의 타임스탬프가 갱신된다. 이때
+     * 무조건 `remove(key)`를 하면 방금 도착한 새 ACK까지 지워버려, 실제로는 장비가 수행한 다음
+     * 명령이 매칭 근거를 잃고 [reapAckTimeouts]에 의해 불필요하게 재전송될 수 있었다. 확인
+     * 시작 시점에 읽은 타임스탬프 값이 그대로일 때만 제거하도록 `remove(key, value)`(원자적
+     * compare-and-remove)를 써서, 그 사이 갱신된 새 ACK는 다음 폴링 주기를 위해 남겨둔다.
+     *
+     * [Codex 적대적 리뷰 지적] [purgeStaleAcks]가 매칭되지 않은 ACK를 최대 `ackTimeoutSeconds * 2`
+     * 까지 [ackedLanes]에 남겨두는데, 그 시간 동안 같은 (IP, 레인)에 **새 명령**이 전송되면 이
+     * 지연/중복/스퓨리어스 ACK가 그 새 명령의 실제 전송을 기다리지 않고 즉시 확인 처리해버렸다
+     * — 장비가 새 명령을 수행하지 않았는데도 `chkYn=YES`로 기록되고, 리셋 명령이면 아직 존재하는
+     * 장애까지 화면에서 지워지는 허위 성공이었다. ACK 시각이 이 명령의 실제 물리 전송 시각
+     * ([lastSentAt]) *이후*일 때만 확인 처리하도록 선후관계를 검증한다. 전송 시각을 아직 모르면
+     * (재기동 직후 [reapAckTimeouts]가 채우기 전) 안전하게 이번 주기는 건너뛴다.
+     */
     private fun confirmAckedCommands(): Int {
         if (ackedLanes.isEmpty()) return 0
 
-        // 스냅샷을 뜨고 즉시 비운다 — 처리 중 새로 도착한 ACK는 다음 주기에 반영된다.
-        val keys = ackedLanes.keys.toSet()
-        keys.forEach { ackedLanes.remove(it) }
-
         var confirmed = 0
         for (command in dataSendRepository.findAwaitingAck(PageRequest.of(0, properties.batchSize))) {
-            if (AckKey(command.dtlIp, command.dtlLaneNo) !in keys) continue
+            val key = AckKey(command.dtlIp, command.dtlLaneNo)
+            val ackedAt = ackedLanes[key] ?: continue
             val sndId = command.sndId ?: continue
+
+            val sentAt = lastSentAt[sndId]
+            if (sentAt == null || ackedAt.isBefore(sentAt)) continue
 
             command.chkYn = DataSend.YES
             if (!trySave(command, "ACK확인")) continue
+            ackedLanes.remove(key, ackedAt)
             clearTracking(sndId)
             confirmed++
 
             resolveFaultsIfReset(command)
         }
+        purgeStaleAcks()
         return confirmed
+    }
+
+    /**
+     * 결국 어떤 대기 명령과도 매칭되지 못한 [ackedLanes] 항목(스퓨리어스 ACK, 이미 다른 경로로
+     * 종료된 명령 등)이 무한정 쌓이는 것을 막는다 — ACK 타임아웃의 2배가 지나도록 매칭되지
+     * 않았다면 더 기다려도 매칭될 대기 명령이 새로 생길 가능성이 낮다고 보고 버린다.
+     */
+    private fun purgeStaleAcks() {
+        val cutoff = clock.instant().minus(Duration.ofSeconds(properties.ackTimeoutSeconds * 2))
+        ackedLanes.entries.removeIf { it.value.isBefore(cutoff) }
     }
 
     /**

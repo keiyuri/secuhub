@@ -1,5 +1,6 @@
 package kr.co.securance.secuhub.scheduler.job
 
+import kotlinx.coroutines.runBlocking
 import kr.co.securance.secuhub.domain.entity.OprStatusOutbox
 import kr.co.securance.secuhub.domain.repository.OprStatusOutboxRepository
 import kr.co.securance.secuhub.scheduler.config.SchedulerProperties
@@ -53,7 +54,14 @@ class OprStatusOutboxReplayJob : QuartzJobBean() {
         var gaveUp = 0
         for (entry in pending) {
             try {
-                oprStatusPersister.replayOutboxEntry(entry)
+                // replayOutboxEntry는 이제 GateDbWriteQueue를 거쳐 라이브 상태 패킷 처리와 같은
+                // 파티션(dtlIp)에서 직렬화된다(코드 리뷰 지적, OprStatusPersister KDoc 참고) —
+                // Quartz 잡은 동기식이라 결과를 runBlocking으로 기다린다.
+                val succeeded = runBlocking { oprStatusPersister.replayOutboxEntry(entry) }
+                if (!succeeded) {
+                    if (recordReplayFailure(entry, IllegalStateException("큐 드롭 또는 최종 실패"))) gaveUp++
+                    continue
+                }
                 entry.processed = true
                 entry.processedDate = LocalDateTime.now()
                 outboxRepository.save(entry)

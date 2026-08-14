@@ -88,7 +88,8 @@ object LogEventCodec {
         val readerNumber: Int,
         val doorStatus: Byte,
         val functionCode: Int,
-        val eventTime: LocalDateTime,
+        /** 장비가 기록한 발생 시각. BCD 값이 달력 범위를 벗어나면(손상/노이즈) null. */
+        val eventTime: LocalDateTime?,
         val userData1Hex: String,
         val userData2Hex: String,
     )
@@ -97,26 +98,6 @@ object LogEventCodec {
     fun decode(entry: ByteArray): LogEvent {
         require(entry.size == ENTRY_LENGTH) {
             "로그 엔트리는 ${ENTRY_LENGTH}바이트여야 합니다: ${entry.size}"
-        }
-
-        val year = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME])
-        val month = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 1])
-        val day = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 2])
-        val hour = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 3])
-        val minute = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 4])
-        val second = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 5])
-
-        // 로그 엔트리는 신뢰할 수 없는 TCP 원시 바이트에서 온다 — 노이즈/손상/조작된 패킷이면
-        // 시각 필드가 달력 범위를 벗어날 수 있다(월=0/13, 일=32 등). LocalDateTime.of가 던지는
-        // DateTimeException은 IllegalArgumentException의 하위 타입이 아니라서 호출측
-        // (GateLogService.decodeEntries)의 catch(IllegalArgumentException)를 그대로 빠져나가
-        // 커넥션 처리 자체가 죽는다. 여기서 IllegalArgumentException으로 감싸 기존 catch 경로가
-        // 이 실패도 흡수하도록 한다.
-        val eventTime = try {
-            // 문서 예시("0x20 → 2020")와 동일하게 두 자리 BCD 연도에 2000을 더한다.
-            LocalDateTime.of(2000 + year, month, day, hour, minute, second)
-        } catch (ex: DateTimeException) {
-            throw IllegalArgumentException("로그 엔트리 시각이 달력 범위를 벗어났습니다: year=$year, month=$month, day=$day, hour=$hour, minute=$minute, second=$second", ex)
         }
 
         return LogEvent(
@@ -130,21 +111,44 @@ object LogEventCodec {
             readerNumber = entry[Offset.READER_NUMBER].toInt() and 0xFF,
             doorStatus = entry[Offset.DOOR_STATUS],
             functionCode = entry[Offset.FUNCTION_CODE].toInt() and 0xFF,
-            eventTime = eventTime,
+            eventTime = decodeEventTime(entry),
             userData1Hex = HexCodec.toHex(entry.copyOfRange(Offset.USER_DATA1, Offset.USER_DATA1 + USER_DATA1_LENGTH)),
             userData2Hex = HexCodec.toHex(entry.copyOfRange(Offset.USER_DATA2, Offset.USER_DATA2 + USER_DATA2_LENGTH)),
         )
     }
 
     /**
+     * 6바이트 BCD(Year,Month,Day,Hour,Min,Sec)를 [LocalDateTime]으로 디코딩한다. 문서 예시
+     * ("0x20 → 2020")대로 Year는 2000을 더한다. BCD 값이 달력으로 성립하지 않으면(노이즈/손상
+     * 엔트리, 예: 월=13) 예외 대신 null을 반환한다 — 엔트리 1건의 시각 파싱 실패로 전체 배치
+     * 디코딩이 예외로 중단되면 안 된다([SpeedGateLogCodec.decodeEventTime]과 동일한 방어).
+     */
+    private fun decodeEventTime(entry: ByteArray): LocalDateTime? = try {
+        val year = 2000 + SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME])
+        val month = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 1])
+        val day = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 2])
+        val hour = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 3])
+        val minute = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 4])
+        val second = SpeedGatePacketCodec.fromBcd(entry[Offset.EVENT_TIME + 5])
+        LocalDateTime.of(year, month, day, hour, minute, second)
+    } catch (ex: DateTimeException) {
+        null
+    }
+
+    /**
      * `GATE_LOG` 패킷의 Data 영역에서 [entryCount]개(헤더 `DATA_COUNT` 필드)의 로그 엔트리를
      * 순서대로 디코딩한다.
+     *
+     * 코드 리뷰 지적(2026-08-14): [entryCount]는 장비가 보낸 헤더 필드(신뢰할 수 없는 입력)라,
+     * 실제 [data] 길이와 맞지 않는(손상/절단된 패킷) 경우가 있을 수 있다. 예전에는 `require`로
+     * 예외를 던졌는데 — 현재 유일한 호출부(`GateLogService`)가 호출 전 미리 커버 가능한 개수로
+     * 잘라주고 있어 실제로는 발동하지 않지만, 이 함수 자체를 직접 호출할 다른 경로가 생기면
+     * 여전히 위험하다. [SpeedGateLogCodec.decodeEntries]와 동일하게, 커버 가능한 만큼만 디코딩하고
+     * 마지막 미완성 엔트리부터는 조용히 버린다(부분 파싱으로 잘못된 값을 만드는 것보다 안전).
      */
     fun decodeAll(data: ByteArray, entryCount: Int): List<LogEvent> {
-        require(data.size >= entryCount * ENTRY_LENGTH) {
-            "데이터 길이(${data.size})가 로그 ${entryCount}건(${entryCount * ENTRY_LENGTH}바이트)에 부족합니다"
-        }
-        return (0 until entryCount).map { idx ->
+        val maxEntries = (data.size / ENTRY_LENGTH).coerceAtMost(entryCount.coerceAtLeast(0))
+        return (0 until maxEntries).map { idx ->
             val start = idx * ENTRY_LENGTH
             decode(data.copyOfRange(start, start + ENTRY_LENGTH))
         }

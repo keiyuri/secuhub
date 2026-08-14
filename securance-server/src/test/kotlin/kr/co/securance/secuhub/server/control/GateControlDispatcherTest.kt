@@ -10,6 +10,7 @@ import kr.co.securance.secuhub.domain.repository.NetStateRepository
 import kr.co.securance.secuhub.protocol.SpeedFlapGateProtocolCodec
 import kr.co.securance.secuhub.protocol.SpeedGateControlCommand
 import kr.co.securance.secuhub.protocol.SpeedGatePacketCodec
+import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.connection.GateConnectionActor
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.connection.GateConnectionState
@@ -59,6 +60,7 @@ class GateControlDispatcherTest {
         mock(NetStateRepository::class.java),
         GateDbWriteQueue(shardCount = 1),
         mock(GateDetailRepository::class.java),
+        ServerModeConfig(),
     ) {
         val sentPackets = mutableListOf<ByteArray>()
         var acceptSend = true
@@ -428,6 +430,53 @@ class GateControlDispatcherTest {
 
         assertEquals(DataSend.YES, lane1.chkYn)
         assertEquals(DataSend.NO, lane2.chkYn, "같은 IP라도 다른 레인의 ACK로 확정되면 안 된다")
+    }
+
+    @Test
+    fun `전송 전에 도착한 오래된 ACK는 이후 새 명령을 허위로 확정하지 않는다`() {
+        // Codex 적대적 리뷰 지적: purgeStaleAcks가 미매칭 ACK를 ackTimeoutSeconds*2까지
+        // ackedLanes에 남겨두는데, 그 사이 같은 (IP, 레인)에 새 명령이 전송되면 이 오래된
+        // ACK가 실제 장비 응답 없이 새 명령을 즉시 확정해버릴 수 있었다(리셋 명령이면 아직
+        // 존재하는 장애까지 허위로 해제됨). ACK 시각이 명령의 실제 전송 시각보다 앞서면
+        // 확정하지 않아야 한다.
+        val registry = RecordingRegistry()
+        connect(registry, "192.168.0.10")
+        val clock = MutableClock(Instant.parse("2026-08-10T03:00:00Z"))
+        val repository = mock(DataSendRepository::class.java)
+        val store = mutableListOf<DataSend>()
+        org.mockito.Mockito.`when`(repository.findPendingCommands(anyNonNull<Pageable>()))
+            .thenAnswer { store.filter { it.isPending } }
+        org.mockito.Mockito.`when`(repository.findAwaitingAck(anyNonNull<Pageable>()))
+            .thenAnswer { store.filter { it.isAwaitingAck } }
+        org.mockito.Mockito.`when`(repository.save(anyNonNull<DataSend>()))
+            .thenAnswer { it.arguments[0] }
+        stubClaim(repository, store)
+        val dispatcher = dispatcherOf(registry, repository, clock)
+
+        // 1) 이전 명령의 뒤늦은/스퓨리어스 ACK가, 새 명령이 대기열에 들어오기도 전에 도착한다.
+        dispatcher.onDeviceControlAck("192.168.0.10", 1)
+        dispatcher.dispatchPending() // 매칭할 대기 명령이 없어 ackedLanes에 그대로 남는다.
+
+        // 2) 그 뒤(오래된 ACK가 purgeStaleAcks 유예기간 안에 있는 동안) 진짜 새 명령이 전송된다.
+        // ACK 시각과 전송 시각이 같으면 선후관계를 구분할 수 없으므로 시간을 흘려보낸다.
+        clock.advance(Duration.ofSeconds(1))
+        val row = pendingCommand(command = SpeedGateControlCommand.RESET_MOTOR)
+        store += row
+        val sendCycle = dispatcher.dispatchPending()
+        assertEquals(1, sendCycle.sent)
+        assertTrue(row.isAwaitingAck)
+
+        // 3) 새 명령의 실제 ACK 없이도, 남아있던 오래된 ACK로 확정되면 안 된다.
+        val staleCycle = dispatcher.dispatchPending()
+        assertEquals(0, staleCycle.confirmed, "전송 전에 도착한 ACK로 새 명령이 확정되면 안 된다")
+        assertTrue(row.isAwaitingAck, "장비의 실제 ACK를 받기 전까지는 확정되면 안 된다")
+
+        // 4) 전송 이후에 도착한 진짜 ACK는 정상적으로 확정된다.
+        clock.advance(Duration.ofSeconds(1))
+        dispatcher.onDeviceControlAck("192.168.0.10", 1)
+        val confirmedCycle = dispatcher.dispatchPending()
+        assertEquals(1, confirmedCycle.confirmed)
+        assertEquals(DataSend.YES, row.chkYn)
     }
 
     // ── 레인당 동시 in-flight 명령 1건 제한(Codex 어드버서리얼 리뷰) ──

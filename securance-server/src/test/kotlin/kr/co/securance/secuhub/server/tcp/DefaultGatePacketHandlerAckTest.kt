@@ -14,6 +14,7 @@ import kr.co.securance.secuhub.protocol.GatePacket
 import kr.co.securance.secuhub.protocol.SpeedFlapGateProtocolCodec
 import kr.co.securance.secuhub.protocol.SpeedGatePacketCodec
 import kr.co.securance.secuhub.protocol.SpeedGateProtocolConstants
+import kr.co.securance.secuhub.server.config.ServerModeConfig
 import kr.co.securance.secuhub.server.connection.GateConnectionActor
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.connection.GateConnectionState
@@ -45,6 +46,7 @@ class DefaultGatePacketHandlerAckTest {
         mock(NetStateRepository::class.java),
         GateDbWriteQueue(shardCount = 1),
         mock(GateDetailRepository::class.java),
+        ServerModeConfig(),
     ) {
         val sentPackets = mutableListOf<ByteArray>()
         val onlineLanes = mutableListOf<Int>()

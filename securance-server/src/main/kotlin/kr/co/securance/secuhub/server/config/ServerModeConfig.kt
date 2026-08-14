@@ -62,4 +62,15 @@ data class ServerModeConfig(
 
     /** DB 비동기 쓰기 파이프라인 샤드 수(계획서 3.5/3.7절). 1,000+ 디바이스 규모에서는 16~32 권장. */
     val dbWriterShards: Int = 8,
+
+    /**
+     * 코드 리뷰 지적(2026-08-14): [io.netty.handler.timeout.ReadTimeoutHandler]는 인바운드(수신)
+     * 유휴만 감지하고 아웃바운드(송신) 쓰기가 멈춘 경우는 잡지 못한다. 원격이 TCP 수신을 멈추거나
+     * 소켓 송신 버퍼가 계속 가득 차 있으면 `outbound.sendByteArray(...)`가 완료되지 않아 해당
+     * 커넥션의 [kr.co.securance.secuhub.server.connection.GateConnectionActor] 워커 코루틴이
+     * 이 값을 넘겨 무기한 블로킹되고, 뒤이은 ACK 회신/제어 명령 전송이 전부 밀린다 — 이 시간(초)
+     * 안에 소켓 쓰기가 끝나지 않으면 타임아웃시켜 연결을 닫는다(정리는 기존 `onDispose` 가드가
+     * 담당 — [kr.co.securance.secuhub.server.tcp.GateTcpServer.registerDisposeGuard] 참고).
+     */
+    val writeTimeoutSeconds: Long = 15,
 )

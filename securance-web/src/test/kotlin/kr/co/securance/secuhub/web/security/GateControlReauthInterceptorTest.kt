@@ -104,7 +104,7 @@ class GateControlReauthInterceptorTest {
     }
 
     @Test
-    fun `비밀번호가 틀리고 화면 경로면 Referer로 리다이렉트하며 reauthError를 붙인다`() {
+    fun `비밀번호가 틀리고 화면 경로면 Referer 경로로 리다이렉트하며 reauthError를 붙인다`() {
         val request = mock(HttpServletRequest::class.java)
         `when`(request.method).thenReturn("POST")
         `when`(request.getParameter("reauthPassword")).thenReturn("wrong-pw")
@@ -117,7 +117,26 @@ class GateControlReauthInterceptorTest {
         val passed = interceptor(reauthRequired = true).preHandle(request, response, Any())
 
         assertFalse(passed)
-        verify(response).sendRedirect("https://host/gates/details/1/mode?reauthError=1")
+        // 코드 리뷰 지적(2026-08-14): Referer는 클라이언트가 완전히 제어하는 값이라 스킴/호스트를
+        // 그대로 신뢰해 리다이렉트하면 오픈 리다이렉트가 된다 — 경로만 남기고 붙여야 한다.
+        verify(response).sendRedirect("/gates/details/1/mode?reauthError=1")
+    }
+
+    @Test
+    fun `Referer가 다른 호스트를 가리키면 오픈 리다이렉트를 막고 경로만 남긴다`() {
+        val request = mock(HttpServletRequest::class.java)
+        `when`(request.method).thenReturn("POST")
+        `when`(request.getParameter("reauthPassword")).thenReturn("wrong-pw")
+        `when`(request.requestURI).thenReturn("/gates/details/1/mode")
+        `when`(request.getHeader("Referer")).thenReturn("https://evil.example.com/phishing")
+        val response = mock(HttpServletResponse::class.java)
+        authenticateAs("admin")
+        `when`(reauthService.verify("admin", "wrong-pw")).thenReturn(false)
+
+        val passed = interceptor(reauthRequired = true).preHandle(request, response, Any())
+
+        assertFalse(passed)
+        verify(response).sendRedirect("/phishing?reauthError=1")
     }
 
     @Test

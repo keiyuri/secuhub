@@ -74,8 +74,15 @@ class DataSend(
     @Column(name = "dtl_type", nullable = false)
     var dtlType: Int = 1,
 
-    @Column(name = "dtl_id", nullable = false)
-    var dtlId: Long = 0,
+    /**
+     * 코드 리뷰 지적(2026-08-14): `tb_data_snd.dtl_id`는 V1부터 `BIGINT UNSIGNED NULL`로
+     * 생성된 뒤 이후 마이그레이션에서도 NOT NULL로 바뀐 적이 없다(V8이 `loc_id`/`grp_id`는
+     * 명시적으로 NOT NULL로 정합화했지만 `dtl_id`는 대상에서 빠졌다) — 엔티티만 `nullable=false`로
+     * 앞서 있었다. 현재 앱 코드는 항상 기본값 0으로 쓰기 때문에 실질적 위험은 낮지만, 과거
+     * 데이터를 조회할 가능성을 배제할 수 없어 스키마에 맞춰 nullable로 정정한다.
+     */
+    @Column(name = "dtl_id")
+    var dtlId: Long? = 0,
 
     @Column(name = "loc_id", nullable = false)
     var locId: Long = 0,

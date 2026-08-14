@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.servlet.HandlerInterceptor
+import java.net.URI
 
 /**
  * `securance.security.gate-control-reauth-required=true`일 때 상태를 바꾸는 게이트 제어 요청마다
@@ -13,9 +14,9 @@ import org.springframework.web.servlet.HandlerInterceptor
  *
  * 컨트롤러마다 검증 로직을 반복하지 않도록 [kr.co.securance.secuhub.web.common.WebConfig]가
  * `/api/gate-control` 하위, `/gates/details/{id}/mode`, `/gates/details/{id}/motor`,
- * `/gates/reset/execute` 경로에 이 인터셉터 하나만 등록해 일괄 적용한다. `/schedule` 하위는
- * [SecurityConfig]에 권한 규칙은 이미 있지만 실제 컨트롤러가 아직 스캐폴드 단계라(SecurityConfig
- * 주석 참고) 대상에서 제외했다 — 컨트롤러가 추가되면 경로 패턴도 함께 추가해야 한다.
+ * `/gates/reset/execute`, `/schedule/apply`, `/schedule/reset`, `/schedule/timezones`(+`/sync`)
+ * 경로에 이 인터셉터 하나만 등록해 일괄 적용한다 — 게이트에 실제 제어 명령을 큐에 적재하는 상태
+ * 변경 엔드포인트는 전부 포함해야 한다(새 제어 엔드포인트를 추가하면 경로 패턴도 함께 추가할 것).
  */
 class GateControlReauthInterceptor(
     private val properties: SecuritySettingsProperties,
@@ -63,11 +64,21 @@ class GateControlReauthInterceptor(
      * 폼 제출(모드 변경/모터 설정/일괄 리셋) 실패 시 원래 화면으로 돌려보낸다. 인터셉터 단계에서는
      * 컨트롤러의 `RedirectAttributes`(플래시 메시지)를 쓸 수 없어, 대신 쿼리 파라미터
      * (`reauthError=1`)로 실패를 알리고 각 화면 템플릿이 이를 읽어 오류 문구를 표시한다.
+     *
+     * 코드 리뷰 지적(2026-08-14): `Referer` 헤더는 클라이언트가 완전히 제어할 수 있는 값이라
+     * 검증 없이 `sendRedirect`에 넣으면 오픈 리다이렉트가 된다([MultipartExceptionHandler]의
+     * `safeRedirectPath`와 동일한 이유·방식으로 스킴/호스트를 버리고 같은 서버 내 경로만 쓴다).
      */
     private fun redirectBack(request: HttpServletRequest, response: HttpServletResponse) {
-        val referer = request.getHeader("Referer")
-        val target = referer?.substringBefore('?') ?: "/dashboard"
-        response.sendRedirect("$target?reauthError=1")
+        response.sendRedirect("${safeRedirectPath(request.getHeader("Referer"))}?reauthError=1")
+    }
+
+    /** [MultipartExceptionHandler.safeRedirectPath]와 동일한 정책 — 이 클래스 KDoc 참고. */
+    private fun safeRedirectPath(referer: String?): String {
+        if (referer.isNullOrBlank()) return "/dashboard"
+        val path = runCatching { URI(referer).rawPath }.getOrNull()
+        if (path.isNullOrBlank() || !path.startsWith("/")) return "/dashboard"
+        return path
     }
 
     private companion object {

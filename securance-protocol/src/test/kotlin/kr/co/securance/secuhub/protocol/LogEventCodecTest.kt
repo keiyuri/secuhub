@@ -58,18 +58,27 @@ class LogEventCodecTest {
     }
 
     @Test
-    fun `BCD 시각 값이 달력 범위를 벗어나면 IllegalArgumentException으로 변환해 던진다`() {
-        // month 바이트(offset 11)를 유효 범위를 벗어난 BCD 값(13월)으로 변조 — 손상/조작된
-        // TCP 원시 바이트를 흉내낸다. 회귀 대상: LocalDateTime.of가 던지는 DateTimeException이
-        // IllegalArgumentException의 하위 타입이 아니라서 그대로 전파되면 GateLogService의
-        // catch(IllegalArgumentException)를 빠져나가 커넥션 처리가 죽는다.
-        val invalidMonthHex =
-            "1801050B0500000001FF2513051500250000000000000000000000000000000000000000"
-        val entry = HexCodec.fromHex(invalidMonthHex)
+    fun `decodeAll은 entryCount가 실제 데이터로 커버 가능한 개수보다 크면 예외 대신 커버 가능한 만큼만 반환한다`() {
+        val entry = HexCodec.fromHex(sampleHex)
+        // 완전한 엔트리 1건 + 미완성 엔트리(10바이트)만 있는 손상 데이터.
+        val truncated = entry + ByteArray(10)
 
-        val ex = org.junit.jupiter.api.assertThrows<IllegalArgumentException> {
-            LogEventCodec.decode(entry)
-        }
-        assertEquals(java.time.DateTimeException::class.java, ex.cause?.javaClass)
+        val events = LogEventCodec.decodeAll(truncated, entryCount = 2)
+
+        assertEquals(1, events.size)
+        assertEquals(LocalDateTime.of(2025, 8, 5, 15, 0, 25), events[0].eventTime)
+    }
+
+    @Test
+    fun `BCD 시각이 달력 범위를 벗어나면 예외 대신 null을 반환한다`() {
+        // month 바이트를 0x13(BCD상 13월, 존재하지 않는 달)으로 손상시킨 샘플.
+        val corrupted = HexCodec.fromHex(
+            "1801050B0500000001FF2513051500250000000000000000000000000000000000000000",
+        )
+        assertEquals(36, corrupted.size)
+
+        val event = LogEventCodec.decode(corrupted)
+
+        assertEquals(null, event.eventTime)
     }
 }

@@ -1,6 +1,7 @@
 package kr.co.securance.secuhub.server.db
 
 import kotlinx.coroutines.Dispatchers
+import kr.co.securance.secuhub.domain.entity.DataReceive
 import kr.co.securance.secuhub.domain.entity.DataReceiveAnalysis
 import kr.co.securance.secuhub.domain.entity.GateDetail
 import kr.co.securance.secuhub.domain.entity.GateGroup
@@ -81,9 +82,10 @@ class GatePacketPersisterTest {
     private fun newPersister(
         analysisRepository: DataReceiveAnalysisRepository,
         gateDetailRepository: GateDetailRepository = mock(GateDetailRepository::class.java),
+        dataReceiveRepository: DataReceiveRepository = mock(DataReceiveRepository::class.java),
     ): GatePacketPersister = GatePacketPersister(
         GateDbWriteQueue(shardCount = 1),
-        mock(DataReceiveRepository::class.java),
+        dataReceiveRepository,
         mock(DataReceiveAckRepository::class.java),
         mock(DataReceiveFailRepository::class.java),
         analysisRepository,
@@ -104,6 +106,123 @@ class GatePacketPersisterTest {
         verify(analysisRepository, timeout(5_000)).save(captor.capture())
         assertEquals("NOR", captor.value.analTp)
         assertEquals("100", captor.value.descTotalCount)
+    }
+
+    @Test
+    fun `anal_header와 anal_tail을 원시 패킷의 Header Tail 구간으로 채운다`() {
+        // 회귀 방지(2026-08-14) — DataReceiveAnalysis 엔티티에 매핑은 있었지만 실제로 채우는
+        // 코드가 없어 늘 NULL로 저장되던 문제.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val persister = newPersister(analysisRepository)
+        val state = newState("192.168.0.205")
+        val packet = statusPacket(laneBlock(laneNo = 1, totalCount = 100))
+
+        persister.persistStatusAnalysis(state, packet)
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        val headerHex = kr.co.securance.secuhub.common.util.HexCodec.toHex(
+            packet.copyOfRange(0, SpeedGateProtocolConstants.HEADER_LENGTH),
+        )
+        val tailHex = kr.co.securance.secuhub.common.util.HexCodec.toHex(
+            packet.copyOfRange(packet.size - SpeedGateProtocolConstants.TAIL_LENGTH, packet.size),
+        )
+        assertEquals(headerHex, captor.value.analHeader)
+        assertEquals(tailHex, captor.value.analTail)
+    }
+
+    @Test
+    fun `rcv_id는 같은 장비의 최신 원시 수신 행 PK로 채운다`() {
+        // 회귀 방지(2026-08-14) — 이전에는 항상 0으로 고정되어 tb_data_rcv와의 FK 추적이 불가능했다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 4242L, rcvDate = "202608141200", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
+        val state = newState("192.168.0.205")
+
+        persister.persistStatusAnalysis(state, statusPacket(laneBlock(laneNo = 1, totalCount = 100)))
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        assertEquals(4242L, captor.value.rcvId)
+    }
+
+    @Test
+    fun `다중 레인 패킷의 모든 레인 분석 행이 같은 원시 행 rcv_id를 공유한다`() {
+        // 회귀 방지(2026-08-14 재검토) — 원래 레인 번호로 필터링해 조회했을 때, tb_data_rcv에는
+        // 대표 레인 1개로만 태그된 행이 있는 반면 이 패킷은 레인 2개로 분석되어, 대표 레인이 아닌
+        // 레인(레인 2)의 분석 행은 방금 저장된 원시 행을 찾지 못하고 무관한 값(또는 0)이 채워졌다.
+        // 지금은 레인 필터 없이 dtlIp만으로 조회하므로 두 레인 모두 같은 rcv_id를 가져야 한다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 9999L, rcvDate = "202608141200", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        val gateDetailRepository = mock(GateDetailRepository::class.java)
+        val persister = newPersister(analysisRepository, gateDetailRepository, dataReceiveRepository)
+        val state = GateConnectionState(
+            dtlIp = "192.168.0.205",
+            gateTypeCode = 1,
+            codec = SpeedFlapGateProtocolCodec(),
+            connection = mock(Connection::class.java),
+            outbound = mock(NettyOutbound::class.java),
+            actor = GateConnectionActor("192.168.0.205", Dispatchers.Default, queueCapacity = 100),
+            laneInfo = listOf(
+                GateLaneInfo(locId = 1, grpId = 70, dtlId = 159, dtlLaneNo = 1, dtlType = 1, analysisYn = true, dtlName = "1번레인"),
+                GateLaneInfo(locId = 1, grpId = 70, dtlId = 160, dtlLaneNo = 2, dtlType = 1, analysisYn = true, dtlName = "2번레인"),
+            ),
+        )
+
+        persister.persistStatusAnalysis(
+            state,
+            statusPacket(laneBlock(laneNo = 1, totalCount = 100), laneBlock(laneNo = 2, totalCount = 200)),
+        )
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000).times(2)).save(captor.capture())
+        assertTrue(captor.allValues.all { it.rcvId == 9999L })
+    }
+
+    @Test
+    fun `anal_data_ 헤더 파생 컬럼들을 패킷 헤더에서 채운다`() {
+        // 회귀 방지(2026-08-14) — DataReceiveAnalysis에 새로 매핑한 anal_data_* 33개 컬럼 중
+        // 헤더 바이트에서 뽑을 수 있는 11개가 실제로 채워지는지 검증한다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val persister = newPersister(analysisRepository)
+        val state = newState("192.168.0.205")
+
+        persister.persistStatusAnalysis(state, statusPacket(laneBlock(laneNo = 1, totalCount = 100)))
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        val saved = captor.value
+        assertEquals("02", saved.analDataStx) // SpeedGateProtocolConstants.STX
+        assertEquals("4D", saved.analDataObjectCode) // ObjectCode.GATE_STATUS
+        assertEquals("캐시된이름", saved.analDataGateName)
+        assertEquals("192.168.0.205", saved.analDataIp)
+        assertTrue(saved.analDataAddress.isNotEmpty())
+    }
+
+    @Test
+    fun `같은 장비의 원시 수신 행을 찾지 못하면 rcv_id는 0으로 폴백한다`() {
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc(anyString())).thenReturn(null)
+        val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
+        val state = newState("192.168.0.205")
+
+        persister.persistStatusAnalysis(state, statusPacket(laneBlock(laneNo = 1, totalCount = 100)))
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        assertEquals(0L, captor.value.rcvId)
     }
 
     @Test
@@ -132,6 +251,46 @@ class GatePacketPersisterTest {
         // Codex 리뷰(2026-08-14) P2 지적 회귀 방지 — 동일 데이터 반복 시 anal_date는 최초 기록
         // 시각을 그대로 유지해야 한다(요구사항: "수신일자만 갱신").
         assertEquals(originalAnalDate, allCaptor.allValues[1].analDate)
+    }
+
+    @Test
+    fun `동일 데이터 반복 시 rcv_date와 함께 rcv_id anal_header anal_tail도 최신 원본 패킷 값으로 갱신한다`() {
+        // 회귀 방지 테스트(Codex 적대적 리뷰 지적, 2026-08-14) — 이전에는 rcv_date만 최신 시각으로
+        // 바꾸고 rcv_id/rcv_raw/anal_header/anal_tail은 최초 INSERT 시점(과거 tb_data_rcv 행/원본
+        // 바이트)에 그대로 머물러 있어, rcv_date가 가리키는 시각과 실제로 참조하는 원본 패킷이
+        // 서로 다른 수신 이벤트를 가리키는 모순이 생겼다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 1111L, rcvDate = "202608141200", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
+        val state = newState("192.168.0.205")
+        val packet = statusPacket(laneBlock(laneNo = 1, totalCount = 100))
+
+        // 1차 수신 — 새 행 INSERT, rcv_id=1111.
+        persister.persistStatusAnalysis(state, packet)
+        val firstCaptor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(firstCaptor.capture())
+        val firstSaved = firstCaptor.value
+        assertEquals(1111L, firstSaved.rcvId)
+
+        // 2차 수신 — 동일 데이터지만 새 원시 행(rcv_id=2222)이 함께 적재됐다고 가정한다.
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(firstSaved)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 2222L, rcvDate = "202608141201", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        persister.persistStatusAnalysis(state, packet)
+
+        val allCaptor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000).times(2)).save(allCaptor.capture())
+        val updated = allCaptor.allValues[1]
+        assertSame(firstSaved, updated)
+        // rcv_id가 최신 원시 행(2222)을 가리켜야 한다 — rcv_date와 rcv_id가 같은 패킷을 나타낸다.
+        assertEquals(2222L, updated.rcvId)
+        assertEquals(firstSaved.analHeader, updated.analHeader)
+        assertEquals(firstSaved.analTail, updated.analTail)
     }
 
     @Test

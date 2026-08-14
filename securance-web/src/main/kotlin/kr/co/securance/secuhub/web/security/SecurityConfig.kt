@@ -105,6 +105,11 @@ class SecurityConfig {
                 // 좁힌다. Spring Security는 먼저 매칭되는 규칙을 적용하므로 순서가 중요하다.
                 authorize(HttpMethod.POST, "/gates/details/*/mode", hasAnyRole("CONTROL", "ADMIN"))
                 authorize(HttpMethod.POST, "/gates/details/*/motor", hasAnyRole("CONTROL", "ADMIN"))
+                // Codex 리뷰(2026-08-14) 지적: Fast Gate 전용 모터 설정 화면(P11)이 위 일반 모터
+                // 규칙과 별도 경로(/gates/details/*/fast-motor)로 구현됐는데 이 규칙이 없어 아래
+                // "/gates/**" -> ROLE_ADMIN 규칙에 걸려버려, 의도한 ROLE_CONTROL 사용자가 제출하면
+                // 403이 났다. 다른 모터 설정과 동일하게 CONTROL/ADMIN을 허용한다.
+                authorize(HttpMethod.POST, "/gates/details/*/fast-motor", hasAnyRole("CONTROL", "ADMIN"))
                 authorize(HttpMethod.POST, "/gates/reset/execute", hasAnyRole("CONTROL", "ADMIN"))
                 authorize(HttpMethod.POST, "/gates/**", hasRole("ADMIN"))
                 authorize(HttpMethod.PUT, "/gates/**", hasRole("ADMIN"))

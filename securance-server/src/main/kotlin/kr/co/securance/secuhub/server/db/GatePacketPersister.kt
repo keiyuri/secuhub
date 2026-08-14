@@ -168,6 +168,18 @@ class GatePacketPersister(
         val rawHex = HexCodec.toHex(raw)
         val laneCount = analyses.size
 
+        // `anal_header`/`anal_tail` — `tb_data_rcv.rcv_header`/`rcv_tail`([enqueueReceiveInsert])와
+        // 동일한 Header/Tail 구간 분할을 이 원시 패킷에도 적용한다(2026-08-14 확인: 엔티티에 컬럼
+        // 매핑은 있었지만 이 값을 실제로 채우는 코드가 없어 항상 NULL로 저장되고 있었다).
+        val headerEnd = minOf(SpeedGateProtocolConstants.HEADER_LENGTH, raw.size)
+        val tailStart = maxOf(raw.size - SpeedGateProtocolConstants.TAIL_LENGTH, headerEnd)
+        val headerHex = HexCodec.toHex(raw.copyOfRange(0, headerEnd))
+        val tailHex = HexCodec.toHex(raw.copyOfRange(tailStart, raw.size))
+        // `anal_data_*` 33개 컬럼 중 헤더 바이트로 채울 수 있는 11개(2026-08-14, [DataReceiveAnalysis]
+        // KDoc "레거시 anal_data_* 33개 컬럼" 참고) — 헤더가 27바이트 전부 도착하지 않은 손상 패킷이면
+        // 필드별로 안전하게 빈 값으로 남긴다.
+        val headerFields = AnalDataHeaderFields.from(raw)
+
         for (analysis in analyses) {
             val laneNo = analysis.laneNumber
             val info = state.laneInfoOf(laneNo)
@@ -181,10 +193,55 @@ class GatePacketPersister(
             if (!info.analysisYn) continue
 
             if (analysis.errType == GateStatusAnalyzer.ErrorCheck.ERROR) {
-                enqueueAnalysisInsert(state, analysis, info, analDate, rawHex, laneCount)
+                enqueueAnalysisInsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount)
             } else {
-                enqueueStatusUpsert(state, analysis, info, analDate, rawHex, laneCount)
+                enqueueStatusUpsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount)
                 enqueueRecovery(state, analysis)
+            }
+        }
+    }
+
+    /**
+     * `tb_data_rcv_anal.anal_data_*` 중 패킷 헤더(27바이트)에서 그대로 뽑아낼 수 있는 11개 필드.
+     * [DataReceiveAnalysis]의 "레거시 `anal_data_*` 33개 컬럼" KDoc에 이 필드들이 무엇이고 왜
+     * 이만큼만 채우는지 배경이 있다. 각 필드는 [SpeedGateProtocolConstants.HeaderOffset]과 1:1
+     * 대응하며, 값은 원본 바이트의 hex 표현이다(레거시 프로시저가 정확히 hex로 저장했는지는
+     * 확인할 수 없으나, 이 코드베이스의 다른 원본 보존 컬럼(`rcv_header`/`anal_header` 등)과
+     * 동일한 규약을 따른다).
+     */
+    private data class AnalDataHeaderFields(
+        val stx: String,
+        val packetLen: String,
+        val protocolVer: String,
+        val frameOption: String,
+        val address: String,
+        val command: String,
+        val subcommand: String,
+        val objectCode: String,
+        val infoLength: String,
+        val count: String,
+        val length: String,
+    ) {
+        companion object {
+            val EMPTY = AnalDataHeaderFields("", "", "", "", "", "", "", "", "", "", "")
+
+            fun from(raw: ByteArray): AnalDataHeaderFields {
+                if (raw.size < SpeedGateProtocolConstants.HEADER_LENGTH) return EMPTY
+                fun hex(start: Int, len: Int) = HexCodec.toHex(raw.copyOfRange(start, start + len))
+                val o = SpeedGateProtocolConstants.HeaderOffset
+                return AnalDataHeaderFields(
+                    stx = hex(o.STX, 1),
+                    packetLen = hex(o.PACKET_LENGTH, 2),
+                    protocolVer = hex(o.PROTOCOL_VERSION, 1),
+                    frameOption = hex(o.FRAME_OPTION, 2),
+                    address = hex(o.ADDRESS, SpeedGateProtocolConstants.ADDRESS_LENGTH),
+                    command = hex(o.COMMAND1, 1),
+                    subcommand = hex(o.COMMAND2, 1),
+                    objectCode = hex(o.OBJECT_CODE, 1),
+                    infoLength = hex(o.DATA_INFO_LENGTH, 1),
+                    count = hex(o.DATA_COUNT, 2),
+                    length = hex(o.DATA_LENGTH, 2),
+                )
             }
         }
     }
@@ -196,6 +253,9 @@ class GatePacketPersister(
         info: GateLaneInfo,
         analDate: String,
         rawHex: String,
+        headerHex: String,
+        tailHex: String,
+        headerFields: AnalDataHeaderFields,
         laneCount: Int,
     ) {
         dbWriteQueue.enqueue(
@@ -204,7 +264,10 @@ class GatePacketPersister(
                 operationName = "InsertReceiveAnal(${state.dtlIp},${analysis.laneNumber},${analysis.analysisType})",
             ) {
                 val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
-                dataReceiveAnalysisRepository.save(buildAnalysisEntity(state, analysis, identity, analDate, rawHex, laneCount))
+                val rcvId = resolveRcvId(state.dtlIp)
+                dataReceiveAnalysisRepository.save(
+                    buildAnalysisEntity(state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount),
+                )
                 Unit
             },
         )
@@ -226,6 +289,12 @@ class GatePacketPersister(
      * 기록된 시각이 사라져 D5 보존 삭제([DataReceiveAnalysisRepository.deleteBatchOlderThan])나
      * 분석 조회에서 "언제부터 이 상태였는지"가 아니라 "마지막으로 반복 수신한 시각"만 남게 된다.
      *
+     * 반대로 `rcv_id`/`rcv_raw`/`anal_header`/`anal_tail`(이 수신을 식별하는 원본 패킷 출처 필드)은
+     * `rcv_date`와 **함께 원자적으로 갱신한다**(Codex 적대적 리뷰 지적, 2026-08-14) — `rcv_date`만
+     * 최신 시각으로 바꾸고 이 필드들을 최초 INSERT 시점 값에 그대로 두면, "이 행은 최신 시각에
+     * 수신됐다"는 `rcv_date`와 실제로 가리키는 원본 패킷(`rcv_id`)이 서로 다른 수신 이벤트를
+     * 가리키는 모순이 생겨 감사/장애 분석에서 원본 패킷을 잘못 역추적하게 된다.
+     *
      * ### 식별정보(`dtl_type`/`dtl_name`/`loc_id`/`grp_id`) 최신화 주기 = 최대 1일(Codex 적대적
      * 리뷰 지적 대응)
      * [isSameContent]는 식별정보를 비교하지 않으므로([resolveLaneIdentity] KDoc 참고), 상태가
@@ -244,6 +313,9 @@ class GatePacketPersister(
         info: GateLaneInfo,
         analDate: String,
         rawHex: String,
+        headerHex: String,
+        tailHex: String,
+        headerFields: AnalDataHeaderFields,
         laneCount: Int,
     ) {
         val today = analDate.substring(0, 8) // yyyyMMdd
@@ -260,11 +332,29 @@ class GatePacketPersister(
                 if (latest != null && latest.analDate.startsWith(today) && isSameContent(latest, analysis, laneCount)) {
                     // 동일 데이터 반복 — 새 행 없이 수신일자(rcv_date)만 갱신한다. anal_date는
                     // 이 상태가 최초로 기록된 시각을 보존하기 위해 건드리지 않는다(P2 지적).
+                    //
+                    // rcv_id/rcv_raw/anal_header/anal_tail은 rcv_date와 함께 원자적으로 갱신한다
+                    // (Codex 적대적 리뷰 지적, 2026-08-14) — 이전에는 rcv_date만 최신 시각으로 바꾸고
+                    // 이 필드들은 최초 INSERT 시점 값(과거 tb_data_rcv 행/원본 바이트)에 그대로
+                    // 머물러 있어, "이 행은 최신 시각에 수신됐다"는 rcv_date와 실제로 가리키는 원본
+                    // 패킷(rcv_id)이 서로 다른 시점을 가리키는 모순이 생겼다 — 운영자가 감사/장애
+                    // 분석에서 rcv_date로 원본 패킷을 역추적하면 엉뚱한 과거 행과 대조하게 된다.
+                    // rcvId는 enqueueReceiveInsert가 먼저 큐잉한 원시 INSERT를 가리키므로
+                    // resolveRcvId로 다시 조회해야 이번 수신의 원본 행을 가리킨다(resolveRcvId KDoc 참고).
                     latest.rcvDate = analDate
+                    latest.rcvId = resolveRcvId(state.dtlIp)
+                    latest.rcvRaw = rawHex
+                    latest.analHeader = headerHex
+                    latest.analTail = tailHex
                     dataReceiveAnalysisRepository.save(latest)
                 } else {
                     val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
-                    dataReceiveAnalysisRepository.save(buildAnalysisEntity(state, analysis, identity, analDate, rawHex, laneCount))
+                    val rcvId = resolveRcvId(state.dtlIp)
+                    dataReceiveAnalysisRepository.save(
+                        buildAnalysisEntity(
+                            state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount,
+                        ),
+                    )
                 }
                 Unit
             },
@@ -358,6 +448,23 @@ class GatePacketPersister(
         )
     }
 
+    /**
+     * `tb_data_rcv_anal.rcv_id` — 이 상태 패킷이 [enqueueReceiveInsert]로 함께 적재한 원본
+     * `tb_data_rcv` 행의 PK를 찾아 채운다(2026-08-14 코드 리뷰 지적: 이전에는 항상 0으로 고정돼
+     * 두 테이블 간 추적이 불가능했다). 같은 파티션 키(dtlIp)로 큐잉되는 원시 INSERT 작업이 이
+     * 분석 INSERT 작업보다 먼저 enqueue되고, [GateDbWriteQueue]가 파티션 내 실행 순서를
+     * 보장하므로 정상 경로에서는 이 조회가 방금 저장된 원시 행을 찾는다. 못 찾으면(레코드가
+     * 아직 없거나 드문 재시도 경합) 0으로 폴백한다 — 엔티티 KDoc이 이미 0을 허용값으로 규정한다.
+     *
+     * **레인으로 필터링하지 않는다**(2026-08-14 재검토로 발견한 버그 수정 — [DataReceiveRepository]
+     * KDoc 참고) — `tb_data_rcv`는 원시 패킷 1건당 대표 레인 하나로만 태그된 행 1건을 만드는 반면,
+     * [persistStatusAnalysis]는 같은 원시 패킷에서 레인 수만큼 여러 분석 행을 만든다. 레인 번호로
+     * 필터링하면 대표 레인이 아닌 레인들은 방금 저장된 원시 행을 절대 찾지 못하고 무관한 과거
+     * 값을 잘못 가져왔다 — 같은 패킷에서 나온 분석 행은 전부 같은 원시 행을 가리켜야 한다.
+     */
+    private fun resolveRcvId(dtlIp: String): Long =
+        dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc(dtlIp)?.rcvId ?: 0
+
     /** [analysis]/[identity]로부터 `tb_data_rcv_anal` 1행(엔티티)을 만든다 — INSERT 경로 전용 공통 로직. */
     private fun buildAnalysisEntity(
         state: GateConnectionState,
@@ -365,6 +472,10 @@ class GatePacketPersister(
         identity: GateLaneInfo,
         analDate: String,
         rawHex: String,
+        headerHex: String,
+        tailHex: String,
+        rcvId: Long,
+        headerFields: AnalDataHeaderFields,
         laneCount: Int,
     ): DataReceiveAnalysis = DataReceiveAnalysis(
         analDate = analDate,
@@ -376,9 +487,25 @@ class GatePacketPersister(
         locId = identity.locId,
         grpId = identity.grpId,
         rcvDate = analDate,
+        rcvId = rcvId,
         rcvRaw = rawHex,
+        analHeader = headerHex,
         analData = analysis.operationStatusHex,
+        analTail = tailHex,
         objCd = "%02X".format(SpeedGateProtocolConstants.ObjectCode.GATE_STATUS),
+        analDataStx = headerFields.stx,
+        analDataPacketLen = headerFields.packetLen,
+        analDataProtocolVer = headerFields.protocolVer,
+        analDataFrameOption = headerFields.frameOption,
+        analDataAddress = headerFields.address,
+        analDataCommand = headerFields.command,
+        analDataSubcommand = headerFields.subcommand,
+        analDataObjectCode = headerFields.objectCode,
+        analDataInfoLength = headerFields.infoLength,
+        analDataCount = headerFields.count,
+        analDataLength = headerFields.length,
+        analDataGateName = identity.dtlName ?: "",
+        analDataIp = state.dtlIp,
         // desc_data_info_length/desc_gate_name/desc_gate_ip는 레거시 트리거가 항상 채우던 필드인데
         // 이 엔티티 도입 초기에는 매핑이 누락돼 빈 문자열로만 저장되고 있었다(2026-08-14 실 DB
         // 조회로 확인 — anal_id=856773 등 secuhub가 쓴 행만 이 세 컬럼이 비어 있었다).

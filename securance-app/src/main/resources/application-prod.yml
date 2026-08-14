@@ -28,10 +28,11 @@ spring:
   # V1을 건너뛴 채 "성공"으로 기동해버릴 수 있다. 운영에서는 마이그레이션 이력이 없는 DB에 붙는
   # 것 자체가 이례적인 상황이므로, 반드시 실패시켜 운영자가 무슨 일이 있었는지 확인하게 한다 —
   # 신규 운영 DB를 처음 구축할 때는 이 값을 일시적으로 true로 켜고 기동한 뒤 다시 꺼둘 것.
+  # url/user/password는 여기서 재정의하지 않는다 — SECURANCE_DB_URL에 이미 쿼리 파라미터(useSSL,
+  # serverTimezone 등)가 포함된 운영 환경에서 물음표가 중복돼 잘못된 JDBC URL이 되는 문제(2026-08-14
+  # Codex 리뷰 지적)를 막기 위해 kr.co.securance.secuhub.domain.config.FlywayDataSourceConfig가
+  # spring.datasource.url을 그대로 읽어 안전하게 구성한다.
   flyway:
-    url: ${SECURANCE_DB_URL}?socketTimeout=600000&connectTimeout=3000
-    user: ${SECURANCE_DB_USER}
-    password: ${SECURANCE_DB_PASSWORD}
     baseline-on-migrate: false
 
 logging:

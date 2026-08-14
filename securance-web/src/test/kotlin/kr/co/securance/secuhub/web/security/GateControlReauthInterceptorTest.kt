@@ -13,7 +13,9 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
+import org.springframework.security.authentication.AnonymousAuthenticationToken
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -171,5 +173,59 @@ class GateControlReauthInterceptorTest {
 
         assertFalse(passed)
         assertEquals(true, writer.toString().contains("REJECTED"))
+    }
+
+    @Test
+    fun `SecurityContext에 인증 정보가 없으면 비밀번호 검증 없이 즉시 거부한다`() {
+        // SecurityContextHolder는 @AfterEach에서 매번 clearContext()되므로 authenticateAs()를
+        // 호출하지 않으면 authentication == null인 상태를 그대로 재현한다.
+        val request = mock(HttpServletRequest::class.java)
+        `when`(request.method).thenReturn("POST")
+        `when`(request.requestURI).thenReturn("/api/gate-control/command")
+        val response = mock(HttpServletResponse::class.java)
+        val writer = StringWriter()
+        `when`(response.writer).thenReturn(PrintWriter(writer))
+
+        val passed = interceptor(reauthRequired = true).preHandle(request, response, Any())
+
+        assertFalse(passed)
+        verify(reauthService, never()).verify(anyString(), anyString())
+        verify(response).status = HttpServletResponse.SC_UNAUTHORIZED
+    }
+
+    @Test
+    fun `인증되지 않은(authenticated=false) 토큰이면 비밀번호 검증 없이 즉시 거부한다`() {
+        val request = mock(HttpServletRequest::class.java)
+        `when`(request.method).thenReturn("POST")
+        `when`(request.requestURI).thenReturn("/api/gate-control/command")
+        val response = mock(HttpServletResponse::class.java)
+        val writer = StringWriter()
+        `when`(response.writer).thenReturn(PrintWriter(writer))
+        // 2-인자 생성자는 Spring Security 관례상 "아직 인증되지 않음"(authenticated=false) 상태다.
+        SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken("admin", "N/A")
+
+        val passed = interceptor(reauthRequired = true).preHandle(request, response, Any())
+
+        assertFalse(passed)
+        verify(reauthService, never()).verify(anyString(), anyString())
+    }
+
+    @Test
+    fun `익명 사용자(AnonymousAuthenticationToken)면 비밀번호 검증 없이 즉시 거부한다`() {
+        // AnonymousAuthenticationToken은 isAuthenticated=true로 생성되므로, isAuthenticated 체크
+        // 만으로는 걸러지지 않는다 — 타입 체크가 반드시 필요하다는 것을 검증하는 회귀 방지 테스트.
+        val request = mock(HttpServletRequest::class.java)
+        `when`(request.method).thenReturn("POST")
+        `when`(request.requestURI).thenReturn("/api/gate-control/command")
+        val response = mock(HttpServletResponse::class.java)
+        val writer = StringWriter()
+        `when`(response.writer).thenReturn(PrintWriter(writer))
+        SecurityContextHolder.getContext().authentication =
+            AnonymousAuthenticationToken("key", "anonymousUser", listOf(SimpleGrantedAuthority("ROLE_ANONYMOUS")))
+
+        val passed = interceptor(reauthRequired = true).preHandle(request, response, Any())
+
+        assertFalse(passed)
+        verify(reauthService, never()).verify(anyString(), anyString())
     }
 }

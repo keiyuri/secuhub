@@ -1,0 +1,11 @@
+-- ============================================================================
+-- tb_data_rcv_anal에 "레인별 최신 1건" 조회 인덱스를 추가한다.
+--
+-- GatePacketPersister가 상태 데이터를 당일 레인별로 upsert하면서(2026-08-14, "당일 전체 상태
+-- 데이터 저장 + 동일 데이터 반복 시 rcv_date만 갱신" 기능 추가) 매 상태 패킷마다
+-- `findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc`로 해당 레인의 최신 행을 조회한다. 기존
+-- IDX_DATA_ANAL_ERR(dtl_ip, dtl_lane_no, anal_date, err_type, resolve_yn)는 정렬 키가
+-- anal_date라 이 조회(정렬 키 anal_id)에는 인덱스만 태우고 정렬은 별도로 해야 한다 —
+-- (dtl_ip, dtl_lane_no, anal_id) 인덱스를 추가해 정렬까지 인덱스로 커버한다.
+-- ============================================================================
+CREATE INDEX IDX_ANAL_LANE_LATEST ON tb_data_rcv_anal (dtl_ip, dtl_lane_no, anal_id);

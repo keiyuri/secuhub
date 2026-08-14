@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.MediaType
+import org.springframework.security.authentication.AnonymousAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.servlet.HandlerInterceptor
 import java.net.URI
@@ -30,16 +31,31 @@ class GateControlReauthInterceptor(
         // /motor는 GET(폼 표시)/POST(제출)를 같은 경로로 공유해 경로 패턴만으로는 구분할 수 없다.
         if (request.method !in STATE_CHANGING_METHODS) return true
 
-        val username = SecurityContextHolder.getContext().authentication?.name
-        val password = request.getParameter("reauthPassword")
-        if (username != null && reauthService.verify(username, password)) return true
+        // [2026-08-14 사용자 요청] 게이트 제어 요청의 권한(재인증 비밀번호) 검증보다 먼저 최초
+        // 로그인 여부를 확인한다. Spring Security 필터 체인이 이 경로들을 이미
+        // hasAnyRole(CONTROL, ADMIN)으로 보호하므로 실제로는 미인증 상태로 여기 도달할 수 없지만,
+        // 방어적으로 명시해 둔다 — 인증이 없거나(anonymousAuthenticationFilter가 채운
+        // AnonymousAuthenticationToken 포함) isAuthenticated가 false인 경우 비밀번호 검증 자체를
+        // 시도하지 않고 즉시 거부한다.
+        val authentication = SecurityContextHolder.getContext().authentication
+        if (authentication == null || !authentication.isAuthenticated || authentication is AnonymousAuthenticationToken) {
+            reject(request, response)
+            return false
+        }
 
+        val password = request.getParameter("reauthPassword")
+        if (reauthService.verify(authentication.name, password)) return true
+
+        reject(request, response)
+        return false
+    }
+
+    private fun reject(request: HttpServletRequest, response: HttpServletResponse) {
         if (request.requestURI.startsWith("/api/")) {
             respondJson(response)
         } else {
             redirectBack(request, response)
         }
-        return false
     }
 
     private fun respondJson(response: HttpServletResponse) {

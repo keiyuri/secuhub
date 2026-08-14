@@ -43,6 +43,11 @@ class SecurityTestFixtureController {
     // 와 마스터 데이터 컨트롤러(GateGroupController, /gates/groups)의 경로 형태를 그대로 흉내낸다.
     @PostMapping("/gates/details/{dtlId}/mode") fun gateMode(): String = "gate-mode-ok"
     @PostMapping("/gates/groups") fun gateGroupCreate(): String = "gate-group-ok"
+
+    // 2026-08-14 Codex 리뷰 회귀 방지용 — GateControlController의 Fast Gate 전용 모터 설정
+    // (/gates/details/{id}/fast-motor)이 전용 인가 규칙 없이 추가되어, 다른 모터 설정과 달리
+    // ROLE_CONTROL 사용자가 제출하면 하위 "/gates/**" -> ROLE_ADMIN 규칙에 걸려 403이 났다.
+    @PostMapping("/gates/details/{dtlId}/fast-motor") fun gateFastMotor(): String = "gate-fast-motor-ok"
 }
 
 // securance-web 모듈에는 @SpringBootApplication 메인 클래스가 없다(그건 securance-app에 있다).
@@ -145,6 +150,14 @@ class SecurityConfigTest {
     @WithMockUser(roles = ["CONTROL"])
     fun `ROLE_CONTROL 사용자는 실제 게이트 제어 엔드포인트를 호출할 수 있다`() {
         mockMvc.post("/gates/details/1/mode") { with(csrf()) }.andExpect { status { isOk() } }
+    }
+
+    @Test
+    @WithMockUser(roles = ["CONTROL"])
+    fun `ROLE_CONTROL 사용자는 Fast Gate 모터 설정 엔드포인트를 호출할 수 있다`() {
+        // 회귀 방지 테스트(2026-08-14 Codex 리뷰 지적) — 전용 인가 규칙이 없어 하위
+        // "/gates/**" -> ROLE_ADMIN 규칙에 걸려 403이 나던 문제.
+        mockMvc.post("/gates/details/1/fast-motor") { with(csrf()) }.andExpect { status { isOk() } }
     }
 
     @Test

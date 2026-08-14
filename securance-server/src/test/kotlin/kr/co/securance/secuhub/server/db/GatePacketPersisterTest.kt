@@ -254,6 +254,46 @@ class GatePacketPersisterTest {
     }
 
     @Test
+    fun `동일 데이터 반복 시 rcv_date와 함께 rcv_id anal_header anal_tail도 최신 원본 패킷 값으로 갱신한다`() {
+        // 회귀 방지 테스트(Codex 적대적 리뷰 지적, 2026-08-14) — 이전에는 rcv_date만 최신 시각으로
+        // 바꾸고 rcv_id/rcv_raw/anal_header/anal_tail은 최초 INSERT 시점(과거 tb_data_rcv 행/원본
+        // 바이트)에 그대로 머물러 있어, rcv_date가 가리키는 시각과 실제로 참조하는 원본 패킷이
+        // 서로 다른 수신 이벤트를 가리키는 모순이 생겼다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 1111L, rcvDate = "202608141200", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
+        val state = newState("192.168.0.205")
+        val packet = statusPacket(laneBlock(laneNo = 1, totalCount = 100))
+
+        // 1차 수신 — 새 행 INSERT, rcv_id=1111.
+        persister.persistStatusAnalysis(state, packet)
+        val firstCaptor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(firstCaptor.capture())
+        val firstSaved = firstCaptor.value
+        assertEquals(1111L, firstSaved.rcvId)
+
+        // 2차 수신 — 동일 데이터지만 새 원시 행(rcv_id=2222)이 함께 적재됐다고 가정한다.
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(firstSaved)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 2222L, rcvDate = "202608141201", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        persister.persistStatusAnalysis(state, packet)
+
+        val allCaptor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000).times(2)).save(allCaptor.capture())
+        val updated = allCaptor.allValues[1]
+        assertSame(firstSaved, updated)
+        // rcv_id가 최신 원시 행(2222)을 가리켜야 한다 — rcv_date와 rcv_id가 같은 패킷을 나타낸다.
+        assertEquals(2222L, updated.rcvId)
+        assertEquals(firstSaved.analHeader, updated.analHeader)
+        assertEquals(firstSaved.analTail, updated.analTail)
+    }
+
+    @Test
     fun `연결 캐시와 실 DB 식별정보가 달라도 동일 데이터가 반복되면 rcv_date만 갱신한다`() {
         // Codex 리뷰(2026-08-14) P1 지적 회귀 방지 — dtl_type 등 식별정보가 tb_gate_dtl 재조회로
         // 최신화된 뒤에도(=저장된 행의 식별정보와 커넥션 캐시가 어긋난 뒤에도), 동일 데이터가

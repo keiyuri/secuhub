@@ -289,6 +289,12 @@ class GatePacketPersister(
      * 기록된 시각이 사라져 D5 보존 삭제([DataReceiveAnalysisRepository.deleteBatchOlderThan])나
      * 분석 조회에서 "언제부터 이 상태였는지"가 아니라 "마지막으로 반복 수신한 시각"만 남게 된다.
      *
+     * 반대로 `rcv_id`/`rcv_raw`/`anal_header`/`anal_tail`(이 수신을 식별하는 원본 패킷 출처 필드)은
+     * `rcv_date`와 **함께 원자적으로 갱신한다**(Codex 적대적 리뷰 지적, 2026-08-14) — `rcv_date`만
+     * 최신 시각으로 바꾸고 이 필드들을 최초 INSERT 시점 값에 그대로 두면, "이 행은 최신 시각에
+     * 수신됐다"는 `rcv_date`와 실제로 가리키는 원본 패킷(`rcv_id`)이 서로 다른 수신 이벤트를
+     * 가리키는 모순이 생겨 감사/장애 분석에서 원본 패킷을 잘못 역추적하게 된다.
+     *
      * ### 식별정보(`dtl_type`/`dtl_name`/`loc_id`/`grp_id`) 최신화 주기 = 최대 1일(Codex 적대적
      * 리뷰 지적 대응)
      * [isSameContent]는 식별정보를 비교하지 않으므로([resolveLaneIdentity] KDoc 참고), 상태가
@@ -326,7 +332,20 @@ class GatePacketPersister(
                 if (latest != null && latest.analDate.startsWith(today) && isSameContent(latest, analysis, laneCount)) {
                     // 동일 데이터 반복 — 새 행 없이 수신일자(rcv_date)만 갱신한다. anal_date는
                     // 이 상태가 최초로 기록된 시각을 보존하기 위해 건드리지 않는다(P2 지적).
+                    //
+                    // rcv_id/rcv_raw/anal_header/anal_tail은 rcv_date와 함께 원자적으로 갱신한다
+                    // (Codex 적대적 리뷰 지적, 2026-08-14) — 이전에는 rcv_date만 최신 시각으로 바꾸고
+                    // 이 필드들은 최초 INSERT 시점 값(과거 tb_data_rcv 행/원본 바이트)에 그대로
+                    // 머물러 있어, "이 행은 최신 시각에 수신됐다"는 rcv_date와 실제로 가리키는 원본
+                    // 패킷(rcv_id)이 서로 다른 시점을 가리키는 모순이 생겼다 — 운영자가 감사/장애
+                    // 분석에서 rcv_date로 원본 패킷을 역추적하면 엉뚱한 과거 행과 대조하게 된다.
+                    // rcvId는 enqueueReceiveInsert가 먼저 큐잉한 원시 INSERT를 가리키므로
+                    // resolveRcvId로 다시 조회해야 이번 수신의 원본 행을 가리킨다(resolveRcvId KDoc 참고).
                     latest.rcvDate = analDate
+                    latest.rcvId = resolveRcvId(state.dtlIp)
+                    latest.rcvRaw = rawHex
+                    latest.analHeader = headerHex
+                    latest.analTail = tailHex
                     dataReceiveAnalysisRepository.save(latest)
                 } else {
                     val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)

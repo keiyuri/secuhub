@@ -264,7 +264,7 @@ class GatePacketPersister(
                 operationName = "InsertReceiveAnal(${state.dtlIp},${analysis.laneNumber},${analysis.analysisType})",
             ) {
                 val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
-                val rcvId = resolveRcvId(state.dtlIp, analysis.laneNumber)
+                val rcvId = resolveRcvId(state.dtlIp)
                 dataReceiveAnalysisRepository.save(
                     buildAnalysisEntity(state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount),
                 )
@@ -330,7 +330,7 @@ class GatePacketPersister(
                     dataReceiveAnalysisRepository.save(latest)
                 } else {
                     val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
-                    val rcvId = resolveRcvId(state.dtlIp, analysis.laneNumber)
+                    val rcvId = resolveRcvId(state.dtlIp)
                     dataReceiveAnalysisRepository.save(
                         buildAnalysisEntity(
                             state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount,
@@ -436,9 +436,15 @@ class GatePacketPersister(
      * 분석 INSERT 작업보다 먼저 enqueue되고, [GateDbWriteQueue]가 파티션 내 실행 순서를
      * 보장하므로 정상 경로에서는 이 조회가 방금 저장된 원시 행을 찾는다. 못 찾으면(레코드가
      * 아직 없거나 드문 재시도 경합) 0으로 폴백한다 — 엔티티 KDoc이 이미 0을 허용값으로 규정한다.
+     *
+     * **레인으로 필터링하지 않는다**(2026-08-14 재검토로 발견한 버그 수정 — [DataReceiveRepository]
+     * KDoc 참고) — `tb_data_rcv`는 원시 패킷 1건당 대표 레인 하나로만 태그된 행 1건을 만드는 반면,
+     * [persistStatusAnalysis]는 같은 원시 패킷에서 레인 수만큼 여러 분석 행을 만든다. 레인 번호로
+     * 필터링하면 대표 레인이 아닌 레인들은 방금 저장된 원시 행을 절대 찾지 못하고 무관한 과거
+     * 값을 잘못 가져왔다 — 같은 패킷에서 나온 분석 행은 전부 같은 원시 행을 가리켜야 한다.
      */
-    private fun resolveRcvId(dtlIp: String, laneNo: Int): Long =
-        dataReceiveRepository.findTopByDtlIpAndDtlLaneNoOrderByRcvIdDesc(dtlIp, laneNo)?.rcvId ?: 0
+    private fun resolveRcvId(dtlIp: String): Long =
+        dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc(dtlIp)?.rcvId ?: 0
 
     /** [analysis]/[identity]로부터 `tb_data_rcv_anal` 1행(엔티티)을 만든다 — INSERT 경로 전용 공통 로직. */
     private fun buildAnalysisEntity(

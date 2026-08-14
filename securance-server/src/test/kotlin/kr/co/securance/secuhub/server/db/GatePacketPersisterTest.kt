@@ -133,12 +133,12 @@ class GatePacketPersisterTest {
     }
 
     @Test
-    fun `rcv_id는 같은 레인의 최신 원시 수신 행 PK로 채운다`() {
+    fun `rcv_id는 같은 장비의 최신 원시 수신 행 PK로 채운다`() {
         // 회귀 방지(2026-08-14) — 이전에는 항상 0으로 고정되어 tb_data_rcv와의 FK 추적이 불가능했다.
         val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
         `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
         val dataReceiveRepository = mock(DataReceiveRepository::class.java)
-        `when`(dataReceiveRepository.findTopByDtlIpAndDtlLaneNoOrderByRcvIdDesc("192.168.0.205", 1)).thenReturn(
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
             DataReceive(rcvId = 4242L, rcvDate = "202608141200", dtlIp = "192.168.0.205", dtlLaneNo = 1),
         )
         val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
@@ -149,6 +149,43 @@ class GatePacketPersisterTest {
         val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
         verify(analysisRepository, timeout(5_000)).save(captor.capture())
         assertEquals(4242L, captor.value.rcvId)
+    }
+
+    @Test
+    fun `다중 레인 패킷의 모든 레인 분석 행이 같은 원시 행 rcv_id를 공유한다`() {
+        // 회귀 방지(2026-08-14 재검토) — 원래 레인 번호로 필터링해 조회했을 때, tb_data_rcv에는
+        // 대표 레인 1개로만 태그된 행이 있는 반면 이 패킷은 레인 2개로 분석되어, 대표 레인이 아닌
+        // 레인(레인 2)의 분석 행은 방금 저장된 원시 행을 찾지 못하고 무관한 값(또는 0)이 채워졌다.
+        // 지금은 레인 필터 없이 dtlIp만으로 조회하므로 두 레인 모두 같은 rcv_id를 가져야 한다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 9999L, rcvDate = "202608141200", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        val gateDetailRepository = mock(GateDetailRepository::class.java)
+        val persister = newPersister(analysisRepository, gateDetailRepository, dataReceiveRepository)
+        val state = GateConnectionState(
+            dtlIp = "192.168.0.205",
+            gateTypeCode = 1,
+            codec = SpeedFlapGateProtocolCodec(),
+            connection = mock(Connection::class.java),
+            outbound = mock(NettyOutbound::class.java),
+            actor = GateConnectionActor("192.168.0.205", Dispatchers.Default, queueCapacity = 100),
+            laneInfo = listOf(
+                GateLaneInfo(locId = 1, grpId = 70, dtlId = 159, dtlLaneNo = 1, dtlType = 1, analysisYn = true, dtlName = "1번레인"),
+                GateLaneInfo(locId = 1, grpId = 70, dtlId = 160, dtlLaneNo = 2, dtlType = 1, analysisYn = true, dtlName = "2번레인"),
+            ),
+        )
+
+        persister.persistStatusAnalysis(
+            state,
+            statusPacket(laneBlock(laneNo = 1, totalCount = 100), laneBlock(laneNo = 2, totalCount = 200)),
+        )
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000).times(2)).save(captor.capture())
+        assertTrue(captor.allValues.all { it.rcvId == 9999L })
     }
 
     @Test
@@ -173,11 +210,11 @@ class GatePacketPersisterTest {
     }
 
     @Test
-    fun `같은 레인의 원시 수신 행을 찾지 못하면 rcv_id는 0으로 폴백한다`() {
+    fun `같은 장비의 원시 수신 행을 찾지 못하면 rcv_id는 0으로 폴백한다`() {
         val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
         `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
         val dataReceiveRepository = mock(DataReceiveRepository::class.java)
-        `when`(dataReceiveRepository.findTopByDtlIpAndDtlLaneNoOrderByRcvIdDesc(anyString(), anyInt())).thenReturn(null)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc(anyString())).thenReturn(null)
         val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
         val state = newState("192.168.0.205")
 

@@ -40,4 +40,9 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-webmvc-test")
     testImplementation("org.springframework.security:spring-security-test")
+    // EventSearchFilter/LogSearchFilter(Specification)가 실제 JPA 프로바이더 위에서 올바른 컬럼을
+    // 조회하는지 검증하기 위해 securance-domain과 동일한 @DataJpaTest 인프라를 들여온다
+    // (2026-08-14, anal_type/anal_tp 오참조 버그 회귀 테스트 — docs/작업일지.md 0030 참고).
+    testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
+    testRuntimeOnly("com.h2database:h2")
 }

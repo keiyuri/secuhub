@@ -56,17 +56,30 @@ data class LogSearchFilter(
             locId?.let { add(cb.equal(root.get<Long>("locId"), it)) }
             grpId?.let { add(cb.equal(root.get<Long>("grpId"), it)) }
             if (!dtlIp.isNullOrBlank()) add(cb.equal(root.get<String>("dtlIp"), dtlIp))
-            if (!analType.isNullOrBlank()) add(cb.equal(root.get<String>("analType"), analType))
+            // 버그 수정(2026-08-14): EventReportController와 동일한 이유로 anal_tp를 봐야 한다 —
+            // analType은 레거시가 항상 'B'만 채우는 무관한 컬럼(docs/작업일지.md 0030 참고).
+            if (!analType.isNullOrBlank()) add(cb.equal(root.get<String>("analTp"), analType))
 
             // 레거시 SelectGateLog가 빈 설명(sDesc)인 행을 제외하던 것과 동일 — desc_* 컬럼 중
             // 하나라도 채워져 있어야 한다.
+            //
+            // 버그 수정(2026-08-14): 두 가지 문제가 있었다(docs/작업일지.md 0030 참고).
+            // 1) descFireAlarm/descMainMotorError/descSlaveMotorError는 DataReceiveAnalysis의
+            //    실제 매핑 컬럼이 아니라 descGateStatus07/10/11을 그대로 반환하는 읽기 전용 getter
+            //    별칭이다 — JPA Criteria가 엔티티 메타모델에서 이 이름을 속성으로 찾지 못해
+            //    `Could not resolve attribute` 예외가 나며, 이 화면(#10 통신/운영 로그 조회)의 모든
+            //    조회가 항상 실패하고 있었다. 실제 컬럼명(descGateStatus07/10/11)으로 바꿨다.
+            // 2) desc_* 컬럼은 스키마상 전부 `NOT NULL DEFAULT ''`라 SQL NULL이 될 수 없다 —
+            //    `isNotNull`은 내용 유무와 무관하게 모든 행에서 항상 참이라 "빈 설명 행 제외"가
+            //    사실상 죽은 코드였다. 다른 리포지토리 메서드(resolveSensorErrors 등)와 동일하게
+            //    TRIM 후 빈 문자열이 아닌지로 판정하도록 바꿨다.
             val descColumns = listOf(
-                "descFireAlarm", "descOperation01", "descOperation02", "descOperation03", "descOperation04",
+                "descGateStatus07", "descOperation01", "descOperation02", "descOperation03", "descOperation04",
                 "descOperation05", "descOperation06", "descOperation07", "descOperation08",
                 "descSafety01", "descSafety02", "descSafety03", "descSafety04",
-                "descGateStatus09", "descMainMotorError", "descSlaveMotorError",
+                "descGateStatus09", "descGateStatus10", "descGateStatus11",
             )
-            add(cb.or(*descColumns.map { cb.isNotNull(root.get<String>(it)) }.toTypedArray()))
+            add(cb.or(*descColumns.map { cb.notEqual(cb.trim(root.get<String>(it)), "") }.toTypedArray()))
         }
         cb.and(*predicates.toTypedArray())
     }
@@ -112,7 +125,10 @@ class LogReportService(private val analysisRepository: DataReceiveAnalysisReposi
 
     private fun toRow(row: DataReceiveAnalysis) = LogRow(
         analDate = row.analDate,
-        analType = row.analType,
+        // 버그 수정(2026-08-14): 화면에 보여줄 "유형"은 anal_tp(NOR/EVT/PLM/STA)다 — analType은
+        // 레거시가 항상 'B'만 채우는 무관한 컬럼이라 이 화면의 "유형" 열이 늘 "B"로만 찍히고 있었다
+        // (docs/작업일지.md 0030 참고). [LogRow.analType] 필드명 자체는 화면/파라미터 계약이라 유지한다.
+        analType = row.analTp,
         dtlIp = row.dtlIp,
         dtlLaneNo = row.dtlLaneNo,
         description = buildDescription(row),
@@ -167,7 +183,8 @@ class LogReportController(
             response = response,
             fileName = "통신로그",
             headers = listOf("발생일시", "유형", "IP", "레인", "설명"),
-            rows = rows.map { listOf(it.analDate, it.analType, it.dtlIp, it.dtlLaneNo, logReportService.buildDescription(it)) },
+            // "유형" 컬럼도 같은 이유로 anal_tp를 내보낸다(analType은 항상 'B').
+            rows = rows.map { listOf(it.analDate, it.analTp, it.dtlIp, it.dtlLaneNo, logReportService.buildDescription(it)) },
         )
     }
 

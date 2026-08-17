@@ -39,7 +39,11 @@ data class EventSearchFilter(
             locId?.let { add(cb.equal(root.get<Long>("locId"), it)) }
             grpId?.let { add(cb.equal(root.get<Long>("grpId"), it)) }
             if (!dtlIp.isNullOrBlank()) add(cb.equal(root.get<String>("dtlIp"), dtlIp))
-            if (!analType.isNullOrBlank()) add(cb.equal(root.get<String>("analType"), analType))
+            // 버그 수정(2026-08-14): "유형"(NOR/EVT/PLM/STA) 필터는 파티션 키 컬럼 anal_tp를 봐야
+            // 한다 — 이름이 비슷한 anal_type은 레거시가 항상 'B'만 채우는 무관한 컬럼이라, 이 조건을
+            // analType으로 걸면 필터를 하나라도 선택하는 순간 결과가 항상 0건이었다
+            // (DashboardPushService와 동일한 근본 원인, docs/작업일지.md 0030 참고).
+            if (!analType.isNullOrBlank()) add(cb.equal(root.get<String>("analTp"), analType))
             if (!resolveYn.isNullOrBlank()) add(cb.equal(root.get<String>("resolveYn"), resolveYn))
         }
         cb.and(*predicates.toTypedArray())
@@ -117,7 +121,8 @@ class EventReportController(
             headers = listOf("발생일시", "유형", "IP", "레인", "화재경보", "메인모터", "서브모터", "해결여부", "해결자", "해결일시"),
             rows = rows.map {
                 listOf(
-                    it.analDate, it.analType, it.dtlIp, it.dtlLaneNo,
+                    // "유형" 컬럼도 같은 이유로 anal_tp를 내보낸다(analType은 항상 'B').
+                    it.analDate, it.analTp, it.dtlIp, it.dtlLaneNo,
                     it.descFireAlarm, it.descMainMotorError, it.descSlaveMotorError,
                     it.resolveYn, it.resolveUser, it.resolveDate?.toString(),
                 )

@@ -84,7 +84,8 @@
           </tr>
           <tr th:each="row : ${result.content}">
             <td th:text="${row.analDate}">일시</td>
-            <td th:text="${row.analType}">유형</td>
+            <!-- 버그 수정(2026-08-14): row.analType은 항상 'B' — 실제 유형(NOR/EVT/PLM/STA)은 anal_tp -->
+            <td th:text="${row.analTp}">유형</td>
             <td th:text="${row.dtlIp}">IP</td>
             <td th:text="${row.dtlLaneNo}">0</td>
             <td th:text="${row.descFireAlarm}">-</td>

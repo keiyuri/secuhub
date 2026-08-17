@@ -73,7 +73,7 @@ class DataReceiveAnalysisRepositoryNewUnresolvedErrorsTest {
 
     @Test
     fun `has_error_event가 false이거나 resolve_yn이 Y면 제외한다`() {
-        val notError = entityManager.persistAndFlush(sample(analTp = "PLM")) // markHasErrorEvent 호출 안 함 → false로 유지
+        entityManager.persistAndFlush(sample(analTp = "PLM")) // markHasErrorEvent 호출 안 함 → false로 유지
         val resolved = entityManager.persistAndFlush(sample(analTp = "STA", resolveYn = "Y"))
         markHasErrorEvent(resolved)
         entityManager.clear()
@@ -81,7 +81,6 @@ class DataReceiveAnalysisRepositoryNewUnresolvedErrorsTest {
         val result = repository.findNewUnresolvedErrors(0L, PageRequest.of(0, 200))
 
         assertEquals(0, result.size)
-        assertEquals(0, listOf(notError, resolved).count { it.analId in result.map { r -> r.analId } })
     }
 
     @Test

@@ -11,10 +11,13 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.test.context.TestPropertySource
 
 /**
- * [DataReceiveAnalysisRepository.findNewUnresolvedErrors]/[DataReceiveAnalysisRepository.findMaxUnresolvedErrorAnalId]
+ * [DataReceiveAnalysisRepository.findNewUnresolvedErrors]/[DataReceiveAnalysisRepository.findMaxErrorAnalId]
  * 회귀 테스트. `DashboardPushService`(securance-web)가 3초마다 폴링하는 조회가 실수로 파티션 키
  * `anal_tp` 대신 무관한 `anal_type`(항상 'B') 컬럼을 참조했던 버그(2026-08-14,
  * `docs/작업일지.md` 참고 — 개발 DB `20260814-01.txt` 소켓 타임아웃의 근본 원인) 재발을 막는다.
+ * `findMaxErrorAnalId`가 `resolve_yn`과 무관하게 최댓값을 잡아야 하는 이유(적대적 리뷰 [high]
+ * 지적 — 미해결 조건까지 걸면 오류 대부분이 해결된 운영 DB에서 기준선이 과거에 고정돼 같은
+ * 타임아웃이 재현될 수 있음)도 함께 검증한다.
  *
  * `has_error_event`는 실제 스키마에서 MariaDB VIRTUAL 생성 컬럼이라 엔티티가 읽기 전용
  * (`insertable=false updatable=false`)으로 매핑한다 — [GateLogRepositoryTest]와 동일한 이유로
@@ -99,18 +102,30 @@ class DataReceiveAnalysisRepositoryNewUnresolvedErrorsTest {
     }
 
     @Test
-    fun `findMaxUnresolvedErrorAnalId는 조건에 맞는 행이 없으면 null을 반환한다`() {
-        assertNull(repository.findMaxUnresolvedErrorAnalId())
+    fun `findMaxErrorAnalId는 조건에 맞는 행이 없으면 null을 반환한다`() {
+        assertNull(repository.findMaxErrorAnalId())
     }
 
     @Test
-    fun `findMaxUnresolvedErrorAnalId는 조건에 맞는 행 중 최댓값을 반환한다`() {
+    fun `findMaxErrorAnalId는 조건에 맞는 행 중 최댓값을 반환한다`() {
         val first = entityManager.persistAndFlush(sample(analTp = "PLM"))
         markHasErrorEvent(first)
         val second = entityManager.persistAndFlush(sample(analTp = "STA"))
         markHasErrorEvent(second)
         entityManager.clear()
 
-        assertEquals(second.analId, repository.findMaxUnresolvedErrorAnalId())
+        assertEquals(second.analId, repository.findMaxErrorAnalId())
+    }
+
+    @Test
+    fun `findMaxErrorAnalId는 이미 해결된 행도 포함해 최댓값을 반환한다`() {
+        // 적대적 리뷰 [high] 지적 회귀 테스트: 운영 DB처럼 오류 대부분이 이미 해결(resolve_yn='Y')
+        // 처리된 상황을 재현한다 — resolve_yn 조건을 걸면 이 최신 행을 놓치고 과거(또는 0)로
+        // 기준선이 고정돼, 이후 매 폴링이 넓은 구간을 재스캔하는 문제가 재현된다.
+        val resolved = entityManager.persistAndFlush(sample(analTp = "PLM", resolveYn = "Y"))
+        markHasErrorEvent(resolved)
+        entityManager.clear()
+
+        assertEquals(resolved.analId, repository.findMaxErrorAnalId())
     }
 }

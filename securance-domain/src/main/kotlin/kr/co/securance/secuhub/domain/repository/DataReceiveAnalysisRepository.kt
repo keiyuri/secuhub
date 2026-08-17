@@ -208,16 +208,29 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
     )
     fun findNewUnresolvedErrors(@Param("sinceExclusive") sinceExclusive: Long, limit: Pageable): List<DataReceiveAnalysis>
 
-    /** [findNewUnresolvedErrors]와 동일 조건의 현재 최댓값 — 앱 기동 시 `lastSeenAnalId` 기준선을
-     * 잡을 때 전체 목록을 메모리에 올리지 않고 인덱스만으로 값 하나를 얻기 위해 별도로 둔다. */
+    /**
+     * 앱 기동 시 `lastSeenAnalId` 기준선을 잡는 데 쓰는 "PLM/STA 스트림 전체의 최신 anal_id".
+     *
+     * 버그 수정(2026-08-14, `/codex:adversarial-review` [high] 지적): 이전에는 [findNewUnresolvedErrors]와
+     * 동일하게 `resolve_yn = 'N'` 조건을 걸었다 — 운영 DB처럼 오류 대부분이 이미 해결 처리된
+     * 환경에서는 미해결 행의 MAX(anal_id)가 실제 최신 anal_id보다 훨씬 뒤처지거나(오래전에 해결
+     * 안 된 행 하나만 남아있는 경우), 미해결 행이 아예 없으면 0으로 잡힌다. 그러면 기동 직후
+     * `lastSeenAnalId`가 과거(또는 0)에 고정되고, 이후 매 폴링마다 [findNewUnresolvedErrors]가
+     * 그 오래된 지점부터 현재까지 전체 구간을 다시 스캔해야 한다 — `resolve_yn`이 없는
+     * `IDX_ANAL_ERR3_SCAN(err_type, has_error_event, anal_id)` 인덱스로도 범위 자체가 크면 느려져,
+     * 이번 수정이 없애려던 소켓 타임아웃이 그대로 재현될 수 있었다.
+     *
+     * 그래서 기준선은 해결 여부와 무관하게 "PLM/STA 스트림에 실제로 마지막까지 쌓인 지점"으로
+     * 잡아야 한다 — 그래야 기동 직후 첫 폴링부터 [findNewUnresolvedErrors]의 `anal_id > baseline`
+     * 범위가 항상 좁게 유지된다(개발 DB에서 최근 anal_id 기준 EXPLAIN 시 rows=1).
+     */
     @Query(
         """
         SELECT MAX(a.analId) FROM DataReceiveAnalysis a
         WHERE a.errType = 3
           AND a.hasErrorEvent = true
-          AND a.resolveYn = 'N'
           AND a.analTp IN ('PLM', 'STA')
         """,
     )
-    fun findMaxUnresolvedErrorAnalId(): Long?
+    fun findMaxErrorAnalId(): Long?
 }

@@ -81,7 +81,11 @@ class DashboardPushService(
     }
 
     private fun initializeBaseline() {
-        lastSeenAnalId.set(analysisRepository.findMaxUnresolvedErrorAnalId() ?: 0L)
+        // 버그 수정(2026-08-14, /codex:adversarial-review [high] 지적): 미해결(resolve_yn='N')
+        // 행만 기준으로 잡으면 오류 대부분이 이미 해결 처리된 운영 DB에서 기준선이 과거에
+        // 고정되고, 이후 매 폴링이 그 오래된 지점부터 전체 구간을 재스캔하게 된다 — 해결 여부와
+        // 무관한 PLM/STA 스트림 전체의 최신 anal_id로 잡아야 한다(findMaxErrorAnalId KDoc 참고).
+        lastSeenAnalId.set(analysisRepository.findMaxErrorAnalId() ?: 0L)
     }
 
     private fun alertDescription(error: DataReceiveAnalysis): String =

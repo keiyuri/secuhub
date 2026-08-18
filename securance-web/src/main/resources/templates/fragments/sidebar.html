@@ -39,7 +39,11 @@
       </p>
     </a>
     <ul class="nav nav-treeview">
-      <li th:each="child : ${node.children}" th:insert="~{this :: menuNode(${child}, ${currentPath})}"></li>
+      <!-- 버그 수정(2026-08-18): 재귀 프래그먼트를 th:each로 반복 삽입할 때 Thymeleaf가 하위 트리를
+           gathering(사전 수집)하는 패스에서 부모 th:if(Group 판별)가 아직 확정되기 전에 이 th:each가
+           먼저 평가되어 node가 null인 채로 .children에 접근해 EL1007E가 발생했다. 세이프 내비게이션(?.)
+           으로 방어 — node가 null이면 빈 컬렉션으로 취급되어 예외 없이 넘어간다. -->
+      <li th:each="child : ${node?.children}" th:insert="~{this :: menuNode(${child}, ${currentPath})}"></li>
     </ul>
   </li>
 </th:block>

@@ -4,6 +4,10 @@
 -- (MariaDB VIRTUAL 생성 컬럼 등 H2로 그대로 이식하기 어려운 문법을 피해 엔티티가 매핑하는 컬럼만
 -- 최소 재현) 이 모듈에도 같은 테이블을 둔다 — 두 모듈이 별도로 컴파일되는 test source set이라
 -- 공유할 수 없다(운영 스키마 회귀 검증 목적이 아님에 주의).
+-- ※ 2026-08-18: DataReceiveAnalysis에 dtl_type_cd + anal_data_* 19개 필드를 추가하면서
+-- securance-domain 쪽 schema.sql만 갱신하고 이 파일은 빠뜨려 EventSearchFilterTest/
+-- LogSearchFilterTest가 SQLGrammarException(Column not found)으로 깨졌다 — 엔티티 컬럼을
+-- 추가/변경할 때는 이 파일도 함께 갱신해야 한다.
 CREATE TABLE tb_data_rcv_anal (
     anal_id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
     anal_date               VARCHAR(20) NOT NULL,
@@ -12,6 +16,7 @@ CREATE TABLE tb_data_rcv_anal (
     dtl_ip                  VARCHAR(20) NOT NULL,
     dtl_lane_no             TINYINT     NOT NULL,
     dtl_type                TINYINT     NOT NULL DEFAULT 1,
+    dtl_type_cd             VARCHAR(10) NULL,
     dtl_no                  INT         NOT NULL DEFAULT 1,
     dtl_id                  BIGINT      NOT NULL DEFAULT 0,
     loc_id                  BIGINT NULL,
@@ -37,6 +42,25 @@ CREATE TABLE tb_data_rcv_anal (
     anal_data_gate_name     VARCHAR(80) NOT NULL DEFAULT '',
     anal_data_ip            VARCHAR(20) NOT NULL DEFAULT '',
     anal_data_mac           VARCHAR(20) NOT NULL DEFAULT '',
+    anal_data_gate_lane_number        VARCHAR(2)  NOT NULL DEFAULT '',
+    anal_data_gate_lane_count         VARCHAR(2)  NOT NULL DEFAULT '',
+    anal_data_gate_type               VARCHAR(2)  NOT NULL DEFAULT '',
+    anal_data_user_mode               VARCHAR(2)  NOT NULL DEFAULT '',
+    anal_data_security_mode           VARCHAR(2)  NOT NULL DEFAULT '',
+    anal_data_inout_time              VARCHAR(2)  NOT NULL DEFAULT '',
+    anal_data_user_count              VARCHAR(2)  NOT NULL DEFAULT '',
+    anal_data_total_count             VARCHAR(8)  NOT NULL DEFAULT '',
+    anal_data_operation_sensor_status1 VARCHAR(8) NOT NULL DEFAULT '',
+    anal_data_safety_sensor_status     VARCHAR(8) NOT NULL DEFAULT '',
+    anal_data_operation_sensor_status2 VARCHAR(8) NOT NULL DEFAULT '',
+    anal_data_optical_sensor_status    VARCHAR(50) NOT NULL DEFAULT '',
+    anal_data_output_status            VARCHAR(40) NOT NULL DEFAULT '',
+    anal_data_motor_operation_count    VARCHAR(20) NOT NULL DEFAULT '',
+    anal_data_master_in_total_count    VARCHAR(20) NOT NULL DEFAULT '',
+    anal_data_gate_operation_status    VARCHAR(50) NOT NULL DEFAULT '',
+    anal_data_check_sum                VARCHAR(4)  NOT NULL DEFAULT '',
+    anal_data_packet_checksum          VARCHAR(2)  NOT NULL DEFAULT '',
+    anal_data_etx                      VARCHAR(2)  NOT NULL DEFAULT '',
     desc_data_info_length   VARCHAR(10) NOT NULL DEFAULT '',
     desc_gate_name          VARCHAR(80) NOT NULL DEFAULT '',
     desc_gate_ip            VARCHAR(20) NOT NULL DEFAULT '',

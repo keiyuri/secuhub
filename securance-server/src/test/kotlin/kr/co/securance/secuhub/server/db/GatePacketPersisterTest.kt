@@ -2,6 +2,7 @@ package kr.co.securance.secuhub.server.db
 
 import kotlinx.coroutines.Dispatchers
 import kr.co.securance.secuhub.domain.entity.DataReceive
+import kr.co.securance.secuhub.domain.entity.DataReceiveAck
 import kr.co.securance.secuhub.domain.entity.DataReceiveAnalysis
 import kr.co.securance.secuhub.domain.entity.GateDetail
 import kr.co.securance.secuhub.domain.entity.GateGroup
@@ -43,7 +44,10 @@ class GatePacketPersisterTest {
 
     private val offsets = GateStatusAnalyzer.StatusOffset
 
-    private fun statusPacket(vararg laneBlocks: ByteArray): ByteArray {
+    private fun statusPacket(
+        vararg laneBlocks: ByteArray,
+        tail: ByteArray = ByteArray(SpeedGateProtocolConstants.TAIL_LENGTH),
+    ): ByteArray {
         val header = ByteArray(SpeedGateProtocolConstants.HEADER_LENGTH)
         header[SpeedGateProtocolConstants.HeaderOffset.STX] = SpeedGateProtocolConstants.STX
         header[SpeedGateProtocolConstants.HeaderOffset.OBJECT_CODE] = SpeedGateProtocolConstants.ObjectCode.GATE_STATUS
@@ -52,7 +56,7 @@ class GatePacketPersisterTest {
         info[SpeedGateProtocolConstants.DATA_INFO_LENGTH - 1] = laneBlocks.size.toByte()
 
         val body = header + info + laneBlocks.reduce { acc, bytes -> acc + bytes }
-        return body + ByteArray(SpeedGateProtocolConstants.TAIL_LENGTH)
+        return body + tail
     }
 
     private fun laneBlock(laneNo: Int, errCheck: Int = GateStatusAnalyzer.ErrorCheck.NORMAL, totalCount: Long = 0): ByteArray =
@@ -433,5 +437,108 @@ class GatePacketPersisterTest {
         assertEquals("새이름", captor.value.descGateName)
         assertEquals(77L, captor.value.locId)
         assertEquals(88L, captor.value.grpId)
+    }
+
+    @Test
+    fun `dtl_type_cd는 dtl_type을 문자열로 변환한 값으로 채운다`() {
+        // 재검증(2026-08-18) — V30에서 뒤늦게 추가한 dtl_type_cd가 실제로 채워지는지 고정한다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val persister = newPersister(analysisRepository)
+        val state = newState("192.168.0.205", dtlType = 2)
+
+        persister.persistStatusAnalysis(state, statusPacket(laneBlock(laneNo = 1, totalCount = 100)))
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        assertEquals(2, captor.value.dtlType)
+        assertEquals("2", captor.value.dtlTypeCd)
+    }
+
+    @Test
+    fun `anal_data_ 레인 raw 필드 19개를 레인 상태 블록과 Tail에서 채운다`() {
+        // 재검증(2026-08-18) — V30에서 새로 매핑한 19개 컬럼(레인 상태 블록 74바이트 + Tail 4바이트
+        // 파생)이 실제로 채워지는지 고정한다. desc_* 계열(decoded)과 짝을 이루는 raw hex 컬럼이다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val persister = newPersister(analysisRepository)
+        val state = newState("192.168.0.205")
+
+        val block = laneBlock(laneNo = 1, totalCount = 100).apply {
+            this[offsets.USER_MODE] = 0x02
+            this[offsets.SECURITY_MODE] = 0x01
+            this[offsets.INOUT_TIME] = 0x05
+            this[offsets.USER_COUNT] = 0x03
+        }
+        val tail = byteArrayOf(0x12, 0x34, 0x56.toByte(), 0x78)
+        val packet = statusPacket(block, tail = tail)
+
+        persister.persistStatusAnalysis(state, packet)
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        val saved = captor.value
+        assertEquals("01", saved.analDataGateLaneNumber)
+        assertEquals("01", saved.analDataGateLaneCount) // 레인 1개
+        assertEquals("01", saved.analDataGateType)
+        assertEquals("02", saved.analDataUserMode)
+        assertEquals("01", saved.analDataSecurityMode)
+        assertEquals("05", saved.analDataInoutTime)
+        assertEquals("03", saved.analDataUserCount)
+        assertEquals("00000064", saved.analDataTotalCount) // totalCount=100(0x64)
+        assertTrue(saved.analDataOperationSensorStatus1.isNotEmpty())
+        assertTrue(saved.analDataSafetySensorStatus.isNotEmpty())
+        assertTrue(saved.analDataOperationSensorStatus2.isNotEmpty())
+        assertTrue(saved.analDataOpticalSensorStatus.isNotEmpty())
+        assertTrue(saved.analDataOutputStatus.isNotEmpty())
+        assertTrue(saved.analDataMotorOperationCount.isNotEmpty())
+        assertTrue(saved.analDataMasterInTotalCount.isNotEmpty())
+        assertTrue(saved.analDataGateOperationStatus.isNotEmpty())
+        // Tail(4바이트: XOR,SUM,0x08,ETX) = 12 34 56 78 → check_sum(2)/packet_checksum(1)/etx(1) 분할.
+        assertEquals("1234", saved.analDataCheckSum)
+        assertEquals("56", saved.analDataPacketChecksum)
+        assertEquals("78", saved.analDataEtx)
+    }
+
+    @Test
+    fun `persistAck는 ack_header ack_data ack_tail을 Header Data Tail 구간으로 분할해 채운다`() {
+        // 재검증(2026-08-18) — ack_raw만 채워지고 ack_header/ack_data/ack_tail은 늘 NULL이던 문제.
+        val ackRepository = mock(DataReceiveAckRepository::class.java)
+        val persister = GatePacketPersister(
+            GateDbWriteQueue(shardCount = 1),
+            mock(DataReceiveRepository::class.java),
+            ackRepository,
+            mock(DataReceiveFailRepository::class.java),
+            mock(DataReceiveAnalysisRepository::class.java),
+            mock(GateDetailRepository::class.java),
+            mock(GateFaultResolutionService::class.java),
+        )
+        val state = newState("192.168.0.205")
+        // Header(27) + Data(3) + Tail(4) = 34바이트, 각 구간을 구분할 수 있도록 순번을 채운다.
+        val raw = ByteArray(SpeedGateProtocolConstants.HEADER_LENGTH + 3 + SpeedGateProtocolConstants.TAIL_LENGTH) {
+            it.toByte()
+        }
+
+        persister.persistAck(state, raw, laneNo = 1)
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAck::class.java)
+        verify(ackRepository, timeout(5_000)).save(captor.capture())
+        val saved = captor.value
+        val headerHex = kr.co.securance.secuhub.common.util.HexCodec.toHex(
+            raw.copyOfRange(0, SpeedGateProtocolConstants.HEADER_LENGTH),
+        )
+        val dataHex = kr.co.securance.secuhub.common.util.HexCodec.toHex(
+            raw.copyOfRange(
+                SpeedGateProtocolConstants.HEADER_LENGTH,
+                raw.size - SpeedGateProtocolConstants.TAIL_LENGTH,
+            ),
+        )
+        val tailHex = kr.co.securance.secuhub.common.util.HexCodec.toHex(
+            raw.copyOfRange(raw.size - SpeedGateProtocolConstants.TAIL_LENGTH, raw.size),
+        )
+        assertEquals(kr.co.securance.secuhub.common.util.HexCodec.toHex(raw), saved.ackRaw)
+        assertEquals(headerHex, saved.ackHeader)
+        assertEquals(dataHex, saved.ackData)
+        assertEquals(tailHex, saved.ackTail)
     }
 }

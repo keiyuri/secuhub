@@ -22,7 +22,15 @@
 -- 나머지 19개와 동일하게 DEFAULT ''만 추가한다. 값 자체는 usp_process_analysis가 채우는
 -- 원본 Hex 파싱값이므로 secuhub가 직접 넣지 않는 이상 빈 문자열로 남으며, 이는 GateControl
 -- 쪽 로직에 영향을 주지 않는다(GateControl은 자신이 직접 값을 채워 INSERT함).
--- 85만+ 행 테이블이라 ALGORITHM=INPLACE, LOCK=NONE으로 테이블 재구성 락을 피한다.
+--
+-- [2026-08-18 수정] ALGORITHM=INPLACE를 명시하지 않는다 — MariaDB 11.8(Flyway가 검증한
+-- 최신 버전 11.7보다 최신)에서는 이 MODIFY COLUMN이 "ALGORITHM=INPLACE is not supported.
+-- Reason: Cannot change column type. Try ALGORITHM=COPY" 오류로 실패해 마이그레이션 자체가
+-- 막힌다(재현: dev DB 11.8). ALGORITHM 절을 생략하면 MariaDB가 지원 가능한 알고리즘을
+-- 자동 선택한다(가능하면 INPLACE, 아니면 COPY) — 85만+ 행 테이블에서 COPY로 폴백되면
+-- 테이블 전체를 재구성하므로 운영 적용 시간이 늘어날 수 있으나, INPLACE 강제로 인한
+-- 마이그레이션 실패보다는 낫다. LOCK 절도 함께 제거해 MariaDB가 알고리즘에 맞는 락 수준을
+-- 스스로 고르게 한다.
 -- ============================================================================
 
 ALTER TABLE tb_data_rcv_anal
@@ -39,6 +47,4 @@ ALTER TABLE tb_data_rcv_anal
     MODIFY COLUMN anal_data_length       VARCHAR(10) NOT NULL DEFAULT '',
     MODIFY COLUMN anal_data_gate_name    VARCHAR(80) NOT NULL DEFAULT '',
     MODIFY COLUMN anal_data_ip           VARCHAR(20) NOT NULL DEFAULT '',
-    MODIFY COLUMN anal_data_mac          VARCHAR(20) NOT NULL DEFAULT '',
-    ALGORITHM = INPLACE,
-    LOCK = NONE;
+    MODIFY COLUMN anal_data_mac          VARCHAR(20) NOT NULL DEFAULT '';

@@ -1,12 +1,13 @@
--- `DataReceiveAnalysisRepositoryTest`(@DataJpaTest) 전용 최소 스키마.
+-- EventSearchFilterTest/LogSearchFilterTest(@DataJpaTest) 전용 최소 스키마.
 --
--- 운영 마이그레이션(V1__init_schema.sql)의 tb_data_rcv_anal은 MariaDB VIRTUAL 생성 컬럼 등
--- H2에 그대로 이식하기 어려운 문법을 쓴다. 이 테스트는 "리포지토리의 JPQL이 실제 JPA 프로바이더
--- 위에서 정상 실행되는가"만 검증하면 충분하므로, 엔티티가 매핑하는 컬럼만 최소한으로 재현한다
--- (운영 DDL과 100% 동일하지 않음에 주의 — 운영 스키마 회귀 검증 목적이 아니다).
--- 2026-08-12(D5) `DataReceiveAnalysisRepositoryDeleteBatchTest` 추가로 엔티티가 매핑하는 컬럼
--- 전체를 반영하도록 확장했다 — Hibernate는 매핑된 컬럼을 전부 INSERT 문에 포함하므로, 엔티티에
--- 있는데 스키마에 없는 컬럼이 하나라도 있으면 "Column not found"로 실패한다.
+-- securance-domain/src/test/resources/schema.sql의 tb_data_rcv_anal 정의와 동일한 이유로
+-- (MariaDB VIRTUAL 생성 컬럼 등 H2로 그대로 이식하기 어려운 문법을 피해 엔티티가 매핑하는 컬럼만
+-- 최소 재현) 이 모듈에도 같은 테이블을 둔다 — 두 모듈이 별도로 컴파일되는 test source set이라
+-- 공유할 수 없다(운영 스키마 회귀 검증 목적이 아님에 주의).
+-- ※ 2026-08-18: DataReceiveAnalysis에 dtl_type_cd + anal_data_* 19개 필드를 추가하면서
+-- securance-domain 쪽 schema.sql만 갱신하고 이 파일은 빠뜨려 EventSearchFilterTest/
+-- LogSearchFilterTest가 SQLGrammarException(Column not found)으로 깨졌다 — 엔티티 컬럼을
+-- 추가/변경할 때는 이 파일도 함께 갱신해야 한다.
 CREATE TABLE tb_data_rcv_anal (
     anal_id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
     anal_date               VARCHAR(20) NOT NULL,
@@ -104,73 +105,4 @@ CREATE TABLE tb_data_rcv_anal (
     has_status_event        BOOLEAN NOT NULL DEFAULT FALSE,
     has_error_event         BOOLEAN NOT NULL DEFAULT FALSE,
     reg_date                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- `DataReceiveRepositoryTest`(@DataJpaTest) 전용 최소 스키마. D5 데이터 보관 정책(2026-08-12)의
--- `deleteBatchOlderThan` 네이티브 `LIMIT` 삭제 쿼리가 실제 JPA 프로바이더 위에서 동작하는지
--- 검증하는 데 필요한 컬럼만 재현한다.
-CREATE TABLE tb_data_rcv (
-    rcv_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
-    rcv_date    VARCHAR(20) NOT NULL,
-    dtl_ip      VARCHAR(20) NOT NULL,
-    dtl_lane_no TINYINT     NOT NULL,
-    dtl_type    TINYINT NULL,
-    dtl_id      BIGINT NULL,
-    loc_id      BIGINT NULL,
-    grp_id      BIGINT NULL,
-    rcv_header  VARCHAR(100) NULL,
-    rcv_data    CLOB NULL,
-    rcv_data_info VARCHAR(150) NULL,
-    rcv_data_lane CLOB NULL,
-    rcv_tail    VARCHAR(20) NULL
-);
-
--- `DataSendRepositoryTest`(@DataJpaTest) 전용 최소 스키마. [DataSend] 엔티티가 NOT NULL로 매핑한
--- 컬럼은 전부 채워야 Hibernate INSERT/UPDATE가 실제로 성공하는지 검증할 수 있어 전 컬럼을 재현한다
--- (claimForSend의 상관 서브쿼리 UPDATE를 실제 JPA 프로바이더 위에서 검증하기 위함 — 2026-08-13
--- Opus 전체 리뷰 지적).
-CREATE TABLE tb_data_snd (
-    snd_id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    snd_date        VARCHAR(20) NOT NULL,
-    snd_yn          VARCHAR(1)  NOT NULL DEFAULT 'N',
-    chk_yn          VARCHAR(1)  NOT NULL DEFAULT 'N',
-    next_attempt_at TIMESTAMP NULL,
-    dtl_ip          VARCHAR(20) NOT NULL,
-    dtl_lane_no     TINYINT     NOT NULL,
-    dtl_type        TINYINT     NOT NULL DEFAULT 1,
-    dtl_id          BIGINT      NOT NULL DEFAULT 0,
-    loc_id          BIGINT      NOT NULL DEFAULT 0,
-    grp_id          BIGINT      NOT NULL DEFAULT 0,
-    snd_user        VARCHAR(20) NOT NULL DEFAULT '',
-    snd_server      VARCHAR(20) NOT NULL DEFAULT '',
-    snd_type_cd     VARCHAR(20) NOT NULL DEFAULT '',
-    snd_data_tp     VARCHAR(20) NOT NULL DEFAULT '',
-    snd_raw         CLOB        NOT NULL,
-    snd_header      VARCHAR(100) NOT NULL DEFAULT '',
-    snd_data        CLOB        NOT NULL,
-    snd_tail        VARCHAR(20) NOT NULL DEFAULT '',
-    version         BIGINT      NOT NULL DEFAULT 0
-);
-
--- `GateLogRepositoryTest`(@DataJpaTest) 전용 최소 스키마. 운영 마이그레이션(V7__add_gate_log.sql)의
--- 컬럼을 그대로 재현한다(자연키 UNIQUE 제약 포함 — existsBy... 중복 판단 쿼리가 실제로 그 컬럼
--- 조합을 대상으로 동작하는지 검증하려면 필요하다).
-CREATE TABLE tb_gate_log (
-    log_id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    dtl_ip          VARCHAR(20) NOT NULL,
-    dtl_lane_no     TINYINT     NOT NULL,
-    event_type      TINYINT     NOT NULL,
-    object_code     TINYINT     NOT NULL,
-    code            TINYINT     NOT NULL,
-    err_code        TINYINT     NOT NULL,
-    operation_mode  TINYINT     NOT NULL,
-    reader_type     TINYINT     NOT NULL,
-    reader_number   TINYINT     NOT NULL,
-    door_status     TINYINT     NOT NULL,
-    function_code   SMALLINT    NOT NULL,
-    event_time      TIMESTAMP   NOT NULL,
-    user_data1      VARCHAR(24) NULL,
-    user_data2      VARCHAR(16) NULL,
-    reg_date        TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_gate_log_natural UNIQUE (dtl_ip, dtl_lane_no, event_time, event_type, code, err_code, function_code)
 );

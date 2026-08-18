@@ -62,6 +62,15 @@ class DataReceiveAnalysis(
     @Column(name = "dtl_type")
     var dtlType: Int? = 1,
 
+    /**
+     * `dtl_type`의 문자열 코드값(예: "1") — 레거시 `usp_process_analysis`가 함께 채우던 컬럼인데
+     * 이 저장소 Flyway 이력이 만든 적이 없어(V30에서 뒤늦게 추가, [anal_data_stx] 등과 동일한
+     * 경위) 엔티티에도 매핑이 없었다. 실 DB 조회(2026-08-18)로 secuhub가 저장한 행만 이 컬럼이
+     * NULL인 것을 확인했다 — [dtlType]과 항상 같은 값의 문자열이므로 그대로 반영한다.
+     */
+    @Column(name = "dtl_type_cd", length = 10)
+    var dtlTypeCd: String? = null,
+
     @Column(name = "dtl_no", nullable = false)
     var dtlNo: Int = 1,
 
@@ -181,6 +190,91 @@ class DataReceiveAnalysis(
     /** 게이트 MAC 주소 — 이 코드베이스는 MAC을 추적하지 않아 채우지 않는다(위 KDoc 참고). */
     @Column(name = "anal_data_mac", nullable = false, length = 20)
     var analDataMac: String = "",
+
+    // ── 레인 상태 블록(74바이트) 원시 hex 19개 컬럼(2026-08-18 dev DB information_schema 조회로
+    // 발견) ──────────────────────────────────────────────────────────────────────────────
+    //
+    // 위 14개(anal_data_stx~mac)와 마찬가지로 이 저장소 Flyway 이력이 만든 적이 없는 레거시
+    // 컬럼이다(V30이 존재만 보장). `usp_process_analysis`가 [GateStatusAnalyzer.StatusOffset]과
+    // 동일한 오프셋의 raw byte를 hex로 저장했을 것으로 보고, 이 코드베이스가 이미 분석에 쓰는
+    // 오프셋([GateStatusAnalyzer.AnalDataLaneRawFields])을 그대로 재사용해 채운다 — decoded
+    // desc_* 값과 달리 원본 byte 그대로의 hex 문자열이다.
+
+    /** 레인 번호(1바이트) — `desc_gate_lane_number`의 hex 원본. [GateStatusAnalyzer.StatusOffset.LANE_NUMBER]. */
+    @Column(name = "anal_data_gate_lane_number", nullable = false, length = 2)
+    var analDataGateLaneNumber: String = "",
+
+    /** 이 패킷이 선언한 전체 레인 수(1바이트) — DataInfo `LOCAL GATE LANE COUNT` 필드. */
+    @Column(name = "anal_data_gate_lane_count", nullable = false, length = 2)
+    var analDataGateLaneCount: String = "",
+
+    /** 게이트 타입(1바이트) — `desc_gate_type`의 hex 원본. [GateStatusAnalyzer.StatusOffset.GATE_TYPE]. */
+    @Column(name = "anal_data_gate_type", nullable = false, length = 2)
+    var analDataGateType: String = "",
+
+    /** 운영 모드(1바이트) — `desc_user_mode`의 hex 원본. [GateStatusAnalyzer.StatusOffset.USER_MODE]. */
+    @Column(name = "anal_data_user_mode", nullable = false, length = 2)
+    var analDataUserMode: String = "",
+
+    /** 보안 등급(1바이트) — `desc_security_mode`의 hex 원본. [GateStatusAnalyzer.StatusOffset.SECURITY_MODE]. */
+    @Column(name = "anal_data_security_mode", nullable = false, length = 2)
+    var analDataSecurityMode: String = "",
+
+    /** 통행 시간(1바이트) — `desc_inout_time`의 hex 원본. [GateStatusAnalyzer.StatusOffset.INOUT_TIME]. */
+    @Column(name = "anal_data_inout_time", nullable = false, length = 2)
+    var analDataInoutTime: String = "",
+
+    /** 사용자 수(1바이트) — `desc_user_count`의 hex 원본. [GateStatusAnalyzer.StatusOffset.USER_COUNT]. */
+    @Column(name = "anal_data_user_count", nullable = false, length = 2)
+    var analDataUserCount: String = "",
+
+    /** 누적 통행 수(4바이트) — `desc_total_count`의 hex 원본. [GateStatusAnalyzer.StatusOffset.TOTAL_COUNT]. */
+    @Column(name = "anal_data_total_count", nullable = false, length = 8)
+    var analDataTotalCount: String = "",
+
+    /** 운영 센서1 4채널(4바이트) — `desc_operation01~04`의 hex 원본. [GateStatusAnalyzer.StatusOffset.OPERATION_SENSOR1]. */
+    @Column(name = "anal_data_operation_sensor_status1", nullable = false, length = 8)
+    var analDataOperationSensorStatus1: String = "",
+
+    /** 안전 센서 4채널(4바이트) — `desc_safety01~04`의 hex 원본. [GateStatusAnalyzer.StatusOffset.SAFETY_SENSOR]. */
+    @Column(name = "anal_data_safety_sensor_status", nullable = false, length = 8)
+    var analDataSafetySensorStatus: String = "",
+
+    /** 운영 센서2 4채널(4바이트) — `desc_operation05~08`의 hex 원본. [GateStatusAnalyzer.StatusOffset.OPERATION_SENSOR2]. */
+    @Column(name = "anal_data_operation_sensor_status2", nullable = false, length = 8)
+    var analDataOperationSensorStatus2: String = "",
+
+    /** 광 센서 블록(20바이트, ERROR CHECK 포함) hex 원본. [GateStatusAnalyzer.StatusOffset.OPTICAL_SENSOR]. */
+    @Column(name = "anal_data_optical_sensor_status", nullable = false, length = 50)
+    var analDataOpticalSensorStatus: String = "",
+
+    /** 출력 상태(8바이트) hex 원본. [GateStatusAnalyzer.StatusOffset.OUTPUT_STATUS]. */
+    @Column(name = "anal_data_output_status", nullable = false, length = 40)
+    var analDataOutputStatus: String = "",
+
+    /** 모터 카운트(4바이트) — `desc_motor_count`의 hex 원본. [GateStatusAnalyzer.StatusOffset.MOTOR_COUNT]. */
+    @Column(name = "anal_data_motor_operation_count", nullable = false, length = 20)
+    var analDataMotorOperationCount: String = "",
+
+    /** Master-In 누적 카운트(4바이트) — `desc_master_in_total`의 hex 원본. [GateStatusAnalyzer.StatusOffset.MASTER_IN_COUNT]. */
+    @Column(name = "anal_data_master_in_total_count", nullable = false, length = 20)
+    var analDataMasterInTotalCount: String = "",
+
+    /** 게이트 동작 상태 블록(16바이트) hex 원본 — [analData]/`operationStatusHex`와 동일 값. */
+    @Column(name = "anal_data_gate_operation_status", nullable = false, length = 50)
+    var analDataGateOperationStatus: String = "",
+
+    /** Tail의 체크섬 구간(2바이트, XOR) hex 원본 — [analTail] 앞 4자. */
+    @Column(name = "anal_data_check_sum", nullable = false, length = 4)
+    var analDataCheckSum: String = "",
+
+    /** Tail의 고정 체크섬 바이트(1바이트, [kr.co.securance.secuhub.protocol.SpeedGateProtocolConstants.PACKET_CHECKSUM_FIXED]) hex 원본. */
+    @Column(name = "anal_data_packet_checksum", nullable = false, length = 2)
+    var analDataPacketChecksum: String = "",
+
+    /** Tail의 ETX 바이트(1바이트) hex 원본. */
+    @Column(name = "anal_data_etx", nullable = false, length = 2)
+    var analDataEtx: String = "",
 
     // ── 헤더/정보 영역 해석값 ────────────────────────────────────────
     @Column(name = "desc_data_info_length", nullable = false, length = 10)

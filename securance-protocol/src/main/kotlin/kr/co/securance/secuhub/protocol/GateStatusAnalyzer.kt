@@ -124,6 +124,13 @@ object GateStatusAnalyzer {
         val descGateStatus: List<String>,
         /** 게이트 동작 상태 블록(16바이트) 원본 hex — `anal_data` 보존용. */
         val operationStatusHex: String,
+        /**
+         * `tb_data_rcv_anal.anal_data_*` 중 레인 상태 블록(74바이트)에서 그대로 뽑아낸 원시 hex
+         * 필드(2026-08-18 — dev DB information_schema 조회로 발견한 19개 미매핑 컬럼 대응).
+         * [descOperation] 등 decoded 값과 별개로, 레거시 `usp_process_analysis`가 raw byte를
+         * hex로 저장하던 규약을 그대로 따른다(anal_data_stx 등 헤더 파생 필드와 동일한 규약).
+         */
+        val rawFields: AnalDataLaneRawFields,
     ) {
         /** 장애가 미해결 상태인지(레거시: `err_type = 3`이면 `resolve_yn='N'`). */
         val resolveYn: String get() = if (errType == ErrorCheck.ERROR) "N" else "Y"
@@ -136,6 +143,25 @@ object GateStatusAnalyzer {
         val descMainMotorError: String get() = descGateStatus[9] // desc_gate_status10
         val descSlaveMotorError: String get() = descGateStatus[10] // desc_gate_status11
     }
+
+    /** [LaneStatusAnalysis.rawFields] — 필드별 원본 hex. [StatusOffset]과 1:1 대응한다. */
+    data class AnalDataLaneRawFields(
+        val laneNumber: String,
+        val gateType: String,
+        val userMode: String,
+        val securityMode: String,
+        val inoutTime: String,
+        val userCount: String,
+        val totalCount: String,
+        val operationSensor1: String,
+        val safetySensor: String,
+        val operationSensor2: String,
+        val opticalSensor: String,
+        val outputStatus: String,
+        val motorCount: String,
+        val masterInCount: String,
+        val operationStatus: String,
+    )
 
     /**
      * 상태 패킷에서 모든 레인 블록을 분석한다.
@@ -167,6 +193,9 @@ object GateStatusAnalyzer {
             for (i in 0 until 4) value = (value shl 8) or u8(relative + i).toLong()
             return value
         }
+        fun hex(relative: Int, len: Int): String = buildString {
+            for (i in 0 until len) append("%02X".format(u8(relative + i)))
+        }
 
         val userMode = u8(StatusOffset.USER_MODE)
 
@@ -195,9 +224,25 @@ object GateStatusAnalyzer {
             flag(u8(StatusOffset.EMERGENCY) == OCCURRED, "EMERGENCY"),
         )
 
-        val operationStatusHex = buildString {
-            for (i in 0 until 16) append("%02X".format(u8(StatusOffset.OPERATION_STATUS + i)))
-        }
+        val operationStatusHex = hex(StatusOffset.OPERATION_STATUS, 16)
+
+        val rawFields = AnalDataLaneRawFields(
+            laneNumber = hex(StatusOffset.LANE_NUMBER, 1),
+            gateType = hex(StatusOffset.GATE_TYPE, 1),
+            userMode = hex(StatusOffset.USER_MODE, 1),
+            securityMode = hex(StatusOffset.SECURITY_MODE, 1),
+            inoutTime = hex(StatusOffset.INOUT_TIME, 1),
+            userCount = hex(StatusOffset.USER_COUNT, 1),
+            totalCount = hex(StatusOffset.TOTAL_COUNT, 4),
+            operationSensor1 = hex(StatusOffset.OPERATION_SENSOR1, 4),
+            safetySensor = hex(StatusOffset.SAFETY_SENSOR, 4),
+            operationSensor2 = hex(StatusOffset.OPERATION_SENSOR2, 4),
+            opticalSensor = hex(StatusOffset.OPTICAL_SENSOR, 20),
+            outputStatus = hex(StatusOffset.OUTPUT_STATUS, 8),
+            motorCount = hex(StatusOffset.MOTOR_COUNT, 4),
+            masterInCount = hex(StatusOffset.MASTER_IN_COUNT, 4),
+            operationStatus = operationStatusHex,
+        )
 
         return LaneStatusAnalysis(
             laneNumber = u8(StatusOffset.LANE_NUMBER),
@@ -216,6 +261,7 @@ object GateStatusAnalyzer {
             descOperation2 = descOperation2,
             descGateStatus = descGateStatus,
             operationStatusHex = operationStatusHex,
+            rawFields = rawFields,
         )
     }
 

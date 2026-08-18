@@ -46,6 +46,20 @@ class DataReceive(
     @Column(name = "rcv_data", columnDefinition = "longtext")
     var rcvData: String? = null,
 
+    /**
+     * DataInfo 구간(패킷 헤더 바로 뒤, 레인별 상태 블록이 시작되기 전) 16진 문자열 —
+     * 헤더의 `DATA_INFO_LENGTH` 필드가 가리키는 실제 길이만큼만 담는다. [rcvData]는 이미
+     * DataInfo+레인데이터를 합쳐서 담고 있었지만, 이 컬럼은 V1 스키마에 정의돼 있었음에도
+     * 채우는 코드가 없어 항상 NULL로 저장되고 있었다(2026-08-18 확인).
+     */
+    @Column(name = "rcv_data_info", length = 150)
+    var rcvDataInfo: String? = null,
+
+    /** DataInfo 뒤의 레인별 상태 블록 구간 16진 문자열 — 위 [rcvDataInfo]와 짝을 이룬다. */
+    @Lob
+    @Column(name = "rcv_data_lane", columnDefinition = "longtext")
+    var rcvDataLane: String? = null,
+
     @Column(name = "rcv_tail", length = 20)
     var rcvTail: String? = null,
 )
@@ -98,6 +112,22 @@ class DataReceiveAck(
     @Lob
     @Column(name = "ack_raw", columnDefinition = "longtext")
     var ackRaw: String? = null,
+
+    /**
+     * `ack_header`/`ack_data`/`ack_tail` — [ackRaw](ACK 패킷 전체 원본)를 [rcvHeader]/[rcvData]/
+     * [rcvTail]과 같은 Header(27)/Data/Tail(4) 규약으로 나눈 것. V1 스키마에 컬럼은 있었지만
+     * 채우는 코드가 없어 항상 NULL(dev DB 실제로는 NOT NULL DEFAULT '')로 저장되고 있었다
+     * (2026-08-18 확인).
+     */
+    @Column(name = "ack_header", length = 100)
+    var ackHeader: String? = null,
+
+    @Lob
+    @Column(name = "ack_data", columnDefinition = "longtext")
+    var ackData: String? = null,
+
+    @Column(name = "ack_tail", length = 20)
+    var ackTail: String? = null,
 )
 
 // `DataReceiveLog`(`tb_gate_log_event`, V10)는 2026-08-12 제거됐다 — GATE_LOG(0x61) 패킷을

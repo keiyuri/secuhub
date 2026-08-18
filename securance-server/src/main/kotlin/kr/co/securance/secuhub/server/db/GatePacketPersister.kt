@@ -103,6 +103,15 @@ class GatePacketPersister(
         val hex = HexCodec.toHex(raw)
         val ackDate = LocalDateTime.now().format(TIMESTAMP_FORMAT)
 
+        // ack_header/ack_data/ack_tail — enqueueReceiveInsert의 rcv_header/rcv_data/rcv_tail과
+        // 동일한 Header(27)/Data/Tail(4) 구간 분할이다. 컬럼은 V1 스키마에 있었지만 이 값을 실제로
+        // 채우는 코드가 없어 ack_raw(전체 원본)만 저장되고 나머지는 늘 빈 값이었다(2026-08-18 확인).
+        val headerEnd = minOf(SpeedGateProtocolConstants.HEADER_LENGTH, raw.size)
+        val tailStart = maxOf(raw.size - SpeedGateProtocolConstants.TAIL_LENGTH, headerEnd)
+        val ackHeader = HexCodec.toHex(raw.copyOfRange(0, headerEnd))
+        val ackData = HexCodec.toHex(raw.copyOfRange(headerEnd, tailStart))
+        val ackTail = HexCodec.toHex(raw.copyOfRange(tailStart, raw.size))
+
         dbWriteQueue.enqueue(
             GateDbWriteTask(partitionKey = state.dtlIp, operationName = "InsertReceiveAck(${state.dtlIp},$laneNo)") {
                 dataReceiveAckRepository.save(
@@ -112,6 +121,9 @@ class GatePacketPersister(
                         dtlLaneNo = laneNo,
                         dtlId = info?.dtlId,
                         ackRaw = hex,
+                        ackHeader = ackHeader,
+                        ackData = ackData,
+                        ackTail = ackTail,
                     ),
                 )
                 Unit
@@ -179,6 +191,12 @@ class GatePacketPersister(
         // KDoc "레거시 anal_data_* 33개 컬럼" 참고) — 헤더가 27바이트 전부 도착하지 않은 손상 패킷이면
         // 필드별로 안전하게 빈 값으로 남긴다.
         val headerFields = AnalDataHeaderFields.from(raw)
+        // anal_data_gate_lane_count — DataInfo의 `LOCAL GATE LANE COUNT` 원시 바이트(오프셋
+        // Header(27)+DataInfo(45)-1=71, PacketDiffer.LANE_COUNT_OFFSET과 동일 위치)를 hex로 보존한다.
+        // laneCount(위 laneAnalyses.size, 디코딩된 정수값 → desc_gate_lane_count)와는 별개로,
+        // 이 필드는 usp_process_analysis 규약을 따라 raw byte 그대로 담는다.
+        val laneCountOffset = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH - 1
+        val laneCountHex = if (raw.size > laneCountOffset) "%02X".format(raw[laneCountOffset].toInt() and 0xFF) else ""
 
         for (analysis in analyses) {
             val laneNo = analysis.laneNumber
@@ -193,9 +211,9 @@ class GatePacketPersister(
             if (!info.analysisYn) continue
 
             if (analysis.errType == GateStatusAnalyzer.ErrorCheck.ERROR) {
-                enqueueAnalysisInsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount)
+                enqueueAnalysisInsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex)
             } else {
-                enqueueStatusUpsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount)
+                enqueueStatusUpsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex)
                 enqueueRecovery(state, analysis)
             }
         }
@@ -257,6 +275,7 @@ class GatePacketPersister(
         tailHex: String,
         headerFields: AnalDataHeaderFields,
         laneCount: Int,
+        laneCountHex: String,
     ) {
         dbWriteQueue.enqueue(
             GateDbWriteTask(
@@ -266,7 +285,9 @@ class GatePacketPersister(
                 val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
                 val rcvId = resolveRcvId(state.dtlIp)
                 dataReceiveAnalysisRepository.save(
-                    buildAnalysisEntity(state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount),
+                    buildAnalysisEntity(
+                        state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount, laneCountHex,
+                    ),
                 )
                 Unit
             },
@@ -317,6 +338,7 @@ class GatePacketPersister(
         tailHex: String,
         headerFields: AnalDataHeaderFields,
         laneCount: Int,
+        laneCountHex: String,
     ) {
         val today = analDate.substring(0, 8) // yyyyMMdd
 
@@ -352,7 +374,7 @@ class GatePacketPersister(
                     val rcvId = resolveRcvId(state.dtlIp)
                     dataReceiveAnalysisRepository.save(
                         buildAnalysisEntity(
-                            state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount,
+                            state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount, laneCountHex,
                         ),
                     )
                 }
@@ -477,16 +499,29 @@ class GatePacketPersister(
         rcvId: Long,
         headerFields: AnalDataHeaderFields,
         laneCount: Int,
-    ): DataReceiveAnalysis = DataReceiveAnalysis(
-        analDate = analDate,
-        analTp = analysis.analysisType.name,
-        dtlIp = state.dtlIp,
-        dtlLaneNo = analysis.laneNumber,
-        dtlType = identity.dtlType,
-        dtlId = identity.dtlId ?: 0,
-        locId = identity.locId,
-        grpId = identity.grpId,
-        rcvDate = analDate,
+        laneCountHex: String,
+    ): DataReceiveAnalysis {
+        // anal_data_check_sum/packet_checksum/etx — Tail(4바이트: XOR 체크섬 2 + 고정 체크섬 1 +
+        // ETX 1, 클래스 KDoc "Tail(XOR,SUM,0x08,ETX)" 참고)을 나눈 hex. tailHex는 항상 짝수 길이의
+        // hex 문자열이지만, 손상된 패킷이면 4바이트에 못 미칠 수 있어 안전하게 부분 문자열을 뗀다.
+        fun tailPart(fromChar: Int, toChar: Int): String =
+            if (tailHex.length >= toChar) tailHex.substring(fromChar, toChar) else ""
+        val checkSum = tailPart(0, 4)
+        val packetChecksum = tailPart(4, 6)
+        val etx = tailPart(6, 8)
+        val raw = analysis.rawFields
+
+        return DataReceiveAnalysis(
+            analDate = analDate,
+            analTp = analysis.analysisType.name,
+            dtlIp = state.dtlIp,
+            dtlLaneNo = analysis.laneNumber,
+            dtlType = identity.dtlType,
+            dtlTypeCd = identity.dtlType?.toString(),
+            dtlId = identity.dtlId ?: 0,
+            locId = identity.locId,
+            grpId = identity.grpId,
+            rcvDate = analDate,
         rcvId = rcvId,
         rcvRaw = rawHex,
         analHeader = headerHex,
@@ -506,6 +541,25 @@ class GatePacketPersister(
         analDataLength = headerFields.length,
         analDataGateName = identity.dtlName ?: "",
         analDataIp = state.dtlIp,
+        analDataGateLaneNumber = raw.laneNumber,
+        analDataGateLaneCount = laneCountHex,
+        analDataGateType = raw.gateType,
+        analDataUserMode = raw.userMode,
+        analDataSecurityMode = raw.securityMode,
+        analDataInoutTime = raw.inoutTime,
+        analDataUserCount = raw.userCount,
+        analDataTotalCount = raw.totalCount,
+        analDataOperationSensorStatus1 = raw.operationSensor1,
+        analDataSafetySensorStatus = raw.safetySensor,
+        analDataOperationSensorStatus2 = raw.operationSensor2,
+        analDataOpticalSensorStatus = raw.opticalSensor,
+        analDataOutputStatus = raw.outputStatus,
+        analDataMotorOperationCount = raw.motorCount,
+        analDataMasterInTotalCount = raw.masterInCount,
+        analDataGateOperationStatus = raw.operationStatus,
+        analDataCheckSum = checkSum,
+        analDataPacketChecksum = packetChecksum,
+        analDataEtx = etx,
         // desc_data_info_length/desc_gate_name/desc_gate_ip는 레거시 트리거가 항상 채우던 필드인데
         // 이 엔티티 도입 초기에는 매핑이 누락돼 빈 문자열로만 저장되고 있었다(2026-08-14 실 DB
         // 조회로 확인 — anal_id=856773 등 secuhub가 쓴 행만 이 세 컬럼이 비어 있었다).
@@ -549,6 +603,7 @@ class GatePacketPersister(
         errType = analysis.errType,
         resolveYn = analysis.resolveYn,
     )
+    }
 
     /**
      * 장비가 장애 비트를 내린 레인의 미해결 장애를 자동 해제한다 —
@@ -597,6 +652,21 @@ class GatePacketPersister(
         val body = HexCodec.toHex(raw.copyOfRange(headerEnd, tailStart))
         val tail = HexCodec.toHex(raw.copyOfRange(tailStart, raw.size))
 
+        // rcv_data_info/rcv_data_lane — body(DataInfo+레인데이터 통합)를 다시 DataInfo 구간과
+        // 레인 상태 블록 구간으로 나눈 값이다. 두 컬럼은 V1 스키마에 있었지만 채우는 코드가 없어
+        // 항상 NULL로 저장되고 있었다(2026-08-18 확인). DataInfo 길이는 고정 상수가 아니라 이
+        // 패킷의 헤더 `DATA_INFO_LENGTH` 필드(오프셋 22, objectCode마다 다를 수 있음)에서 읽는다 —
+        // GATE_STATUS(0x4D)가 아닌 다른 objectCode(설정/모터/스케줄/휴일)는 DataInfo 길이가
+        // [SpeedGateProtocolConstants.DATA_INFO_LENGTH](45, 상태 패킷 전용) 고정값과 다를 수 있다.
+        val dataInfoLength = if (headerEnd > SpeedGateProtocolConstants.HeaderOffset.DATA_INFO_LENGTH) {
+            raw[SpeedGateProtocolConstants.HeaderOffset.DATA_INFO_LENGTH].toInt() and 0xFF
+        } else {
+            0
+        }
+        val dataInfoEnd = minOf(headerEnd + dataInfoLength, tailStart)
+        val dataInfo = HexCodec.toHex(raw.copyOfRange(headerEnd, dataInfoEnd))
+        val laneData = HexCodec.toHex(raw.copyOfRange(dataInfoEnd, tailStart))
+
         dbWriteQueue.enqueue(
             GateDbWriteTask(partitionKey = state.dtlIp, operationName = "$operationName(${state.dtlIp},$laneNo)") {
                 dataReceiveRepository.save(
@@ -610,6 +680,8 @@ class GatePacketPersister(
                         grpId = info?.grpId,
                         rcvHeader = header,
                         rcvData = body,
+                        rcvDataInfo = dataInfo,
+                        rcvDataLane = laneData,
                         rcvTail = tail,
                     ),
                 )

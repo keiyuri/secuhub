@@ -191,6 +191,25 @@
       });
   }
 
+  // [2026-08-19 사용자 요청: 리뷰 후속] LOC/GRP 일괄 전송 시 같은 dtlIp(물리 컨트롤러)로 가는
+  // 요청은 순차 전송하고, 서로 다른 dtlIp끼리는 병렬로 전송한다. 레거시 GateCtrlDataSet도 동일한
+  // 이유로 이렇게 처리한다(SR_F_DashBoard.GateControl.cs 342행 주석: "같은 IP의 레인들은 이 그룹
+  // 내부에서 순차 전송... 단일 제어 세션만 처리하는 장비에 최대 10개의 TCP 연결이 동시에 몰리면
+  // 일부 레인 명령이 거부/타임아웃으로 유실될 수 있다") — 같은 물리 장비에 동시에 여러 명령이
+  // 몰리는 것을 막기 위함이다. targets 배열과 같은 순서·개수의 Promise 배열을 반환하므로
+  // reportBulkCommandResult의 성공/실패 집계는 그대로 사용할 수 있다. 앞선 요청이 실패해도(네트워크
+  // 오류로 reject) 같은 IP의 다음 요청까지 막히면 안 되므로, 체인 연결에는 항상 resolve하는
+  // sendFn 결과의 사본을 쓰고, 호출부에는 원래의(성공/실패가 살아있는) Promise를 그대로 돌려준다.
+  function sendBulkSequentialByIp(targets, sendFn) {
+    var chains = {}; // dtlIp -> 그 IP의 마지막 요청이 완료(성공/실패 무관)됐음을 나타내는 Promise
+    return targets.map(function (t) {
+      var wait = chains[t.dtlIp] || Promise.resolve();
+      var result = wait.then(function () { return sendFn(t.dtlIp, t.dtlLaneNo); });
+      chains[t.dtlIp] = result.then(function () {}, function () {});
+      return result;
+    });
+  }
+
   // [2026-08-19 사용자 요청] LOC/GRP 노드 우클릭 → 일괄 전송 결과 요약. 레거시(GateCtrlDataSet)는
   // 게이트별 개별 실패만 로그로 남기고 UI에는 알리지 않았지만, 이 프로젝트는 앞서 Codex 적대적
   // 리뷰(2026-08-19)로 "실패를 조용히 삼키지 않는다"는 원칙을 세웠으므로 성공/실패 건수를 요약해
@@ -384,10 +403,13 @@
         } else {
           // 알려진 제약: 재인증이 필요한 구성(gate-control-reauth-required=true)에서는 게이트마다
           // sendCommandWithReauth가 개별적으로 window.prompt()를 띄운다 — 여러 게이트가 동시에
-          // reauthRequired를 반환하면 창이 순차적으로(같은 비밀번호라도) 여러 번 뜬다. 재인증 자체가
-          // 드문 운영 구성이고, 세션 단위 재인증 캐싱은 이번 요청 범위를 벗어나 후속 과제로 남긴다.
+          // reauthRequired를 반환하면 창이 여러 번 뜬다(같은 IP는 아래 순차 전송 덕에 겹치지는
+          // 않지만, 서로 다른 IP끼리는 여전히 순서대로 뜰 수 있다). 재인증 자체가 드문 운영
+          // 구성이고, 세션 단위 재인증 캐싱은 이번 요청 범위를 벗어나 후속 과제로 남긴다.
           reportBulkCommandResult(
-            bulkTargets.map(function (d) { return sendCommandWithReauth(d.dtlIp, d.dtlLaneNo, OPERATION_COMMANDS[action]); }),
+            sendBulkSequentialByIp(bulkTargets, function (dtlIp, dtlLaneNo) {
+              return sendCommandWithReauth(dtlIp, dtlLaneNo, OPERATION_COMMANDS[action]);
+            }),
             targetLabel,
           );
         }

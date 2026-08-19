@@ -2,6 +2,11 @@
 // 붙은 링크를 클릭하면 전체 페이지 이동 대신 layout/dashboard-layout.html의 공용 모달을 연다.
 // 실제 화면은 기존 URL을 iframe으로 그대로 불러오며, 그 안에서 이어지는 수정/취소 등 내부 네비게이션도
 // window.self !== window.top 판별(dashboard-layout.html의 .gp-embed) 덕분에 계속 팝업 모드로 남는다.
+// [게이트 트리뷰 연동] gate-tree.js가 위치/그룹 노드 우클릭 메뉴에서 "위치 관리"/"게이트그룹
+// 관리" 팝업을 열 때도 이 모달을 재사용한다 — 클릭 위임(data-popup 링크)과 동일한 오픈 로직을
+// window.GatePopupModal.open(url, title)로 노출해 중복 구현하지 않는다.
+window.GatePopupModal = { open: function () {} };
+
 document.addEventListener("DOMContentLoaded", function () {
   var modalEl = document.getElementById("gate-popup-modal");
   if (!modalEl || typeof bootstrap === "undefined") return;
@@ -16,6 +21,18 @@ document.addEventListener("DOMContentLoaded", function () {
     iframe.classList.add("d-none");
   }
 
+  function openPopup(url, title) {
+    if (!url) return;
+    titleEl.textContent = title || "게이트 관리";
+    showLoading();
+    iframe.src = url;
+    bsModal.show();
+  }
+
+  // DOMContentLoaded 이전에 window.GatePopupModal.open()이 호출될 일은 없지만(다른 스크립트도
+  // 전부 DOM 로드 이후 실행), 방어적으로 초기화 이후 실제 구현으로 교체한다.
+  window.GatePopupModal.open = openPopup;
+
   document.addEventListener("click", function (e) {
     var link = e.target.closest('a[data-popup="true"]');
     if (!link) return;
@@ -26,11 +43,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
 
     e.preventDefault();
-
-    titleEl.textContent = link.getAttribute("data-popup-title") || link.textContent.trim();
-    showLoading();
-    iframe.src = link.getAttribute("href");
-    bsModal.show();
+    openPopup(link.getAttribute("href"), link.getAttribute("data-popup-title") || link.textContent.trim());
   });
 
   iframe.addEventListener("load", function () {

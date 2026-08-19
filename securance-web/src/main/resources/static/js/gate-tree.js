@@ -51,7 +51,8 @@
     var detailsHtml = grp.details.length
       ? '<ul class="gt-dtl-list">' + grp.details.map(function (d) { return renderDetail(loc, grp, d); }).join('') + '</ul>'
       : '<div class="text-muted small ms-4">등록된 레인이 없습니다.</div>';
-    return '<details class="gt-grp" data-key="' + key + '"' + (open ? ' open' : '') + '>' +
+    return '<details class="gt-grp" data-key="' + key + '" data-grp-id="' + grp.grpId +
+      '" data-grp-name="' + escapeHtml(grp.grpName) + '"' + (open ? ' open' : '') + '>' +
       '<summary><i class="bi bi-diagram-3"></i> ' + escapeHtml(grp.grpName) +
       ' <span class="badge text-bg-secondary">' + typeName + '</span>' +
       ' <span class="text-muted small">(' + onlineCount + '/' + grp.details.length + ' 온라인)</span>' +
@@ -64,7 +65,8 @@
     var groupsHtml = loc.groups.length
       ? loc.groups.map(function (g) { return renderGroup(loc, g); }).join('')
       : '<div class="text-muted small ms-4">등록된 그룹이 없습니다.</div>';
-    return '<details class="gt-loc" data-key="' + key + '"' + (open ? ' open' : '') + '>' +
+    return '<details class="gt-loc" data-key="' + key + '" data-loc-id="' + loc.locId +
+      '" data-loc-name="' + escapeHtml(loc.locName) + '"' + (open ? ' open' : '') + '>' +
       '<summary><i class="bi bi-geo-alt"></i> ' + escapeHtml(loc.locName) + '</summary>' +
       groupsHtml + '</details>';
   }
@@ -191,21 +193,47 @@
     function hideMenu() { menu.style.display = 'none'; target = null; }
 
     container.addEventListener('contextmenu', function (e) {
-      var li = e.target.closest('.gt-dtl');
-      if (!li) return;
+      // [버그 수정: 2026-08-19] 이전에는 '.gt-dtl'만 찾아, 위치(.gt-loc)/그룹(.gt-grp) 노드를
+      // 우클릭하면 li가 항상 null이라 메뉴 자체가 뜨지 않고(브라우저 기본 메뉴만 표시) "게이트
+      // 관리 팝업" 진입 방법도 없었다. 세 계층 셀렉터를 함께 찾아 가장 가까운 노드를 판별한다
+      // (DOM이 loc > grp > dtl로 중첩돼 있어 closest()가 항상 가장 안쪽 노드부터 매칭한다).
+      var node = e.target.closest('.gt-dtl, .gt-grp, .gt-loc');
+      if (!node) return;
       e.preventDefault();
-      target = {
-        dtlId: li.getAttribute('data-dtl-id'),
-        dtlIp: li.getAttribute('data-dtl-ip'),
-        dtlLaneNo: li.getAttribute('data-dtl-lane'),
-        gateType: li.getAttribute('data-gate-type'),
-      };
+
       var header = menu.querySelector('.gate-tree-context-target');
-      if (header) header.textContent = target.dtlIp + ' / 레인 ' + target.dtlLaneNo;
+      var nodeType;
+      if (node.classList.contains('gt-dtl')) {
+        nodeType = 'dtl';
+        target = {
+          type: nodeType,
+          dtlId: node.getAttribute('data-dtl-id'),
+          dtlIp: node.getAttribute('data-dtl-ip'),
+          dtlLaneNo: node.getAttribute('data-dtl-lane'),
+          gateType: node.getAttribute('data-gate-type'),
+        };
+        if (header) header.textContent = target.dtlIp + ' / 레인 ' + target.dtlLaneNo;
+      } else if (node.classList.contains('gt-grp')) {
+        nodeType = 'grp';
+        target = { type: nodeType, grpId: node.getAttribute('data-grp-id'), grpName: node.getAttribute('data-grp-name') };
+        if (header) header.textContent = target.grpName;
+      } else {
+        nodeType = 'loc';
+        target = { type: nodeType, locId: node.getAttribute('data-loc-id'), locName: node.getAttribute('data-loc-name') };
+        if (header) header.textContent = target.locName;
+      }
+
+      // 노드 계층에 맞는 항목만 노출한다 — DTL 전용 명령(개방/폐쇄/리셋/모드변경 등)은 실제 게이트
+      // IP/레인이 있는 DTL 노드에서만 의미가 있고, "위치 관리"/"게이트그룹 관리"는 그 반대다.
+      menu.querySelectorAll('[data-requires-node-type]').forEach(function (menuLi) {
+        menuLi.style.display = menuLi.getAttribute('data-requires-node-type') === nodeType ? '' : 'none';
+      });
 
       // "역방향 개방" 항목은 Flap 게이트(gate_type_code=2)에서만 노출한다 — 다른 타입 게이트는
       // 명령 자체를 지원하지 않아, 항목을 감추는 것이 클릭 후 실패 응답을 받는 것보다 낫다.
+      // (DTL 노드가 아니면 위 data-requires-node-type 필터로 이미 숨겨져 있으므로 영향 없다.)
       menu.querySelectorAll('[data-requires-gate-type]').forEach(function (menuLi) {
+        if (nodeType !== 'dtl') return;
         menuLi.style.display = menuLi.getAttribute('data-requires-gate-type') === target.gateType ? '' : 'none';
       });
 
@@ -228,6 +256,19 @@
       // 선택된 노드 정보를 별도 변수(selected)로 옮겨두고 이후로는 이 변수만 사용한다.
       var selected = target;
       hideMenu();
+
+      // [버그 수정: 2026-08-19] 위치/그룹 노드 우클릭 메뉴의 목적 — 사이드바 "게이트 관리" 항목과
+      // 동일한 gate-popup-modal(iframe 모달)로 위치/게이트그룹 관리 화면을 연다. 특정 위치·그룹만
+      // 딥링크로 좁히는 컨트롤러 파라미터는 없어 전체 목록 화면을 그대로 연다(사이드바 클릭과 동일
+      // 진입점 — MenuProvider.kt의 popup=true 항목 참고).
+      if (action === 'manage-location') {
+        if (window.GatePopupModal) window.GatePopupModal.open('/gates/locations', '위치 관리');
+        return;
+      }
+      if (action === 'manage-group') {
+        if (window.GatePopupModal) window.GatePopupModal.open('/gates/groups', '게이트그룹 관리');
+        return;
+      }
 
       if (action === 'mode-change') {
         window.location.href = '/gates/details/' + selected.dtlId + '/mode';

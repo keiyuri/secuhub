@@ -39,26 +39,35 @@
         <div id="gate-tree" class="gate-tree" data-loading="true">
           <div class="text-muted small">불러오는 중...</div>
         </div>
-        <!-- 우클릭 제어 메뉴 — DTL(레인) 노드 대상. GateControlApiController(개방/폐쇄/복구/FREE/
+        <!-- 우클릭 메뉴 — LOC(설치위치)/GRP(게이트그룹)/DTL(레인) 3계층 노드 전부 대상.
+             레거시 SR_Speed_Client 트리(SR_F_DashBoard.TreeView.cs tvNet_NodeMouseClick 주석:
+             "LOC/GRP/DTL 모든 노드에서 게이트 제어 메뉴 표시")도 세 계층 전부에서 우클릭 메뉴를
+             띄웠다 — 다만 실제 게이트 IP/레인 단위 명령(개방/폐쇄/리셋/모드변경/모터설정)은 DTL
+             노드에서만 의미가 있어 data-requires-node-type="dtl"로 좁힌다. LOC/GRP 노드는 대신
+             해당 위치/그룹을 관리하는 화면(게이트 관리 팝업 — MenuProvider의 popup=true 항목과
+             동일하게 gate-popup-modal.js가 iframe 모달로 연다)을 열도록 별도 항목을 둔다
+             (2026-08-19 버그 리포트: 위치/그룹 노드 우클릭 시 메뉴가 전혀 뜨지 않고, 게이트
+             관리 팝업도 열 방법이 없었다). GateControlApiController(개방/폐쇄/복구/FREE/
              역방향 개방·리셋)/GateControlController(모드 변경·모터 설정)를 그대로 재사용한다.
-             상단 5개 항목(개방~역방향 개방)은 SR_Speed_Client 트리뷰(SR_F_DashBoard.GateControl.cs
+             DTL 상단 5개 항목(개방~역방향 개방)은 SR_Speed_Client 트리뷰(SR_F_DashBoard.GateControl.cs
              ContextMenu_Init)와 동일 구성(2026-08-19 사용자 요청) — 역방향 개방은 Flap 타입
              (gate_type_code=2) 게이트에만 표시되며, gate-tree.js가 우클릭 시점에 data-gate-type을
-             보고 show/hide한다. 리셋/모드 변경/모터 설정은 secuhub에 이미 구현되어 있던 기존
-             항목이라 참고 프로젝트에는 없지만(주석 처리되어 미노출) 그대로 유지한다. -->
+             보고 show/hide한다. -->
         <ul id="gate-tree-context-menu" class="dropdown-menu gate-tree-context-menu" style="display:none; position:fixed;">
           <li><h6 class="dropdown-header gate-tree-context-target">게이트</h6></li>
-          <li><a class="dropdown-item" href="#" data-action="gate-open"><i class="bi bi-unlock"></i> 게이트 상시 개방</a></li>
-          <li><a class="dropdown-item" href="#" data-action="gate-close"><i class="bi bi-lock"></i> 게이트 상시 폐쇄</a></li>
-          <li><a class="dropdown-item" href="#" data-action="gate-normal"><i class="bi bi-arrow-counterclockwise"></i> 게이트 정상 복구</a></li>
-          <li><a class="dropdown-item" href="#" data-action="gate-free"><i class="bi bi-unlock-fill"></i> 게이트 FREE 모드</a></li>
-          <li data-requires-gate-type="2"><a class="dropdown-item" href="#" data-action="gate-reverse-open"><i class="bi bi-arrow-left-right"></i> 게이트 역방향 개방</a></li>
-          <li><hr class="dropdown-divider"></li>
-          <li><a class="dropdown-item" href="#" data-action="reset-system"><i class="bi bi-arrow-clockwise"></i> 시스템 리셋</a></li>
-          <li><a class="dropdown-item" href="#" data-action="reset-motor"><i class="bi bi-arrow-clockwise"></i> 모터 리셋</a></li>
-          <li><hr class="dropdown-divider"></li>
-          <li><a class="dropdown-item" href="#" data-action="mode-change"><i class="bi bi-sliders"></i> 모드 변경</a></li>
-          <li><a class="dropdown-item" href="#" data-action="motor-setup"><i class="bi bi-gear"></i> 모터 설정</a></li>
+          <li data-requires-node-type="loc"><a class="dropdown-item" href="#" data-action="manage-location"><i class="bi bi-geo-alt"></i> 위치 관리</a></li>
+          <li data-requires-node-type="grp"><a class="dropdown-item" href="#" data-action="manage-group"><i class="bi bi-diagram-3"></i> 게이트그룹 관리</a></li>
+          <li data-requires-node-type="dtl"><a class="dropdown-item" href="#" data-action="gate-open"><i class="bi bi-unlock"></i> 게이트 상시 개방</a></li>
+          <li data-requires-node-type="dtl"><a class="dropdown-item" href="#" data-action="gate-close"><i class="bi bi-lock"></i> 게이트 상시 폐쇄</a></li>
+          <li data-requires-node-type="dtl"><a class="dropdown-item" href="#" data-action="gate-normal"><i class="bi bi-arrow-counterclockwise"></i> 게이트 정상 복구</a></li>
+          <li data-requires-node-type="dtl"><a class="dropdown-item" href="#" data-action="gate-free"><i class="bi bi-unlock-fill"></i> 게이트 FREE 모드</a></li>
+          <li data-requires-node-type="dtl" data-requires-gate-type="2"><a class="dropdown-item" href="#" data-action="gate-reverse-open"><i class="bi bi-arrow-left-right"></i> 게이트 역방향 개방</a></li>
+          <li data-requires-node-type="dtl"><hr class="dropdown-divider"></li>
+          <li data-requires-node-type="dtl"><a class="dropdown-item" href="#" data-action="reset-system"><i class="bi bi-arrow-clockwise"></i> 시스템 리셋</a></li>
+          <li data-requires-node-type="dtl"><a class="dropdown-item" href="#" data-action="reset-motor"><i class="bi bi-arrow-clockwise"></i> 모터 리셋</a></li>
+          <li data-requires-node-type="dtl"><hr class="dropdown-divider"></li>
+          <li data-requires-node-type="dtl"><a class="dropdown-item" href="#" data-action="mode-change"><i class="bi bi-sliders"></i> 모드 변경</a></li>
+          <li data-requires-node-type="dtl"><a class="dropdown-item" href="#" data-action="motor-setup"><i class="bi bi-gear"></i> 모터 설정</a></li>
         </ul>
       </div>
     </div>

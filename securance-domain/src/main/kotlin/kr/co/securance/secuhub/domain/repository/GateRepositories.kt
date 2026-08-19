@@ -123,7 +123,11 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
      * `analysisYn = true` 조건은 2026-08-19 사용자 요청(사용여부·분석여부가 모두 Y인 레인만
      * 표시)에 따라 추가했다 — SR_Speed_Client `GetTreeListAsync` 쿼리(`SR_C_MariaDB.cs`)의
      * `WHERE a.use_yn = 'Y' AND a.analysis_yn = 'Y'`와 동일 기준이다.
+     *
+     * `order by d.dtlId` — [GateTreeController.buildTree]가 위치ID→그룹ID→게이트ID 순으로
+     * 트리를 그리므로 쿼리 정렬 기준도 dtlId로 맞춘다(2026-08-19 재검토: 이전에는 dtlLaneNo로
+     * 정렬해놓고 컨트롤러가 곧바로 dtlId로 재정렬해 무의미했다).
      */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true and d.analysisYn = true order by d.dtlLaneNo")
+    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true and d.analysisYn = true order by d.dtlId")
     fun findAllForTree(): List<GateDetail>
 }

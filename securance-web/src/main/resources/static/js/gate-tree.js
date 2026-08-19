@@ -165,21 +165,28 @@
   //
   // 여러 대를 대상으로 할 때, securance.security.gate-control-reauth-required=true라면 기기마다
   // 매번 비밀번호를 물으면 안 된다(그룹/위치에 레인이 여러 개면 팝업이 계속 뜬다) — 첫 기기에서만
-  // window.prompt()로 물어보고, 이후 나머지 기기에는 같은 비밀번호를 재사용한다. 취소하면 그
-  // 기기부터는 재시도 없이 재인증 요구 응답을 그대로 기록하고 다음 기기로 넘어간다.
+  // window.prompt()로 물어보고, 이후 나머지 기기에는 같은 비밀번호를 재사용한다.
+  //
+  // [재검토 수정] 사용자가 첫 프롬프트를 취소하면 "배치 전체를 포기하겠다"는 의사로 보고,
+  // reauthCancelled 플래그를 세워 남은 기기에는 다시 prompt()를 띄우지 않는다(이전에는 취소해도
+  // sharedPassword가 여전히 null이라 다음 기기마다 또 프롬프트가 떠서, 레인이 많은 그룹/위치를
+  // 대상으로 하면 취소 클릭을 계속 반복해야 했다). 취소 이후 기기들은 재인증 요구 응답을 그대로
+  // 실패로 기록한다.
   //
   // 전송은 병렬이 아니라 순차(reduce 체인)로 진행한다 — 재인증 프롬프트를 한 번만 띄우려면 첫
   // 응답을 봐야 하고, 여러 게이트에 TCP 커넥션을 동시에 여는 부담(레거시 GateCtrlDataSet가
   // TCP 대상만 예외적으로 병렬 처리하는 것과 달리)도 피한다.
   function postCommandToDevices(path, devices, command) {
     var sharedPassword = null;
+    var reauthCancelled = false;
     var results = [];
     return devices.reduce(function (chain, dev) {
       return chain.then(function () {
         return postGateControl(path, dev.dtlIp, dev.dtlLaneNo, command, sharedPassword).then(function (r) {
-          if (r.body && r.body.reauthRequired && !sharedPassword) {
+          if (r.body && r.body.reauthRequired && !sharedPassword && !reauthCancelled) {
             var password = window.prompt('게이트 제어 재인증 — 비밀번호를 입력하세요.');
             if (!password) {
+              reauthCancelled = true;
               results.push({ dev: dev, r: r });
               return;
             }

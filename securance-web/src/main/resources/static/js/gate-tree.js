@@ -296,6 +296,19 @@
         'gate-reverse-open': 'REVERSE_OPEN',
       };
 
+      // [Codex 적대적 리뷰 수정: high] 상시 개방/폐쇄/FREE 모드/역방향 개방은 재인증이 비활성화된
+      // 구성(securance.security.gate-control-reauth-required=false)이거나 최근 인증으로 재인증이
+      // 생략되는 상황에서는 아무 확인 절차 없이 메뉴 클릭 한 번으로 즉시 전송됐다 — 오클릭 한 번이
+      // 출입 통제 상태를 바로 바꿔 보안·운영 사고로 이어질 수 있다("정상 복구"는 안전한 기본
+      // 동작으로 되돌리는 명령이라 확인 대상에서 제외한다). 명령을 서버로 보내기 전에 대상
+      // IP/레인과 명령별 위험 문구를 담은 확인 대화상자를 띄우고, 취소 시 요청 자체를 만들지 않는다.
+      var CONFIRM_MESSAGES = {
+        'gate-open': '게이트를 상시 개방 상태로 전환합니다. 이후 별도로 복구하기 전까지 누구나 통과할 수 있습니다.',
+        'gate-close': '게이트를 상시 폐쇄 상태로 전환합니다. 이후 별도로 복구하기 전까지 아무도 통과할 수 없습니다.',
+        'gate-free': '게이트를 FREE 모드로 전환합니다. 이후 별도로 복구하기 전까지 통제 없이 자유롭게 통과할 수 있습니다.',
+        'gate-reverse-open': '게이트를 역방향으로 개방합니다. 정방향 통행 흐름에 영향을 줄 수 있습니다.',
+      };
+
       if (RESET_COMMANDS[action]) {
         reportCommandResult(
           sendResetWithReauth(selected.dtlIp, selected.dtlLaneNo, RESET_COMMANDS[action]),
@@ -304,6 +317,12 @@
         return;
       }
       if (OPERATION_COMMANDS[action]) {
+        if (CONFIRM_MESSAGES[action]) {
+          var confirmed = window.confirm(
+            selected.dtlIp + ' / 레인 ' + selected.dtlLaneNo + '\n\n' + CONFIRM_MESSAGES[action] + '\n\n계속하시겠습니까?',
+          );
+          if (!confirmed) return;
+        }
         reportCommandResult(
           sendCommandWithReauth(selected.dtlIp, selected.dtlLaneNo, OPERATION_COMMANDS[action]),
           selected.dtlIp, selected.dtlLaneNo,

@@ -44,11 +44,12 @@
              "LOC/GRP/DTL 모든 노드에서 게이트 제어 메뉴 표시")도 세 계층 전부에서 우클릭 메뉴를
              띄웠다 — 다만 실제 게이트 IP/레인 단위 명령(개방/폐쇄/리셋/모드변경/모터설정)은 DTL
              노드에서만 의미가 있어 data-requires-node-type="dtl"로 좁힌다. LOC/GRP 노드는 대신
-             해당 위치/그룹을 관리하는 화면(게이트 관리 팝업 — MenuProvider의 popup=true 항목과
-             동일하게 gate-popup-modal.js가 iframe 모달로 연다)을 열도록 별도 항목을 둔다
-             (2026-08-19 버그 리포트: 위치/그룹 노드 우클릭 시 메뉴가 전혀 뜨지 않고, 게이트
-             관리 팝업도 열 방법이 없었다). GateControlApiController(개방/폐쇄/복구/FREE/
-             역방향 개방·리셋)/GateControlController(모드 변경·모터 설정)를 그대로 재사용한다.
+             해당 위치/그룹을 관리하는 화면을 열도록 별도 항목을 둔다 — URL/제목을 이 항목이
+             직접 갖지 않고, 사이드바 "모니터링 > 게이트 관리" 그룹의 실제 메뉴 항목(위치/
+             게이트그룹, MenuProvider.kt의 popup=true)을 gate-tree.js가 그대로 클릭해 실행한다
+             (2026-08-19 사용자 요청 — 화면 진입점을 MenuProvider 한 곳으로 일원화). GateControlApiController
+             (개방/폐쇄/복구/FREE/역방향 개방·리셋)/GateControlController(모드 변경·모터 설정)를
+             그대로 재사용한다.
              DTL 상단 5개 항목(개방~역방향 개방)은 SR_Speed_Client 트리뷰(SR_F_DashBoard.GateControl.cs
              ContextMenu_Init)와 동일 구성(2026-08-19 사용자 요청) — 역방향 개방은 Flap 타입
              (gate_type_code=2) 게이트에만 표시되며, gate-tree.js가 우클릭 시점에 data-gate-type을

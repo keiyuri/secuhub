@@ -257,21 +257,29 @@
       var selected = target;
       hideMenu();
 
-      // [버그 수정: 2026-08-19] 위치/그룹 노드 우클릭 메뉴의 목적 — 사이드바 "게이트 관리" 항목과
-      // 동일한 gate-popup-modal(iframe 모달)로 위치/게이트그룹 관리 화면을 연다. 특정 위치·그룹만
-      // 딥링크로 좁히는 컨트롤러 파라미터는 없어 전체 목록 화면을 그대로 연다(사이드바 클릭과 동일
-      // 진입점 — MenuProvider.kt의 popup=true 항목 참고).
-      // gate-popup-modal.js 초기화가 실패한 예외적인 경우(모달 프래그먼트 누락, bootstrap 로드
-      // 실패 등)에는 window.GatePopupModal.open이 무동작 스텁(같은 파일 8행)에 계속 머무른다 —
-      // 사이드바 링크(href 유지)와 달리 이 메뉴 항목은 href="#"라 대체 경로가 없으므로, 모달을
-      // 열 수 없을 때는 조용히 실패하는 대신 전체 페이지 이동으로 폴백한다.
+      // [2026-08-19 사용자 요청] 위치/그룹 노드 우클릭 메뉴는 URL/제목을 직접 들고 있지 않고,
+      // 사이드바 "모니터링 > 게이트 관리" 그룹의 실제 메뉴 항목(위치/게이트그룹, MenuNode.Item
+      // popup=true — MenuProvider.kt 참고)을 그대로 클릭해서 실행한다. 이렇게 하면 URL/제목/팝업
+      // 여부가 MenuProvider 한 곳에만 존재해, 사이드바 메뉴 구성이 바뀌어도 트리 메뉴가 별도
+      // 수정 없이 항상 같은 화면을 연다(이전에는 '/gates/locations' 등을 이 파일에도 하드코딩해
+      // 두 곳이 어긋날 여지가 있었다). document.querySelector('a[data-popup="true"][href=...]')로
+      // 사이드바 링크를 찾아 .click()하면 gate-popup-modal.js의 document 클릭 위임 리스너가
+      // 그대로 반응해 동일한 모달 오픈 로직을 탄다.
       if (action === 'manage-location' || action === 'manage-group') {
-        var manageUrl = action === 'manage-location' ? '/gates/locations' : '/gates/groups';
-        var manageTitle = action === 'manage-location' ? '위치 관리' : '게이트그룹 관리';
-        if (window.GatePopupModal && window.GatePopupModal.ready) {
-          window.GatePopupModal.open(manageUrl, manageTitle);
+        var menuHref = action === 'manage-location' ? '/gates/locations' : '/gates/groups';
+        var sidebarLink = document.querySelector('.app-sidebar a[data-popup="true"][href="' + menuHref + '"]');
+        if (sidebarLink) {
+          sidebarLink.click();
         } else {
-          window.location.href = manageUrl;
+          // 사이드바 마크업이 예상과 달라 메뉴 항목을 찾지 못한 예외적인 경우의 최소 폴백 —
+          // gate-popup-modal.js 초기화 실패 시(무동작 스텁, 같은 파일 8행)에는 href="#"라 대체
+          // 경로가 없는 이 메뉴 항목이 조용히 실패하지 않도록 전체 페이지 이동으로 대체한다.
+          var manageTitle = action === 'manage-location' ? '위치 관리' : '게이트그룹 관리';
+          if (window.GatePopupModal && window.GatePopupModal.ready) {
+            window.GatePopupModal.open(menuHref, manageTitle);
+          } else {
+            window.location.href = menuHref;
+          }
         }
         return;
       }

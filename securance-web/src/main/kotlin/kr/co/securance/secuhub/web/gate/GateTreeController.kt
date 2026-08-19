@@ -50,10 +50,16 @@ class GateTreeService(
     fun buildTree(): List<GateTreeLocationNode> {
         // 트리 정렬 순서 — 위치 ID → 그룹 ID → 게이트(레인) ID(2026-08-19 사용자 요청, SR_Speed_Client
         // 트리뷰의 InsertNodeSorted와 동일하게 이름이 아닌 ID 기준으로 정렬한다).
-        val locations = locationRepository.findAll(Sort.by("locId"))
+        //
+        // 사용여부(use_yn)/분석여부(analysis_yn) 필터 — 2026-08-19 사용자 요청("사용여부와
+        // 분석여부가 Y인 것만 표시"). SR_Speed_Client GetTreeListAsync 쿼리(SR_C_MariaDB.cs
+        // 1273~1360행)와 동일한 계층별 기준을 따른다: LOC/GRP는 use_yn='Y'만(두 테이블 모두
+        // analysis_yn 컬럼이 없다), DTL은 use_yn='Y' AND analysis_yn='Y' — 후자는
+        // findAllForTree()의 쿼리 조건으로 이미 반영돼 있다.
+        val locations = locationRepository.findAll(Sort.by("locId")).filter { it.useYn }
         // GateGroupRepository.findAll()/GateDetailRepository.findAllForTree()는 JOIN FETCH로
         // location/group을 함께 읽어온다(둘 다 LAZY + open-in-view:false, 계획서 4.2절 대응).
-        val groupsByLoc = groupRepository.findAll().groupBy { it.location.locId }
+        val groupsByLoc = groupRepository.findAll().filter { it.useYn }.groupBy { it.location.locId }
         val detailsByGrp = detailRepository.findAllForTree().groupBy { it.group.grpId }
         // (dtlIp, dtlLaneNo) 복합키로 온라인 여부를 조회한다 — GateResetGridService와 동일한 이유로
         // dtlLaneNo만으로는 IP가 다른 두 장비의 상태가 서로 덮어써질 수 있다.

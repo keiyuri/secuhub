@@ -119,7 +119,11 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
      * Phase 10 대시보드 게이트 트리뷰 — LOC/GRP/DTL 전체를 한 번에 조회한다. `location`/`group`은
      * LAZY + open-in-view:false라 [GateGroupRepository.findAll]과 동일한 이유로 JOIN FETCH가
      * 필요하다(컨트롤러 트랜잭션 밖에서 접근 시 LazyInitializationException).
+     *
+     * `analysisYn = true` 조건은 2026-08-19 사용자 요청(사용여부·분석여부가 모두 Y인 레인만
+     * 표시)에 따라 추가했다 — SR_Speed_Client `GetTreeListAsync` 쿼리(`SR_C_MariaDB.cs`)의
+     * `WHERE a.use_yn = 'Y' AND a.analysis_yn = 'Y'`와 동일 기준이다.
      */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true order by d.dtlLaneNo")
+    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true and d.analysisYn = true order by d.dtlLaneNo")
     fun findAllForTree(): List<GateDetail>
 }

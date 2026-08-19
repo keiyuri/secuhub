@@ -6,6 +6,7 @@ import kr.co.securance.secuhub.domain.entity.GateLocation
 import kr.co.securance.secuhub.domain.repository.GateLocationRepository
 import kr.co.securance.secuhub.web.menu.MenuProvider
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Controller
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -187,8 +188,16 @@ class GateLocationController(
 
     @PostMapping("/{locId}/delete")
     fun delete(@PathVariable locId: Long, redirectAttributes: RedirectAttributes): String {
-        locationService.delete(locId)
-        redirectAttributes.addFlashAttribute("message", "위치가 삭제되었습니다.")
+        // 하위 그룹/게이트가 남아있는 위치를 삭제하면 FK 제약(fk_gate_dtl_loc 등) 위반으로
+        // DataIntegrityViolationException이 던져진다 — 잡지 않으면 500 에러 페이지로 직행한다
+        // (2026-08-20 Opus 전체 리뷰 지적). UserController.delete와 동일한 패턴으로 안내 메시지로
+        // 바꾼다.
+        try {
+            locationService.delete(locId)
+            redirectAttributes.addFlashAttribute("message", "위치가 삭제되었습니다.")
+        } catch (ex: DataIntegrityViolationException) {
+            redirectAttributes.addFlashAttribute("error", "하위 그룹/게이트가 남아있어 위치를 삭제할 수 없습니다.")
+        }
         return "redirect:/gates/locations"
     }
 }

@@ -1,0 +1,14 @@
+{
+  "name": "secuhub-web-static-js",
+  "private": true,
+  "version": "0.0.0",
+  "description": "securance-web의 정적 JS(static/js/*.js) 회귀 테스트 전용 패키지. Gradle 빌드와는 독립적이며(계획서에 npm/Gradle 통합은 범위 밖으로 명시), 필요할 때 `npm test`로 수동 실행한다.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "vitest": "^2.1.9"
+  }
+}

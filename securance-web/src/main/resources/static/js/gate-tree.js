@@ -514,6 +514,28 @@
     document.head.appendChild(style);
   }
 
+  // 테스트 전용 훅(2026-08-20 Opus 전체 리뷰 지적 — "가장 자주 깨지는 코드가 가장 검증이 없다").
+  // 프로덕션 동작에는 영향이 없다: 브라우저가 <script> 태그로 이 파일을 로드할 때는 CommonJS
+  // `module` 전역이 존재하지 않으므로 이 블록은 실행되지 않는다. Vitest(Node/jsdom) 환경에서
+  // `require('.../gate-tree.js')`로 로드할 때만 내부 함수를 노출해 순수 로직을 단위 테스트할 수
+  // 있게 한다. 아래 자동 실행 블록(폴링 시작 등)도 같은 이유로 이 환경에서는 건너뛴다 — 그렇지
+  // 않으면 테스트가 import하는 순간 실제 fetch()/setInterval이 걸려 부작용이 생긴다.
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      escapeHtml: escapeHtml,
+      renderDetail: renderDetail,
+      renderGroup: renderGroup,
+      renderLocation: renderLocation,
+      render: render,
+      describeResult: describeResult,
+      sendBulkSequentialByIp: sendBulkSequentialByIp,
+      reportBulkCommandResult: reportBulkCommandResult,
+      sendBulkOperationCommand: sendBulkOperationCommand,
+      __setPostGateControl: function (fn) { postGateControl = fn; },
+    };
+    return;
+  }
+
   var container = document.getElementById('gate-tree');
   if (!container) return;
   injectStyles();

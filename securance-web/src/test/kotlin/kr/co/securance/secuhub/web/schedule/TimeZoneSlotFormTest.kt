@@ -1,40 +1,52 @@
 package kr.co.securance.secuhub.web.schedule
 
+import jakarta.validation.Validation
+import jakarta.validation.Validator
+import kotlin.test.BeforeTest
 import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/**
+ * 회귀 방지 테스트(2026-08-20 Opus 전체 리뷰 지적) — [TimeZoneSlotForm]에 범위 검증이 전혀 없어,
+ * `fromHour=99` 같은 값이 컨트롤러의 `binding.hasErrors()`를 통과한 뒤
+ * [kr.co.securance.secuhub.protocol.TimeZoneCommandBuilder.Slot]의 `require(fromHour in 0..23)`에서
+ * `IllegalArgumentException`(→ 500 에러 페이지)으로 터지던 문제. [TimeZoneForm.slot1]~`slot4`의
+ * `@field:Valid` 캐스케이드까지 함께 검증한다 — 캐스케이드가 없으면 아래 `@Min/@Max`는 폼 바인딩
+ * 단계에서 전혀 평가되지 않는다.
+ */
 class TimeZoneSlotFormTest {
 
-    @Test
-    fun `요일이 하나도 선택되지 않으면 미사용 슬롯으로 취급한다`() {
-        assertTrue(TimeZoneSlotForm().isBlank())
+    private lateinit var validator: Validator
+
+    @BeforeTest
+    fun setUp() {
+        val factory = Validation.buildDefaultValidatorFactory()
+        validator = factory.validator
     }
 
     @Test
-    fun `요일이 하나라도 선택되면 미사용 슬롯이 아니다`() {
-        assertFalse(TimeZoneSlotForm(monday = true).isBlank())
+    fun `기본값(미사용 슬롯)은 위반이 없다`() {
+        assertTrue(validator.validate(TimeZoneSlotForm()).isEmpty())
     }
 
     @Test
-    fun `dayLabels는 일-월-화-수-목-금-토 순서를 유지한다`() {
-        // 레거시 UI 체크박스 순서와 동일해야 tb_gate_timezone.timezone_day*에 저장되는
-        // "일,화,금" 같은 문자열이 화면 표시 순서와 어긋나지 않는다.
-        val form = TimeZoneSlotForm(sunday = true, tuesday = true, friday = true)
-        assertEquals(listOf("일", "화", "금"), form.dayLabels())
+    fun `범위를 벗어난 fromHour는 단독 검증에서 거부된다`() {
+        val violations = validator.validate(TimeZoneSlotForm(fromHour = 99))
+        assertTrue(violations.isNotEmpty(), "fromHour=99는 TimeZoneCommandBuilder.Slot의 require(0..23)와 동일한 범위를 위반해야 한다")
     }
 
     @Test
-    fun `toBuilderSlot은 폼 값을 그대로 Slot에 매핑한다`() {
-        val form = TimeZoneSlotForm(fromHour = 9, fromMinute = 30, toHour = 18, toMinute = 0, monday = true)
-        val slot = form.toBuilderSlot()
+    fun `범위를 벗어난 toMinute는 단독 검증에서 거부된다`() {
+        val violations = validator.validate(TimeZoneSlotForm(toMinute = 999))
+        assertTrue(violations.isNotEmpty())
+    }
 
-        assertEquals(9, slot.fromHour)
-        assertEquals(30, slot.fromMinute)
-        assertEquals(18, slot.toHour)
-        assertEquals(0, slot.toMinute)
-        assertTrue(slot.days.monday)
-        assertFalse(slot.days.tuesday)
+    @Test
+    fun `TimeZoneForm은 slot의 범위 위반을 캐스케이드로 잡아낸다`() {
+        // @field:Valid 캐스케이드가 없으면 이 테스트가 실패한다 — TimeZoneForm 자체 필드(timezoneName)만
+        // 검증되고 중첩된 slot1의 위반은 조용히 통과된다.
+        val form = TimeZoneForm(timezoneName = "야간조", slot1 = TimeZoneSlotForm(fromHour = 25))
+        val violations = validator.validate(form)
+        assertTrue(violations.isNotEmpty(), "TimeZoneForm.slot1의 범위 위반이 캐스케이드 검증되어야 한다")
     }
 }

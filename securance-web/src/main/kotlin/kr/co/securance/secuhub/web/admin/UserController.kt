@@ -146,8 +146,19 @@ class UserController(
             populateCommon(model)
             return "admin/users"
         }
-        userManagementService.create(form)
-        redirectAttributes.addFlashAttribute("message", "사용자가 등록되었습니다.")
+        // UserManagementService.create는 중복 아이디를 require(...)(IllegalArgumentException)로
+        // 막는데, 이 컨트롤러가 이를 잡지 않으면 BindingResult 필드 오류 대신 500 에러 페이지가
+        // 뜬다(2026-08-20 Opus 전체 리뷰 지적). 단, DB 연결 장애 등 예상 못한 예외까지 "중복
+        // 아이디"로 오분류하면 실제 운영 장애가 로그 없이 은폐된다(2026-08-20 Codex 리뷰 지적) —
+        // 의도한 IllegalArgumentException만 필드 오류로 변환하고 나머지는 그대로 전파한다.
+        try {
+            userManagementService.create(form)
+            redirectAttributes.addFlashAttribute("message", "사용자가 등록되었습니다.")
+        } catch (ex: IllegalArgumentException) {
+            binding.rejectValue("userId", "duplicate", ex.message ?: "사용자 등록에 실패했습니다.")
+            populateCommon(model)
+            return "admin/users"
+        }
         return "redirect:/admin/users"
     }
 

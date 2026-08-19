@@ -8,6 +8,7 @@ import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.GateGroupRepository
 import kr.co.securance.secuhub.domain.repository.GateLocationRepository
 import kr.co.securance.secuhub.web.menu.MenuProvider
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Controller
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -183,8 +184,15 @@ class GateDetailController(
         @RequestParam(required = false) grpId: Long?,
         redirectAttributes: RedirectAttributes,
     ): String {
-        detailService.delete(dtlId)
-        redirectAttributes.addFlashAttribute("message", "게이트 상세(레인)가 삭제되었습니다.")
+        // 다른 테이블(제어 이력 등)이 이 dtlId를 FK로 참조하는 경우
+        // DataIntegrityViolationException이 던져질 수 있다 — GateLocationController.delete와
+        // 동일한 이유로 잡아서 안내 메시지로 바꾼다(2026-08-20 Opus 전체 리뷰 지적).
+        try {
+            detailService.delete(dtlId)
+            redirectAttributes.addFlashAttribute("message", "게이트 상세(레인)가 삭제되었습니다.")
+        } catch (ex: DataIntegrityViolationException) {
+            redirectAttributes.addFlashAttribute("error", "연관된 데이터가 남아있어 이 게이트(레인)를 삭제할 수 없습니다.")
+        }
         return "redirect:/gates/details" + (grpId?.let { "?grpId=$it" } ?: "")
     }
 

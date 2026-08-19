@@ -1,5 +1,8 @@
 package kr.co.securance.secuhub.web.schedule
 
+import jakarta.validation.Valid
+import jakarta.validation.constraints.Max
+import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import kr.co.securance.secuhub.common.util.HexCodec
@@ -133,17 +136,37 @@ data class TimeZoneForm(
     @field:NotBlank(message = "명칭을 입력하세요")
     var timezoneName: String = "",
     var timezoneDesc: String = "",
+    // @field:Valid — 중첩 폼(슬롯)의 제약을 실제로 검증하려면 캐스케이드 애너테이션이 필요하다.
+    // 이게 없으면 TimeZoneSlotForm의 @Min/@Max는 바인딩 단계에서 전혀 평가되지 않고, 범위를
+    // 벗어난 값이 그대로 TimeZoneCommandBuilder.Slot의 require()까지 흘러가 컨트롤러
+    // BindingResult가 아닌 IllegalArgumentException(→ 500 에러 페이지)으로 터진다
+    // (2026-08-20 Opus 전체 리뷰 지적).
+    @field:Valid
     var slot1: TimeZoneSlotForm = TimeZoneSlotForm(),
+    @field:Valid
     var slot2: TimeZoneSlotForm = TimeZoneSlotForm(),
+    @field:Valid
     var slot3: TimeZoneSlotForm = TimeZoneSlotForm(),
+    @field:Valid
     var slot4: TimeZoneSlotForm = TimeZoneSlotForm(),
 )
 
-/** 타임존 슬롯 1개 입력 — 값을 전혀 입력하지 않으면(모두 0/미체크) "미사용 슬롯"으로 취급한다. */
+/**
+ * 타임존 슬롯 1개 입력 — 값을 전혀 입력하지 않으면(모두 0/미체크) "미사용 슬롯"으로 취급한다.
+ *
+ * `@Min/@Max`는 [TimeZoneCommandBuilder.Slot]의 `require(fromHour in 0..23)` 등과 동일한 범위를
+ * 폼 바인딩 단계에서 미리 강제한다(2026-08-20 Opus 전체 리뷰 지적 — 이전에는 이 폼에 아무 제약이
+ * 없어 `fromHour=99` 같은 값이 `binding.hasErrors()`를 통과한 뒤 서비스 계층의 `require()`에서
+ * `IllegalArgumentException`으로 터져 필드 오류 대신 500 에러 페이지가 떴다).
+ */
 data class TimeZoneSlotForm(
+    @field:Min(0) @field:Max(23)
     var fromHour: Int = 0,
+    @field:Min(0) @field:Max(59)
     var fromMinute: Int = 0,
+    @field:Min(0) @field:Max(23)
     var toHour: Int = 0,
+    @field:Min(0) @field:Max(59)
     var toMinute: Int = 0,
     var sunday: Boolean = false,
     var monday: Boolean = false,

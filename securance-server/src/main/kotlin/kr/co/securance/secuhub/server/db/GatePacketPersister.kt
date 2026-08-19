@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 수신 패킷을 객체 코드별로 분기해 DB에 적재한다(계획서 3.5절 "DB 쓰기 파이프라인").
@@ -198,6 +199,18 @@ class GatePacketPersister(
         val laneCountOffset = SpeedGateProtocolConstants.HEADER_LENGTH + SpeedGateProtocolConstants.DATA_INFO_LENGTH - 1
         val laneCountHex = if (raw.size > laneCountOffset) "%02X".format(raw[laneCountOffset].toInt() and 0xFF) else ""
 
+        // 이 패킷에서 나온 모든 레인의 분석 행은 같은 tb_data_rcv 원본 행(rcv_id)을 가리켜야 한다
+        // ([resolveRcvId] KDoc 참고). 레인마다 독립적으로 재조회하면 레인 수만큼 동일한 SELECT가
+        // 그대로 반복된다(2026-08-20 Opus 전체 리뷰 지적 — 상태 upsert 경로의 쿼리 증폭, 최고빈도
+        // 경로에서 레인당 findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc + resolveRcvId 2회 SELECT).
+        // 같은 partitionKey(dtlIp)로 큐잉되는 레인 태스크들은 [GateDbWriteQueue] 설계상 같은 샤드
+        // 워커가 순서대로 처리하므로, 먼저 실행된 레인이 계산한 값을 뒤 레인들이 그대로 재사용하면
+        // 된다. AtomicLong으로 감싸는 이유는 오직 하나 — 타임아웃으로 "버려진" 시도가 백그라운드에서
+        // 뒤늦게 완료되는 사이 다음 레인 태스크가 이미 시작되는 드문 경합([GateDbWriteQueue] KDoc
+        // "타임아웃 판정 이후 버려둔 호출" 참고)에서도 대입 자체는 원자적이도록 하기 위함이다 —
+        // 이 경우에도 최악은 동일한 조회가 한두 번 더 도는 것뿐, 서로 다른 값이 섞이지는 않는다.
+        val sharedRcvId = AtomicLong(UNRESOLVED_RCV_ID)
+
         for (analysis in analyses) {
             val laneNo = analysis.laneNumber
             val info = state.laneInfoOf(laneNo)
@@ -211,9 +224,9 @@ class GatePacketPersister(
             if (!info.analysisYn) continue
 
             if (analysis.errType == GateStatusAnalyzer.ErrorCheck.ERROR) {
-                enqueueAnalysisInsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex)
+                enqueueAnalysisInsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex, sharedRcvId)
             } else {
-                enqueueStatusUpsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex)
+                enqueueStatusUpsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex, sharedRcvId)
                 enqueueRecovery(state, analysis)
             }
         }
@@ -276,6 +289,7 @@ class GatePacketPersister(
         headerFields: AnalDataHeaderFields,
         laneCount: Int,
         laneCountHex: String,
+        sharedRcvId: AtomicLong,
     ) {
         dbWriteQueue.enqueue(
             GateDbWriteTask(
@@ -283,7 +297,7 @@ class GatePacketPersister(
                 operationName = "InsertReceiveAnal(${state.dtlIp},${analysis.laneNumber},${analysis.analysisType})",
             ) {
                 val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
-                val rcvId = resolveRcvId(state.dtlIp)
+                val rcvId = resolveRcvIdCached(state.dtlIp, sharedRcvId)
                 dataReceiveAnalysisRepository.save(
                     buildAnalysisEntity(
                         state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount, laneCountHex,
@@ -339,6 +353,7 @@ class GatePacketPersister(
         headerFields: AnalDataHeaderFields,
         laneCount: Int,
         laneCountHex: String,
+        sharedRcvId: AtomicLong,
     ) {
         val today = analDate.substring(0, 8) // yyyyMMdd
 
@@ -364,14 +379,14 @@ class GatePacketPersister(
                     // rcvId는 enqueueReceiveInsert가 먼저 큐잉한 원시 INSERT를 가리키므로
                     // resolveRcvId로 다시 조회해야 이번 수신의 원본 행을 가리킨다(resolveRcvId KDoc 참고).
                     latest.rcvDate = analDate
-                    latest.rcvId = resolveRcvId(state.dtlIp)
+                    latest.rcvId = resolveRcvIdCached(state.dtlIp, sharedRcvId)
                     latest.rcvRaw = rawHex
                     latest.analHeader = headerHex
                     latest.analTail = tailHex
                     dataReceiveAnalysisRepository.save(latest)
                 } else {
                     val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
-                    val rcvId = resolveRcvId(state.dtlIp)
+                    val rcvId = resolveRcvIdCached(state.dtlIp, sharedRcvId)
                     dataReceiveAnalysisRepository.save(
                         buildAnalysisEntity(
                             state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount, laneCountHex,
@@ -486,6 +501,27 @@ class GatePacketPersister(
      */
     private fun resolveRcvId(dtlIp: String): Long =
         dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc(dtlIp)?.rcvId ?: 0
+
+    /**
+     * [resolveRcvId]를 패킷당 최대 1회만 실제로 조회하도록 감싼 캐시 래퍼(2026-08-20 Opus 전체
+     * 리뷰 지적 대응) — 호출부([persistStatusAnalysis]의 `sharedRcvId`) 참고. `cache`는 항상 같은
+     * 패킷에서 나온 레인 태스크들끼리만 공유되며(패킷마다 새로 생성), 같은 파티션키(dtlIp)의
+     * 태스크는 [GateDbWriteQueue] 설계상 같은 샤드 워커가 순서대로 처리하므로 정상 경로에서는
+     * 두 번째 레인부터 SELECT 없이 캐시값을 그대로 재사용한다. `UNRESOLVED_RCV_ID`(-1)를
+     * sentinel로 써서 "아직 계산 안 됨"과 "정상값 0"(resolveRcvId가 못 찾았을 때의 폴백)을 구분한다.
+     *
+     * CAS 실패 시 자신이 조회한 [resolved]가 아니라 [cache]에 먼저 기록된 값을 반환해야 한다
+     * (2026-08-20 Codex 리뷰 지적) — 타임아웃으로 버려진 시도가 백그라운드에서 뒤늦게 이 함수를
+     * 호출하는 경합 상황에서는, 두 호출이 동시에 sentinel을 읽고 서로 다른 시점의 rcvId를 각각
+     * 조회할 수 있다. 이때 CAS에서 진 쪽이 자신이 조회한 값을 그대로 반환해 버리면 같은 패킷의
+     * 분석 행들이 서로 다른 원본 행(rcv_id)을 가리키게 된다 — 반드시 승자의 값으로 통일한다.
+     */
+    private fun resolveRcvIdCached(dtlIp: String, cache: AtomicLong): Long {
+        val cached = cache.get()
+        if (cached != UNRESOLVED_RCV_ID) return cached
+        val resolved = resolveRcvId(dtlIp)
+        return if (cache.compareAndSet(UNRESOLVED_RCV_ID, resolved)) resolved else cache.get()
+    }
 
     /** [analysis]/[identity]로부터 `tb_data_rcv_anal` 1행(엔티티)을 만든다 — INSERT 경로 전용 공통 로직. */
     private fun buildAnalysisEntity(
@@ -696,5 +732,8 @@ class GatePacketPersister(
 
         /** ACK/실패 기록은 동일 분 내 다건이 흔하므로 초 단위까지 남긴다. */
         private val TIMESTAMP_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
+
+        /** [resolveRcvIdCached]에서 "아직 계산되지 않음"을 나타내는 sentinel — rcvId는 0 이상이다. */
+        private const val UNRESOLVED_RCV_ID = -1L
     }
 }

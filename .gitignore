@@ -18,6 +18,10 @@ scripts/winsw/*.wrapper.log
 scripts/winsw/*.err.log
 scripts/winsw/*.out.log
 
+# securance-web/package.json — 정적 JS(static/js/*.js) 회귀 테스트 전용, Gradle 빌드와 무관
+# (2026-08-20, gate-tree.js 테스트 인프라 도입). package-lock.json은 재현 가능한 설치를 위해 커밋한다.
+node_modules/
+
 # local profile overrides (may contain credentials)
 application-local.yml
 application-local.yaml

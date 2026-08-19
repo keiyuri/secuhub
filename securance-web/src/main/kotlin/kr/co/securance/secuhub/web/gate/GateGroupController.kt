@@ -9,6 +9,7 @@ import kr.co.securance.secuhub.domain.repository.CodeMasterRepository
 import kr.co.securance.secuhub.domain.repository.GateGroupRepository
 import kr.co.securance.secuhub.domain.repository.GateLocationRepository
 import kr.co.securance.secuhub.web.menu.MenuProvider
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Controller
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -195,8 +196,15 @@ class GateGroupController(
         @RequestParam(required = false) locId: Long?,
         redirectAttributes: RedirectAttributes,
     ): String {
-        groupService.delete(grpId)
-        redirectAttributes.addFlashAttribute("message", "게이트그룹이 삭제되었습니다.")
+        // 하위 게이트(레인)가 남아있는 그룹을 삭제하면 FK 제약 위반으로
+        // DataIntegrityViolationException이 던져진다 — GateLocationController.delete와 동일한
+        // 이유로 잡아서 안내 메시지로 바꾼다(2026-08-20 Opus 전체 리뷰 지적).
+        try {
+            groupService.delete(grpId)
+            redirectAttributes.addFlashAttribute("message", "게이트그룹이 삭제되었습니다.")
+        } catch (ex: DataIntegrityViolationException) {
+            redirectAttributes.addFlashAttribute("error", "하위 게이트(레인)가 남아있어 그룹을 삭제할 수 없습니다.")
+        }
         return "redirect:/gates/groups" + (locId?.let { "?locId=$it" } ?: "")
     }
 

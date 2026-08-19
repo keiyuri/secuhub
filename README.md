@@ -44,6 +44,21 @@ Copy-Item securance-app\src\main\resources\application-local.yml.example `
 ./gradlew.bat :securance-app:bootJar          # 실행 가능 JAR 생성 (securance-app/build/libs/securance-app.jar)
 ```
 
+### 정적 JS 회귀 테스트 (`securance-web/static/js/*.js`)
+
+`securance-web/src/main/resources/static/js/`의 JS는 빌드 파이프라인이 없는 순정 `<script>` 태그
+파일이다(번들러/모듈 시스템 없음). Gradle 빌드와는 독립적으로 Vitest + jsdom으로 회귀 테스트한다:
+
+```powershell
+cd securance-web
+npm install   # 최초 1회
+npm test      # vitest run
+```
+
+테스트 대상 JS 파일 맨 아래에는 `typeof module !== 'undefined'`로 가드된 테스트 전용 export
+블록이 있다 — 브라우저의 `<script>` 로딩(`module` 전역 없음)에는 전혀 영향을 주지 않고, Node/
+Vitest 환경에서만 내부 함수를 노출한다.
+
 ### Windows 서비스로 등록 (WinSW)
 
 레거시 `SR_Speed_Server`가 Windows 서비스로 운영되던 것과 동일한 방식이다.

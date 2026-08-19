@@ -24,6 +24,7 @@ import org.mockito.ArgumentMatchers.anyInt
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
+import org.mockito.Mockito.times
 import org.mockito.Mockito.timeout
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
@@ -190,6 +191,45 @@ class GatePacketPersisterTest {
         val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
         verify(analysisRepository, timeout(5_000).times(2)).save(captor.capture())
         assertTrue(captor.allValues.all { it.rcvId == 9999L })
+    }
+
+    @Test
+    fun `다중 레인 패킷에서 rcv_id 조회는 레인 수와 무관하게 패킷당 한 번만 실행된다`() {
+        // 회귀 방지(2026-08-20 Opus 전체 리뷰 지적) — 이전에는 레인마다 독립적으로
+        // resolveRcvId(findTopByDtlIpOrderByRcvIdDesc)를 재조회해, 최고빈도 경로(상태 upsert)에서
+        // 레인 수만큼 동일한 SELECT가 반복됐다. GateDbWriteQueue가 같은 dtlIp의 태스크를 같은 샤드
+        // 워커에서 순차 실행함을 이용해 패킷당 1회로 공유하도록 고쳤다 — 이 테스트는 3레인 패킷에서
+        // 실제로 조회가 1회만 일어나는지 확인한다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 7777L, rcvDate = "202608141200", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        val gateDetailRepository = mock(GateDetailRepository::class.java)
+        val persister = newPersister(analysisRepository, gateDetailRepository, dataReceiveRepository)
+        val state = GateConnectionState(
+            dtlIp = "192.168.0.205",
+            gateTypeCode = 1,
+            codec = SpeedFlapGateProtocolCodec(),
+            connection = mock(Connection::class.java),
+            outbound = mock(NettyOutbound::class.java),
+            actor = GateConnectionActor("192.168.0.205", Dispatchers.Default, queueCapacity = 100),
+            laneInfo = listOf(
+                GateLaneInfo(locId = 1, grpId = 70, dtlId = 159, dtlLaneNo = 1, dtlType = 1, analysisYn = true, dtlName = "1번레인"),
+                GateLaneInfo(locId = 1, grpId = 70, dtlId = 160, dtlLaneNo = 2, dtlType = 1, analysisYn = true, dtlName = "2번레인"),
+                GateLaneInfo(locId = 1, grpId = 70, dtlId = 161, dtlLaneNo = 3, dtlType = 1, analysisYn = true, dtlName = "3번레인"),
+            ),
+        )
+
+        persister.persistStatusAnalysis(
+            state,
+            statusPacket(laneBlock(laneNo = 1, totalCount = 100), laneBlock(laneNo = 2, totalCount = 200), laneBlock(laneNo = 3, totalCount = 300)),
+        )
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000).times(3)).save(captor.capture())
+        verify(dataReceiveRepository, times(1)).findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")
     }
 
     @Test

@@ -257,14 +257,14 @@
       var selected = target;
       hideMenu();
 
-      // [2026-08-19 사용자 요청] 위치/그룹 노드 우클릭 메뉴는 URL/제목을 직접 들고 있지 않고,
+      // [2026-08-19 사용자 요청] 위치/그룹 노드 우클릭 메뉴는 자체 모달 오픈 로직을 갖지 않고,
       // 사이드바 "모니터링 > 게이트 관리" 그룹의 실제 메뉴 항목(위치/게이트그룹, MenuNode.Item
-      // popup=true — MenuProvider.kt 참고)을 그대로 클릭해서 실행한다. 이렇게 하면 URL/제목/팝업
-      // 여부가 MenuProvider 한 곳에만 존재해, 사이드바 메뉴 구성이 바뀌어도 트리 메뉴가 별도
-      // 수정 없이 항상 같은 화면을 연다(이전에는 '/gates/locations' 등을 이 파일에도 하드코딩해
-      // 두 곳이 어긋날 여지가 있었다). document.querySelector('a[data-popup="true"][href=...]')로
-      // 사이드바 링크를 찾아 .click()하면 gate-popup-modal.js의 document 클릭 위임 리스너가
-      // 그대로 반응해 동일한 모달 오픈 로직을 탄다.
+      // popup=true — MenuProvider.kt 참고)을 그대로 클릭해서 실행한다. document.querySelector로
+      // 찾은 사이드바 링크를 .click()하면 gate-popup-modal.js의 document 클릭 위임 리스너가 그대로
+      // 반응해, 사이드바를 직접 클릭했을 때와 완전히 동일한 모달 오픈(제목 포함)을 탄다 — 열기
+      // 로직·제목 문자열의 중복은 없앴다. 다만 이 파일에 '/gates/locations' 등 href 리터럴
+      // 자체는 여전히 남아 있다(사이드바 링크를 찾기 위한 셀렉터 키로 필요) — MenuProvider.kt에서
+      // 해당 항목의 href를 바꾸면 이 셀렉터도 함께 고쳐야 한다는 점은 완전히 해소되지 않았다.
       if (action === 'manage-location' || action === 'manage-group') {
         var menuHref = action === 'manage-location' ? '/gates/locations' : '/gates/groups';
         var sidebarLink = document.querySelector('.app-sidebar a[data-popup="true"][href="' + menuHref + '"]');
@@ -274,7 +274,9 @@
           // 사이드바 마크업이 예상과 달라 메뉴 항목을 찾지 못한 예외적인 경우의 최소 폴백 —
           // gate-popup-modal.js 초기화 실패 시(무동작 스텁, 같은 파일 8행)에는 href="#"라 대체
           // 경로가 없는 이 메뉴 항목이 조용히 실패하지 않도록 전체 페이지 이동으로 대체한다.
-          var manageTitle = action === 'manage-location' ? '위치 관리' : '게이트그룹 관리';
+          // 제목은 사이드바 항목(MenuProvider.kt의 "위치"/"게이트그룹")과 동일하게 맞춰, 정상
+          // 경로와 폴백 경로가 서로 다른 모달 제목을 보여주지 않도록 한다.
+          var manageTitle = action === 'manage-location' ? '위치' : '게이트그룹';
           if (window.GatePopupModal && window.GatePopupModal.ready) {
             window.GatePopupModal.open(menuHref, manageTitle);
           } else {

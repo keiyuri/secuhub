@@ -11,17 +11,21 @@ class MenuProvider {
         MenuNode.Group(
             "게이트 관리",
             icon = "bi-door-open",
+            // 레거시 SR_Speed_Client는 대시보드 메뉴에서 이 7개 화면을 전부 팝업(SR_F_SetupLocation,
+            // SR_F_SetupGateGroup 등)으로 띄웠다. 사이드바 클릭 시 전체 페이지 이동 대신 모달 팝업으로
+            // 열리도록 popup=true를 붙인다 — 컨트롤러/템플릿/URL은 변경하지 않고 진입 경로만 바꾼다
+            // (gate-popup-modal.js가 클릭을 가로채 iframe 모달로 연다).
             children = listOf(
-                MenuNode.Item("위치", "/gates/locations"),
-                MenuNode.Item("게이트그룹", "/gates/groups"),
-                MenuNode.Item("게이트 상세", "/gates/details"),
+                MenuNode.Item("위치", "/gates/locations", popup = true),
+                MenuNode.Item("게이트그룹", "/gates/groups", popup = true),
+                MenuNode.Item("게이트 상세", "/gates/details", popup = true),
                 // 버그 수정(2026-08-11, B5): 전용 컨트롤러 없이 /gates/net-state로 링크돼 있어 404였다.
                 // 온라인/오프라인 연결 상태를 실제로 보여주는 화면은 /gates/reset(GateResetGridService가
                 // tb_net_state를 레인별 online 컬럼으로 노출)이라 그쪽으로 재연결한다.
-                MenuNode.Item("연결 상태", "/gates/reset"),
-                MenuNode.Item("게이트 제어", "/gates/control"),
-                MenuNode.Item("일괄 리셋", "/gates/reset"),
-                MenuNode.Item("스케줄/타임존", "/schedule"),
+                MenuNode.Item("연결 상태", "/gates/reset", popup = true),
+                MenuNode.Item("게이트 제어", "/gates/control", popup = true),
+                MenuNode.Item("일괄 리셋", "/gates/reset", popup = true),
+                MenuNode.Item("스케줄/타임존", "/schedule", popup = true),
             ),
         ),
         MenuNode.Header("조회/통계"),

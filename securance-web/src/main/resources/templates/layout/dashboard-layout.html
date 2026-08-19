@@ -26,7 +26,30 @@
         : saved;
       document.documentElement.setAttribute('data-bs-theme', resolved);
     })();
+
+    // [게이트 관리 팝업 전환] gate-popup-modal.js가 사이드바 항목을 iframe이 담긴 Bootstrap
+    // modal로 여는데, 그 iframe 안에서 렌더링되는 페이지는 이 레이아웃을 그대로 재사용한다(컨트롤러/
+    // 템플릿 변경 없음). window.top 비교만으로 "지금 iframe 안이다"를 판별해 topbar/sidebar/footer를
+    // 숨기면, 목록 → 수정/취소 등 모달 안에서 이어지는 모든 내부 네비게이션에서도 쿼리 파라미터
+    // 전달 없이 계속 팝업 모드가 유지된다(레거시 SR_F_SetupLocation/SR_F_SetupGateGroup처럼 팝업
+    // 자체가 목록+폼을 갖춘 독립 화면이 되는 구조). head에서 동기 실행해 렌더링 전에 클래스를 붙이므로
+    // 전체 레이아웃이 잠깐 보였다 사라지는 깜빡임이 없다.
+    if (window.self !== window.top) {
+      document.documentElement.classList.add('gp-embed');
+    }
   </script>
+  <style>
+    /* [게이트 관리 팝업 전환] .gp-embed는 위 스크립트가 iframe 안임을 감지했을 때만 붙는다.
+       팝업 모달 자체가 레거시 팝업의 타이틀바/닫기 버튼 역할을 이미 하므로, 그 안에서는
+       topbar/sidebar/footer/페이지 제목 헤더를 감추고 본문만 남긴다. */
+    .gp-embed .app-header,
+    .gp-embed .app-sidebar,
+    .gp-embed .sidebar-overlay,
+    .gp-embed .app-footer,
+    .gp-embed .app-content-header { display: none !important; }
+    .gp-embed .app-main { margin-inline-start: 0 !important; }
+    .gp-embed body { padding-block-start: 0 !important; }
+  </style>
 </head>
 <body class="layout-fixed sidebar-expand-lg fixed-header fixed-sidebar bg-body-tertiary">
   <div class="app-wrapper">
@@ -52,9 +75,15 @@
     <div th:replace="~{fragments/footer :: footer}"></div>
   </div>
 
+  <!--/* 게이트 관리 팝업(SR_F_SetupLocation/SR_F_SetupGateGroup 대응) 공용 모달 — 모든 화면에
+       한 번만 렌더링한다. 임베드(iframe) 상태의 페이지에서는 사이드바 자체가 .gp-embed CSS로
+       숨겨져 트리거될 일이 없으므로 중복 렌더링돼도 무해하다. */-->
+  <div th:replace="~{fragments/gate-popup-modal :: gatePopupModal}"></div>
+
   <script th:src="@{/vendor/bootstrap/js/bootstrap.bundle.min.js}"></script>
   <script th:src="@{/vendor/adminlte/js/adminlte.min.js}"></script>
   <script th:src="@{/vendor/sortablejs/sortable.min.js}"></script>
+  <script th:src="@{/js/gate-popup-modal.js}"></script>
   <script th:src="@{/js/dashboard-widgets.js}" layout:fragment="scripts"></script>
 </body>
 </html>

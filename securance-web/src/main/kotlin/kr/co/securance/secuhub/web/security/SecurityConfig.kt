@@ -143,6 +143,13 @@ class SecurityConfig {
                 logoutUrl = "/logout"
                 logoutSuccessUrl = "/login?logout"
             }
+            // [Codex 적대적 리뷰 지적] Spring Security 기본값은 X-Frame-Options: DENY라, 게이트 관리
+            // 팝업(gate-popup-modal.html)이 같은 애플리케이션의 /gates/**, /schedule 화면을 iframe으로
+            // 띄우는 것 자체가 브라우저에서 차단됐다(모달만 뜨고 내용이 비어 보임). 외부 사이트의
+            // 클릭재킹 방어는 유지하면서 동일 출처 iframe만 허용하도록 SAMEORIGIN으로 좁힌다.
+            headers {
+                frameOptions { sameOrigin = true }
+            }
             sessionManagement {
                 sessionCreationPolicy = SessionCreationPolicy.IF_REQUIRED
                 // 동시 세션 제한(적대적 리뷰 지적) — 게이트 제어 권한을 가진 관리 콘솔이라, 세션이

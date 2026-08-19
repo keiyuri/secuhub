@@ -308,13 +308,20 @@
         menuLi.style.display = reverseCapable ? '' : 'none';
       });
 
+      // [Codex 리뷰 수정: P2] display:none 상태에서 offsetWidth/offsetHeight를 읽으면 항상 0이라
+      // 200px 폴백만 쓰여, 항목이 10개 이상으로 늘어난 DTL 메뉴(실제 높이 약 400px)를 화면
+      // 아래쪽에서 열면 리셋/모드 변경/모터 설정 같은 하단 항목이 뷰포트 밖으로 잘려 클릭할 수
+      // 없었다. visibility:hidden 상태로 먼저 display:block(레이아웃에는 참여하되 화면에는 안
+      // 보임)해서 실제 크기를 측정한 뒤 위치를 계산하고, 그다음에야 보이게 전환한다.
+      menu.style.visibility = 'hidden';
+      menu.style.display = 'block';
       var menuWidth = menu.offsetWidth || 200;
       var menuHeight = menu.offsetHeight || 200;
       var x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
       var y = Math.min(e.clientY, window.innerHeight - menuHeight - 8);
       menu.style.left = Math.max(0, x) + 'px';
       menu.style.top = Math.max(0, y) + 'px';
-      menu.style.display = 'block';
+      menu.style.visibility = 'visible';
     });
 
     menu.addEventListener('click', function (e) {

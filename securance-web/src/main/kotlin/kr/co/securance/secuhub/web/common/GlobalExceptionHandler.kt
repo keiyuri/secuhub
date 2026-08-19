@@ -7,6 +7,7 @@ import org.springframework.core.annotation.Order
 import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.multipart.MaxUploadSizeExceededException
+import org.springframework.web.servlet.resource.NoResourceFoundException
 
 /**
  * 컨트롤러에서 잡히지 않은 예외를 위한 전역 로깅(2026-08-13 코드 리뷰 지적) — 이전까지
@@ -33,7 +34,9 @@ class GlobalExceptionHandler {
     fun handleUnexpected(request: HttpServletRequest, ex: Exception) {
         // MaxUploadSizeExceededException은 MultipartExceptionHandler가 더 구체적으로 처리하는
         // 케이스라 여기서는 에러 레벨로 남기지 않는다(사용자 입력 실수일 뿐 장애가 아님).
-        if (ex is MaxUploadSizeExceededException) throw ex
+        // NoResourceFoundException은 브라우저가 자동 요청하는 favicon.ico 등 존재하지 않는 정적
+        // 리소스 요청일 뿐 장애가 아닌데, 이를 ERROR로 남기면 스택트레이스만 쌓여 로그를 오염시킨다.
+        if (ex is MaxUploadSizeExceededException || ex is NoResourceFoundException) throw ex
 
         log.error("미처리 예외 [{} {}] {}: {}", request.method, request.requestURI, ex.javaClass.simpleName, ex.message, ex)
         throw ex

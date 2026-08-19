@@ -4,7 +4,9 @@ import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
+import org.springframework.http.HttpMethod
 import org.springframework.web.multipart.MaxUploadSizeExceededException
+import org.springframework.web.servlet.resource.NoResourceFoundException
 import kotlin.test.assertFailsWith
 
 /**
@@ -42,6 +44,17 @@ class GlobalExceptionHandlerTest {
         val ex = MaxUploadSizeExceededException(1024)
 
         val thrown = assertFailsWith<MaxUploadSizeExceededException> { handler.handleUnexpected(request, ex) }
+
+        assert(thrown === ex)
+    }
+
+    @Test
+    fun `NoResourceFoundException(favicon_ico 등)도 로깅 없이 그대로 다시 던져진다`() {
+        // 브라우저가 자동 요청하는 favicon.ico 등 존재하지 않는 정적 리소스 요청은 장애가 아니므로
+        // ERROR 로그(스택트레이스 포함)를 남기지 않고 즉시 다시 던지기만 한다.
+        val ex = NoResourceFoundException(HttpMethod.GET, "/favicon.ico", "favicon.ico")
+
+        val thrown = assertFailsWith<NoResourceFoundException> { handler.handleUnexpected(request, ex) }
 
         assert(thrown === ex)
     }

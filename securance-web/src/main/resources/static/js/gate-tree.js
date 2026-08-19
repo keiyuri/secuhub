@@ -1,7 +1,10 @@
 // Phase 10 — #18 대시보드 게이트 트리뷰(계획서 3절/2026-08-12 사용자 확인: 레거시 없이 신규 설계).
-// LOC/GRP/DTL 3계층 트리 + 연결상태 아이콘 + 우클릭 제어 메뉴.
-// GateTreeApiController(/api/gate-tree)를 폴링해 그리고, 제어는 기존 엔드포인트
-// (/api/gate-control/reset, /gates/details/{id}/mode|motor)를 그대로 재사용한다.
+// LOC/GRP/DTL 3계층 트리(정렬: 위치ID→그룹ID→게이트ID, 2026-08-19) + 연결상태 아이콘 + 우클릭 제어
+// 메뉴. GateTreeApiController(/api/gate-tree)를 폴링해 그리고, 제어는 기존 엔드포인트
+// (/api/gate-control/command, /api/gate-control/reset, /gates/details/{id}/mode|motor)를 그대로
+// 재사용한다. 우클릭 메뉴 상단 5개 항목(개방/폐쇄/정상 복구/FREE 모드/역방향 개방)은
+// SR_Speed_Client 트리뷰(SR_F_DashBoard.GateControl.cs ContextMenu_Init)와 동일하게 맞췄다
+// (2026-08-19 사용자 요청).
 (function () {
   'use strict';
 
@@ -29,8 +32,11 @@
 
   function renderDetail(loc, grp, d) {
     var label = d.dtlName ? escapeHtml(d.dtlName) : escapeHtml(d.dtlIp);
+    // data-gate-type: 우클릭 메뉴가 "역방향 개방" 항목의 표시 여부를 판단하는 데 쓴다(Flap=2에서만
+    // 표시 — SR_Speed_Client ContextMenu_Init의 iGateType==2 분기와 동일).
     return '<li class="gt-dtl" data-dtl-id="' + d.dtlId + '" data-dtl-ip="' + escapeHtml(d.dtlIp) +
-      '" data-dtl-lane="' + d.dtlLaneNo + '" data-online="' + d.online + '">' +
+      '" data-dtl-lane="' + d.dtlLaneNo + '" data-online="' + d.online +
+      '" data-gate-type="' + grp.gateTypeCode + '">' +
       statusIcon(d.online) +
       ' <span class="gt-dtl-label">' + label + '</span>' +
       ' <span class="text-muted small">(' + escapeHtml(d.dtlIp) + ' / 레인 ' + d.dtlLaneNo + ')</span>' +
@@ -102,24 +108,79 @@
     return headers;
   }
 
-  function sendReset(dtlIp, dtlLaneNo, command, reauthPassword) {
+  // 리셋(/api/gate-control/reset)과 일반 운영 명령(/api/gate-control/command, 개방/폐쇄/복구/FREE/
+  // 역방향 개방)은 둘 다 GateControlReauthInterceptor가 같은 방식으로 재인증을 요구하므로
+  // (dtlIp/dtlLaneNo/command + 선택적 reauthPassword) 요청 조립·응답 파싱 로직을 공유한다.
+  function postGateControl(path, dtlIp, dtlLaneNo, command, reauthPassword) {
     var payload = { dtlIp: dtlIp, dtlLaneNo: dtlLaneNo, command: command };
     if (reauthPassword) payload.reauthPassword = reauthPassword;
     var params = new URLSearchParams(payload);
-    return fetch('/api/gate-control/reset', { method: 'POST', headers: csrfHeaders(), body: params.toString() })
+    return fetch(path, { method: 'POST', headers: csrfHeaders(), body: params.toString() })
       .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; }); });
   }
 
   // securance.security.gate-control-reauth-required=true일 때 GateControlReauthInterceptor가
   // {reauthRequired:true}를 반환한다 — window.prompt()로 비밀번호를 받아 한 번만 자동 재시도한다.
   // 취소하면 재시도하지 않고 최초(재인증 요구) 응답을 그대로 반환한다.
-  function sendResetWithReauth(dtlIp, dtlLaneNo, command) {
-    return sendReset(dtlIp, dtlLaneNo, command).then(function (r) {
+  function postGateControlWithReauth(path, dtlIp, dtlLaneNo, command) {
+    return postGateControl(path, dtlIp, dtlLaneNo, command).then(function (r) {
       if (!r.body || !r.body.reauthRequired) return r;
       var password = window.prompt('게이트 제어 재인증 — 비밀번호를 입력하세요.');
       if (!password) return r;
-      return sendReset(dtlIp, dtlLaneNo, command, password);
+      return postGateControl(path, dtlIp, dtlLaneNo, command, password);
     });
+  }
+
+  function sendResetWithReauth(dtlIp, dtlLaneNo, command) {
+    return postGateControlWithReauth('/api/gate-control/reset', dtlIp, dtlLaneNo, command);
+  }
+
+  // 게이트 상시 개방/폐쇄/정상 복구/FREE 모드/역방향 개방 — SR_Speed_Client 트리뷰 컨텍스트 메뉴
+  // (ContextMenu_Init)와 동일한 명령 세트. SpeedGateControlCommand enum 이름(OPEN/CLOSE/NORMAL/
+  // FREE_FREE/REVERSE_OPEN)을 그대로 command 파라미터로 보낸다.
+  function sendCommandWithReauth(dtlIp, dtlLaneNo, command) {
+    return postGateControlWithReauth('/api/gate-control/command', dtlIp, dtlLaneNo, command);
+  }
+
+  // [Codex 적대적 리뷰 수정: high] 이전에는 postGateControl(WithReauth)의 응답을 catch에서만
+  // 조용히 삼켰다 — 429(대기열 포화)/503(미접속)/401(재인증 실패)처럼 fetch 자체는 정상 resolve
+  // 되는 실패 응답도 전혀 표시되지 않아, 운영자가 개방/폐쇄 등 출입 통제 명령이 실제로 게이트에
+  // 전달됐는지 알 수 없었다("대시보드 알림 팝업이 별도로 상태를 반영한다"는 주석은 사실
+  // dashboard-realtime.js의 화재/장애 알림 모달(rt-alert-*) 전용 로직이라 이 우클릭 메뉴 요청과는
+  // 연결되어 있지 않았다). HTTP 상태와 무관하게 항상 결과를 화면에 노출한다.
+  function describeResult(r) {
+    if (!r) return { ok: false, text: '응답을 확인할 수 없습니다.' };
+    var message = (r.body && r.body.message) ? r.body.message : ('HTTP ' + r.status);
+    return { ok: !!r.ok, text: message };
+  }
+
+  var resultToastTimer = null;
+
+  function showResultToast(dtlIp, dtlLaneNo, ok, text) {
+    var el = document.getElementById('gate-tree-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'gate-tree-toast';
+      document.body.appendChild(el);
+    }
+    el.className = 'gate-tree-toast ' + (ok ? 'gate-tree-toast-ok' : 'gate-tree-toast-error');
+    el.textContent = dtlIp + ' / 레인 ' + dtlLaneNo + ' — ' + text;
+    el.style.display = 'block';
+    if (resultToastTimer) clearTimeout(resultToastTimer);
+    resultToastTimer = setTimeout(function () { el.style.display = 'none'; }, 4000);
+  }
+
+  // 명령 전송 Promise에 결과 표시를 일괄로 연결한다 — 성공(2xx)/실패(4xx·5xx) 모두 r.ok/r.body를
+  // 검사해 표시하고, 네트워크·JSON 파싱 실패(catch)도 동일하게 사용자에게 노출한다.
+  function reportCommandResult(promise, dtlIp, dtlLaneNo) {
+    return promise
+      .then(function (r) {
+        var described = describeResult(r);
+        showResultToast(dtlIp, dtlLaneNo, described.ok, described.text);
+      })
+      .catch(function (err) {
+        showResultToast(dtlIp, dtlLaneNo, false, '요청 실패: ' + err);
+      });
   }
 
   function setupContextMenu(container) {
@@ -137,9 +198,16 @@
         dtlId: li.getAttribute('data-dtl-id'),
         dtlIp: li.getAttribute('data-dtl-ip'),
         dtlLaneNo: li.getAttribute('data-dtl-lane'),
+        gateType: li.getAttribute('data-gate-type'),
       };
       var header = menu.querySelector('.gate-tree-context-target');
       if (header) header.textContent = target.dtlIp + ' / 레인 ' + target.dtlLaneNo;
+
+      // "역방향 개방" 항목은 Flap 게이트(gate_type_code=2)에서만 노출한다 — 다른 타입 게이트는
+      // 명령 자체를 지원하지 않아, 항목을 감추는 것이 클릭 후 실패 응답을 받는 것보다 낫다.
+      menu.querySelectorAll('[data-requires-gate-type]').forEach(function (menuLi) {
+        menuLi.style.display = menuLi.getAttribute('data-requires-gate-type') === target.gateType ? '' : 'none';
+      });
 
       var menuWidth = menu.offsetWidth || 200;
       var menuHeight = menu.offsetHeight || 200;
@@ -155,19 +223,45 @@
       if (!item || !target) return;
       e.preventDefault();
       var action = item.getAttribute('data-action');
+      // [Codex 리뷰 수정: P1] hideMenu()가 target을 null로 초기화하므로, 그 뒤에 target.*를 읽는
+      // 모든 분기(모드 변경/모터 설정/리셋/운영 명령)가 TypeError로 깨졌다 — 메뉴를 숨기기 전에
+      // 선택된 노드 정보를 별도 변수(selected)로 옮겨두고 이후로는 이 변수만 사용한다.
+      var selected = target;
       hideMenu();
 
       if (action === 'mode-change') {
-        window.location.href = '/gates/details/' + target.dtlId + '/mode';
+        window.location.href = '/gates/details/' + selected.dtlId + '/mode';
         return;
       }
       if (action === 'motor-setup') {
-        window.location.href = '/gates/details/' + target.dtlId + '/motor';
+        window.location.href = '/gates/details/' + selected.dtlId + '/motor';
         return;
       }
-      var command = action === 'reset-system' ? 'RESET_SYSTEM' : action === 'reset-motor' ? 'RESET_MOTOR' : null;
-      if (!command) return;
-      sendResetWithReauth(target.dtlIp, target.dtlLaneNo, command).catch(function () { /* 실패는 조용히 무시 — 대시보드 알림 팝업이 별도로 상태를 반영한다 */ });
+
+      // SpeedGateControlCommand enum 이름과 1:1 대응 — GateControlApiController가 문자열을
+      // valueOf()로 그대로 변환하므로 오타는 400(Bad Request)으로 즉시 드러난다.
+      var RESET_COMMANDS = { 'reset-system': 'RESET_SYSTEM', 'reset-motor': 'RESET_MOTOR' };
+      var OPERATION_COMMANDS = {
+        'gate-open': 'OPEN',
+        'gate-close': 'CLOSE',
+        'gate-normal': 'NORMAL',
+        'gate-free': 'FREE_FREE',
+        'gate-reverse-open': 'REVERSE_OPEN',
+      };
+
+      if (RESET_COMMANDS[action]) {
+        reportCommandResult(
+          sendResetWithReauth(selected.dtlIp, selected.dtlLaneNo, RESET_COMMANDS[action]),
+          selected.dtlIp, selected.dtlLaneNo,
+        );
+        return;
+      }
+      if (OPERATION_COMMANDS[action]) {
+        reportCommandResult(
+          sendCommandWithReauth(selected.dtlIp, selected.dtlLaneNo, OPERATION_COMMANDS[action]),
+          selected.dtlIp, selected.dtlLaneNo,
+        );
+      }
     });
 
     document.addEventListener('click', function (e) {
@@ -189,7 +283,13 @@
       '.gate-tree .gt-dtl-list{list-style:none;margin:0;padding-left:1.5rem}' +
       '.gate-tree .gt-dtl{padding:.1rem 0;cursor:context-menu}' +
       '.gate-tree .gt-status{font-size:.6rem;margin-right:.25rem}' +
-      '.gate-tree-context-menu{min-width:200px;z-index:1080}';
+      '.gate-tree-context-menu{min-width:200px;z-index:1080}' +
+      // 우클릭 메뉴로 보낸 명령의 성공/실패를 표시하는 토스트(2026-08-19 Codex 적대적 리뷰 대응).
+      '#gate-tree-toast{display:none;position:fixed;right:1rem;bottom:1rem;max-width:360px;' +
+      'padding:.6rem 1rem;border-radius:.375rem;color:#fff;font-size:.9rem;z-index:1090;' +
+      'box-shadow:0 .25rem .75rem rgba(0,0,0,.3)}' +
+      '#gate-tree-toast.gate-tree-toast-ok{background:#198754}' +
+      '#gate-tree-toast.gate-tree-toast-error{background:#dc3545}';
     document.head.appendChild(style);
   }
 

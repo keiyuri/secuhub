@@ -48,7 +48,9 @@ class GateTreeService(
     private val netStateRepository: NetStateRepository,
 ) {
     fun buildTree(): List<GateTreeLocationNode> {
-        val locations = locationRepository.findAll(Sort.by("locName"))
+        // 트리 정렬 순서 — 위치 ID → 그룹 ID → 게이트(레인) ID(2026-08-19 사용자 요청, SR_Speed_Client
+        // 트리뷰의 InsertNodeSorted와 동일하게 이름이 아닌 ID 기준으로 정렬한다).
+        val locations = locationRepository.findAll(Sort.by("locId"))
         // GateGroupRepository.findAll()/GateDetailRepository.findAllForTree()는 JOIN FETCH로
         // location/group을 함께 읽어온다(둘 다 LAZY + open-in-view:false, 계획서 4.2절 대응).
         val groupsByLoc = groupRepository.findAll().groupBy { it.location.locId }
@@ -59,10 +61,10 @@ class GateTreeService(
 
         return locations.map { loc ->
             val groups = groupsByLoc[loc.locId].orEmpty()
-                .sortedBy { it.grpName }
+                .sortedBy { it.grpId }
                 .map { grp ->
                     val details = detailsByGrp[grp.grpId].orEmpty()
-                        .sortedBy { it.dtlLaneNo }
+                        .sortedBy { it.dtlId }
                         .map { d ->
                             GateTreeDetailNode(
                                 dtlId = requireNotNull(d.dtlId),

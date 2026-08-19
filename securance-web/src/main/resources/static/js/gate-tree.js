@@ -253,7 +253,8 @@
     if (targets.length === 0) return Promise.resolve([]);
     var first = targets[0];
     var rest = targets.slice(1);
-    return postGateControl('/api/gate-control/command', first.dtlIp, first.dtlLaneNo, command).then(function (r) {
+    var firstPromise = postGateControl('/api/gate-control/command', first.dtlIp, first.dtlLaneNo, command);
+    return firstPromise.then(function (r) {
       if (r.body && r.body.reauthRequired) {
         var password = window.prompt('게이트 제어 재인증 — 비밀번호를 입력하세요.');
         if (!password) return null;
@@ -267,6 +268,22 @@
         return postGateControl('/api/gate-control/command', dtlIp, dtlLaneNo, command);
       });
       return [Promise.resolve(r)].concat(restPromises);
+    }, function () {
+      // [Codex 적대적 리뷰 수정: high, 2026-08-19] 이전에는 첫 대상 요청 자체가 reject(응답 유실/
+      // 비JSON 응답/네트워크 오류 등 — postGateControl의 res.json() 파싱 실패 포함)되면 이 then의
+      // 성공 콜백이 전혀 실행되지 않아 함수 전체가 reject되고, 재인증이 필요 없는 나머지 N-1대는
+      // 통째로 전송조차 되지 않았다. 상시 개방/폐쇄/FREE 같은 위험 명령이 첫 게이트에만(그것도
+      // 실제 적용 여부조차 불명한 채) 적용되고 나머지는 아예 시도되지 않는 부분 적용 상태를
+      // 만들 수 있었다. 첫 요청이 reject되면 재인증 필요 여부를 알 수 없으므로(preHandle 응답을
+      // 못 받음) 재인증이 필요 없는 구성이라고 가정하고 나머지 대상에는 비밀번호 없이 그대로
+      // 전송한다 — 실제로 재인증이 필요한 구성이었다면 그 응답들도 reauthRequired로 개별 실패
+      // 처리되어 운영자가 식별할 수 있다(집단 프롬프트를 다시 띄우지는 않는다 — "프롬프트 1회"
+      // 원칙 유지). 첫 대상의 원래 reject는 감추지 않고 결과 배열에 그대로 보존해, 실제 적용
+      // 여부가 불명확한 상태로 reportBulkCommandResult가 "요청 실패"로 명시하게 한다.
+      var restPromises = sendBulkSequentialByIp(rest, function (dtlIp, dtlLaneNo) {
+        return postGateControl('/api/gate-control/command', dtlIp, dtlLaneNo, command);
+      });
+      return [firstPromise].concat(restPromises);
     });
   }
 

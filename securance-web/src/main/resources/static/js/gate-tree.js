@@ -214,7 +214,12 @@
   // 게이트별 개별 실패만 로그로 남기고 UI에는 알리지 않았지만, 이 프로젝트는 앞서 Codex 적대적
   // 리뷰(2026-08-19)로 "실패를 조용히 삼키지 않는다"는 원칙을 세웠으므로 성공/실패 건수를 요약해
   // 토스트로 노출한다.
-  function reportBulkCommandResult(promises, targetLabel) {
+  // [Codex 적대적 리뷰 수정: high, 2026-08-19] "N/M대 성공"이라는 집계만으로는 운영자가 정확히
+  // 어떤 게이트가 명령을 받지 못했는지 알 수 없어, 위험 상태(예: 개방 명령이 일부만 적용된 상태)를
+  // 식별·복구할 방법이 없었다. targets를 함께 받아 실패한 게이트의 IP/레인을 텍스트에 그대로
+  // 나열한다(너무 길어지지 않도록 최대 5건까지만 나열하고 나머지는 "외 N건"으로 축약).
+  function reportBulkCommandResult(promises, targetLabel, targets) {
+    var FAILED_LABEL_LIMIT = 5;
     return Promise.all(promises.map(function (p) {
       return p
         .then(function (r) { return describeResult(r); })
@@ -222,8 +227,46 @@
     })).then(function (results) {
       var okCount = results.filter(function (r) { return r.ok; }).length;
       var text = okCount + '/' + results.length + '대 성공';
-      if (okCount < results.length) text += ' (' + (results.length - okCount) + '대 실패)';
+      if (okCount < results.length) {
+        var failedLabels = results
+          .map(function (r, i) { return (!r.ok && targets[i]) ? (targets[i].dtlIp + '/레인' + targets[i].dtlLaneNo) : null; })
+          .filter(Boolean);
+        var shown = failedLabels.slice(0, FAILED_LABEL_LIMIT).join(', ');
+        if (failedLabels.length > FAILED_LABEL_LIMIT) shown += ' 외 ' + (failedLabels.length - FAILED_LABEL_LIMIT) + '건';
+        text += ' (' + (results.length - okCount) + '대 실패: ' + shown + ')';
+      }
       showResultToast(targetLabel, okCount === results.length, text);
+    });
+  }
+
+  // [Codex 적대적 리뷰 수정: high, 2026-08-19] 이전에는 대상마다 독립적으로 sendCommandWithReauth를
+  // 호출해, 재인증이 활성화된 구성에서 게이트마다 따로 프롬프트가 떴다. 사용자가 중간에 프롬프트를
+  // 취소하거나 일부만 응답하면 이미 인증된 일부 게이트에는 명령이 적용되고 나머지는 적용되지 않는
+  // 상태로 남을 수 있었다. 대신 첫 대상으로 재인증 필요 여부를 먼저 확인한다 — 비밀번호 없이
+  // 전송했을 때 GateControlReauthInterceptor가 {reauthRequired:true}를 반환한다는 것은 preHandle
+  // 단계에서 컨트롤러(실제 명령 처리)에 도달하기 전에 차단됐다는 뜻이라, 이 시점까지는 어떤
+  // 게이트에도 명령이 실제로 전달되지 않는다. 재인증이 필요하면 프롬프트를 단 한 번만 띄우고,
+  // 취소하면 전체 일괄 전송을 여기서 중단한다(null 반환) — 부분 실행 없이 아무 게이트도 건드리지
+  // 않은 채로 끝난다. 재인증이 필요 없는 구성이면 이 "확인 요청"이 곧 실제 첫 번째 명령 전송이라
+  // 낭비 없이 그대로 이어간다.
+  function sendBulkOperationCommand(targets, command) {
+    if (targets.length === 0) return Promise.resolve([]);
+    var first = targets[0];
+    var rest = targets.slice(1);
+    return postGateControl('/api/gate-control/command', first.dtlIp, first.dtlLaneNo, command).then(function (r) {
+      if (r.body && r.body.reauthRequired) {
+        var password = window.prompt('게이트 제어 재인증 — 비밀번호를 입력하세요.');
+        if (!password) return null;
+        // 첫 대상도 아직 실행되지 않았으므로 targets 전체를 비밀번호와 함께 다시 보낸다.
+        return sendBulkSequentialByIp(targets, function (dtlIp, dtlLaneNo) {
+          return postGateControl('/api/gate-control/command', dtlIp, dtlLaneNo, command, password);
+        });
+      }
+      // 재인증 불필요 — 첫 대상은 이미 전송·응답까지 끝났으니 그 결과를 그대로 쓰고 나머지만 보낸다.
+      var restPromises = sendBulkSequentialByIp(rest, function (dtlIp, dtlLaneNo) {
+        return postGateControl('/api/gate-control/command', dtlIp, dtlLaneNo, command);
+      });
+      return [Promise.resolve(r)].concat(restPromises);
     });
   }
 
@@ -408,17 +451,19 @@
             selected.dtlIp, selected.dtlLaneNo,
           );
         } else {
-          // 알려진 제약: 재인증이 필요한 구성(gate-control-reauth-required=true)에서는 게이트마다
-          // sendCommandWithReauth가 개별적으로 window.prompt()를 띄운다 — 여러 게이트가 동시에
-          // reauthRequired를 반환하면 창이 여러 번 뜬다(같은 IP는 아래 순차 전송 덕에 겹치지는
-          // 않지만, 서로 다른 IP끼리는 여전히 순서대로 뜰 수 있다). 재인증 자체가 드문 운영
-          // 구성이고, 세션 단위 재인증 캐싱은 이번 요청 범위를 벗어나 후속 과제로 남긴다.
-          reportBulkCommandResult(
-            sendBulkSequentialByIp(bulkTargets, function (dtlIp, dtlLaneNo) {
-              return sendCommandWithReauth(dtlIp, dtlLaneNo, OPERATION_COMMANDS[action]);
-            }),
-            targetLabel,
-          );
+          // [Codex 적대적 리뷰 수정: high] 재인증은 대상 전체에 대해 딱 한 번만 확인한다
+          // (sendBulkOperationCommand 참고) — 취소 시 어떤 게이트도 건드리지 않고 전체 중단한다.
+          sendBulkOperationCommand(bulkTargets, OPERATION_COMMANDS[action])
+            .then(function (promises) {
+              if (!promises) {
+                showResultToast(targetLabel, false, '재인증이 취소되어 전송하지 않았습니다.');
+                return;
+              }
+              reportBulkCommandResult(promises, targetLabel, bulkTargets);
+            })
+            .catch(function (err) {
+              showResultToast(targetLabel, false, '요청 실패: ' + err);
+            });
         }
       }
     });

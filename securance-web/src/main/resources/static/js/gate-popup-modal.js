@@ -4,8 +4,11 @@
 // window.self !== window.top 판별(dashboard-layout.html의 .gp-embed) 덕분에 계속 팝업 모드로 남는다.
 // [게이트 트리뷰 연동] gate-tree.js가 위치/그룹 노드 우클릭 메뉴에서 "위치 관리"/"게이트그룹
 // 관리" 팝업을 열 때도 이 모달을 재사용한다 — 클릭 위임(data-popup 링크)과 동일한 오픈 로직을
-// window.GatePopupModal.open(url, title)로 노출해 중복 구현하지 않는다.
-window.GatePopupModal = { open: function () {} };
+// window.GatePopupModal.open(url, title)로 노출해 중복 구현하지 않는다. ready=false인 동안은
+// 아래 DOMContentLoaded 초기화가 아직(또는 끝내) 되지 않은 상태 — 호출부(gate-tree.js)가 이
+// 값을 보고 모달 대신 전체 페이지 이동으로 폴백할 수 있게 한다(사이드바 링크의 href 폴백과
+// 달리 트리 메뉴 항목은 href="#"라 대체 경로가 없어 무동작 스텁만으로는 조용히 실패한다).
+window.GatePopupModal = { ready: false, open: function () {} };
 
 document.addEventListener("DOMContentLoaded", function () {
   var modalEl = document.getElementById("gate-popup-modal");
@@ -32,6 +35,7 @@ document.addEventListener("DOMContentLoaded", function () {
   // DOMContentLoaded 이전에 window.GatePopupModal.open()이 호출될 일은 없지만(다른 스크립트도
   // 전부 DOM 로드 이후 실행), 방어적으로 초기화 이후 실제 구현으로 교체한다.
   window.GatePopupModal.open = openPopup;
+  window.GatePopupModal.ready = true;
 
   document.addEventListener("click", function (e) {
     var link = e.target.closest('a[data-popup="true"]');

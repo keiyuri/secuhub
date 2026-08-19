@@ -261,12 +261,18 @@
       // 동일한 gate-popup-modal(iframe 모달)로 위치/게이트그룹 관리 화면을 연다. 특정 위치·그룹만
       // 딥링크로 좁히는 컨트롤러 파라미터는 없어 전체 목록 화면을 그대로 연다(사이드바 클릭과 동일
       // 진입점 — MenuProvider.kt의 popup=true 항목 참고).
-      if (action === 'manage-location') {
-        if (window.GatePopupModal) window.GatePopupModal.open('/gates/locations', '위치 관리');
-        return;
-      }
-      if (action === 'manage-group') {
-        if (window.GatePopupModal) window.GatePopupModal.open('/gates/groups', '게이트그룹 관리');
+      // gate-popup-modal.js 초기화가 실패한 예외적인 경우(모달 프래그먼트 누락, bootstrap 로드
+      // 실패 등)에는 window.GatePopupModal.open이 무동작 스텁(같은 파일 8행)에 계속 머무른다 —
+      // 사이드바 링크(href 유지)와 달리 이 메뉴 항목은 href="#"라 대체 경로가 없으므로, 모달을
+      // 열 수 없을 때는 조용히 실패하는 대신 전체 페이지 이동으로 폴백한다.
+      if (action === 'manage-location' || action === 'manage-group') {
+        var manageUrl = action === 'manage-location' ? '/gates/locations' : '/gates/groups';
+        var manageTitle = action === 'manage-location' ? '위치 관리' : '게이트그룹 관리';
+        if (window.GatePopupModal && window.GatePopupModal.ready) {
+          window.GatePopupModal.open(manageUrl, manageTitle);
+        } else {
+          window.location.href = manageUrl;
+        }
         return;
       }
 

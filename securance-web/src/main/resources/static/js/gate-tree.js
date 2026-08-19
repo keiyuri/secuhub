@@ -4,7 +4,10 @@
 // (/api/gate-control/command, /api/gate-control/reset, /gates/details/{id}/mode|motor)를 그대로
 // 재사용한다. 우클릭 메뉴 상단 5개 항목(개방/폐쇄/정상 복구/FREE 모드/역방향 개방)은
 // SR_Speed_Client 트리뷰(SR_F_DashBoard.GateControl.cs ContextMenu_Init)와 동일하게 맞췄다
-// (2026-08-19 사용자 요청).
+// (2026-08-19 사용자 요청). 같은 5개 항목을 LOC/GRP 노드에서도 동일하게 띄우고 하위 DTL 전체에
+// 일괄 전송하도록 확장했다(2026-08-19 두 번째 요청 — 레거시가 노드 계층과 무관하게 항상 같은
+// 메뉴를 띄우고 FullPath 하위 전체에 broadcast하는 것과 동일하게 "완전 교체"; dashboard.html의
+// 우클릭 메뉴 마크업 주석 참고).
 (function () {
   'use strict';
 
@@ -158,7 +161,10 @@
 
   var resultToastTimer = null;
 
-  function showResultToast(dtlIp, dtlLaneNo, ok, text) {
+  // [2026-08-19 사용자 요청] LOC/GRP 노드의 일괄 전송을 지원하려고 dtlIp/dtlLaneNo 두 인자 대신
+  // 라벨 문자열 하나를 받도록 일반화했다 — 단일 게이트는 "IP / 레인 N", 다건 전송은 "위치 ~ N대"
+  // 처럼 호출부가 원하는 라벨을 그대로 넘긴다.
+  function showResultToast(label, ok, text) {
     var el = document.getElementById('gate-tree-toast');
     if (!el) {
       el = document.createElement('div');
@@ -166,7 +172,7 @@
       document.body.appendChild(el);
     }
     el.className = 'gate-tree-toast ' + (ok ? 'gate-tree-toast-ok' : 'gate-tree-toast-error');
-    el.textContent = dtlIp + ' / 레인 ' + dtlLaneNo + ' — ' + text;
+    el.textContent = label + ' — ' + text;
     el.style.display = 'block';
     if (resultToastTimer) clearTimeout(resultToastTimer);
     resultToastTimer = setTimeout(function () { el.style.display = 'none'; }, 4000);
@@ -178,11 +184,28 @@
     return promise
       .then(function (r) {
         var described = describeResult(r);
-        showResultToast(dtlIp, dtlLaneNo, described.ok, described.text);
+        showResultToast(dtlIp + ' / 레인 ' + dtlLaneNo, described.ok, described.text);
       })
       .catch(function (err) {
-        showResultToast(dtlIp, dtlLaneNo, false, '요청 실패: ' + err);
+        showResultToast(dtlIp + ' / 레인 ' + dtlLaneNo, false, '요청 실패: ' + err);
       });
+  }
+
+  // [2026-08-19 사용자 요청] LOC/GRP 노드 우클릭 → 일괄 전송 결과 요약. 레거시(GateCtrlDataSet)는
+  // 게이트별 개별 실패만 로그로 남기고 UI에는 알리지 않았지만, 이 프로젝트는 앞서 Codex 적대적
+  // 리뷰(2026-08-19)로 "실패를 조용히 삼키지 않는다"는 원칙을 세웠으므로 성공/실패 건수를 요약해
+  // 토스트로 노출한다.
+  function reportBulkCommandResult(promises, targetLabel) {
+    return Promise.all(promises.map(function (p) {
+      return p
+        .then(function (r) { return describeResult(r); })
+        .catch(function (err) { return { ok: false, text: '요청 실패: ' + err }; });
+    })).then(function (results) {
+      var okCount = results.filter(function (r) { return r.ok; }).length;
+      var text = okCount + '/' + results.length + '대 성공';
+      if (okCount < results.length) text += ' (' + (results.length - okCount) + '대 실패)';
+      showResultToast(targetLabel, okCount === results.length, text);
+    });
   }
 
   function setupContextMenu(container) {
@@ -215,26 +238,55 @@
         if (header) header.textContent = target.dtlIp + ' / 레인 ' + target.dtlLaneNo;
       } else if (node.classList.contains('gt-grp')) {
         nodeType = 'grp';
-        target = { type: nodeType, grpId: node.getAttribute('data-grp-id'), grpName: node.getAttribute('data-grp-name') };
+        target = {
+          type: nodeType,
+          grpId: node.getAttribute('data-grp-id'),
+          grpName: node.getAttribute('data-grp-name'),
+          // [2026-08-19 사용자 요청: "완전 교체"] LOC/GRP 노드도 DTL과 동일한 5개 제어 명령을
+          // 하위 게이트 전체에 일괄 전송한다(레거시 GateCtrlDataSet의 broadcast와 동일 의도) —
+          // 서버에 별도 broadcast 엔드포인트가 없어, 우클릭 시점에 이 노드 하위의 .gt-dtl DOM에서
+          // dtlIp/dtlLaneNo/gateType을 모아두고 클릭 시 순회 전송한다.
+          dtlList: Array.prototype.map.call(node.querySelectorAll('.gt-dtl'), function (el) {
+            return {
+              dtlIp: el.getAttribute('data-dtl-ip'),
+              dtlLaneNo: el.getAttribute('data-dtl-lane'),
+              gateType: el.getAttribute('data-gate-type'),
+            };
+          }),
+        };
         if (header) header.textContent = target.grpName;
       } else {
         nodeType = 'loc';
-        target = { type: nodeType, locId: node.getAttribute('data-loc-id'), locName: node.getAttribute('data-loc-name') };
+        target = {
+          type: nodeType,
+          locId: node.getAttribute('data-loc-id'),
+          locName: node.getAttribute('data-loc-name'),
+          dtlList: Array.prototype.map.call(node.querySelectorAll('.gt-dtl'), function (el) {
+            return {
+              dtlIp: el.getAttribute('data-dtl-ip'),
+              dtlLaneNo: el.getAttribute('data-dtl-lane'),
+              gateType: el.getAttribute('data-gate-type'),
+            };
+          }),
+        };
         if (header) header.textContent = target.locName;
       }
 
-      // 노드 계층에 맞는 항목만 노출한다 — DTL 전용 명령(개방/폐쇄/리셋/모드변경 등)은 실제 게이트
-      // IP/레인이 있는 DTL 노드에서만 의미가 있고, "위치 관리"/"게이트그룹 관리"는 그 반대다.
+      // 리셋/모드 변경/모터 설정은 여전히 DTL 전용이다(레거시에도 없던 항목이거나 개발자용으로만
+      // 존재 — dashboard.html 우클릭 메뉴 주석 참고). 5개 제어 명령(개방~역방향 개방)은 세 계층
+      // 모두에서 항상 노출되므로 이 필터 대상이 아니다(마크업에 data-requires-node-type 없음).
       menu.querySelectorAll('[data-requires-node-type]').forEach(function (menuLi) {
         menuLi.style.display = menuLi.getAttribute('data-requires-node-type') === nodeType ? '' : 'none';
       });
 
       // "역방향 개방" 항목은 Flap 게이트(gate_type_code=2)에서만 노출한다 — 다른 타입 게이트는
       // 명령 자체를 지원하지 않아, 항목을 감추는 것이 클릭 후 실패 응답을 받는 것보다 낫다.
-      // (DTL 노드가 아니면 위 data-requires-node-type 필터로 이미 숨겨져 있으므로 영향 없다.)
+      // DTL 노드는 자신의 gateType을, LOC/GRP 노드는 하위 DTL 중 Flap 타입이 하나라도 있는지를 본다.
+      var reverseCapable = nodeType === 'dtl'
+        ? target.gateType === '2'
+        : target.dtlList.some(function (d) { return d.gateType === '2'; });
       menu.querySelectorAll('[data-requires-gate-type]').forEach(function (menuLi) {
-        if (nodeType !== 'dtl') return;
-        menuLi.style.display = menuLi.getAttribute('data-requires-gate-type') === target.gateType ? '' : 'none';
+        menuLi.style.display = reverseCapable ? '' : 'none';
       });
 
       var menuWidth = menu.offsetWidth || 200;
@@ -256,35 +308,6 @@
       // 선택된 노드 정보를 별도 변수(selected)로 옮겨두고 이후로는 이 변수만 사용한다.
       var selected = target;
       hideMenu();
-
-      // [2026-08-19 사용자 요청] 위치/그룹 노드 우클릭 메뉴는 자체 모달 오픈 로직을 갖지 않고,
-      // 사이드바 "모니터링 > 게이트 관리" 그룹의 실제 메뉴 항목(위치/게이트그룹, MenuNode.Item
-      // popup=true — MenuProvider.kt 참고)을 그대로 클릭해서 실행한다. document.querySelector로
-      // 찾은 사이드바 링크를 .click()하면 gate-popup-modal.js의 document 클릭 위임 리스너가 그대로
-      // 반응해, 사이드바를 직접 클릭했을 때와 완전히 동일한 모달 오픈(제목 포함)을 탄다 — 열기
-      // 로직·제목 문자열의 중복은 없앴다. 다만 이 파일에 '/gates/locations' 등 href 리터럴
-      // 자체는 여전히 남아 있다(사이드바 링크를 찾기 위한 셀렉터 키로 필요) — MenuProvider.kt에서
-      // 해당 항목의 href를 바꾸면 이 셀렉터도 함께 고쳐야 한다는 점은 완전히 해소되지 않았다.
-      if (action === 'manage-location' || action === 'manage-group') {
-        var menuHref = action === 'manage-location' ? '/gates/locations' : '/gates/groups';
-        var sidebarLink = document.querySelector('.app-sidebar a[data-popup="true"][href="' + menuHref + '"]');
-        if (sidebarLink) {
-          sidebarLink.click();
-        } else {
-          // 사이드바 마크업이 예상과 달라 메뉴 항목을 찾지 못한 예외적인 경우의 최소 폴백 —
-          // gate-popup-modal.js 초기화 실패 시(무동작 스텁, 같은 파일 8행)에는 href="#"라 대체
-          // 경로가 없는 이 메뉴 항목이 조용히 실패하지 않도록 전체 페이지 이동으로 대체한다.
-          // 제목은 사이드바 항목(MenuProvider.kt의 "위치"/"게이트그룹")과 동일하게 맞춰, 정상
-          // 경로와 폴백 경로가 서로 다른 모달 제목을 보여주지 않도록 한다.
-          var manageTitle = action === 'manage-location' ? '위치' : '게이트그룹';
-          if (window.GatePopupModal && window.GatePopupModal.ready) {
-            window.GatePopupModal.open(menuHref, manageTitle);
-          } else {
-            window.location.href = menuHref;
-          }
-        }
-        return;
-      }
 
       if (action === 'mode-change') {
         window.location.href = '/gates/details/' + selected.dtlId + '/mode';
@@ -320,6 +343,7 @@
       };
 
       if (RESET_COMMANDS[action]) {
+        // 리셋은 여전히 DTL 전용이라 selected는 항상 단일 게이트다(메뉴 필터가 이미 보장).
         reportCommandResult(
           sendResetWithReauth(selected.dtlIp, selected.dtlLaneNo, RESET_COMMANDS[action]),
           selected.dtlIp, selected.dtlLaneNo,
@@ -327,16 +351,46 @@
         return;
       }
       if (OPERATION_COMMANDS[action]) {
+        // [2026-08-19 사용자 요청: "완전 교체"] LOC/GRP 노드에서는 selected.dtlList(우클릭 시점에
+        // 모아둔 하위 게이트 목록)에 동일 명령을 순회 전송한다 — 레거시 GateCtrlDataSet의
+        // FullPath 하위 broadcast와 동일 의도. 역방향 개방은 Flap 타입(gate_type_code=2)에만
+        // 의미가 있어 그 중에서도 한 번 더 필터링한다(메뉴 자체는 하위에 Flap이 하나라도 있으면
+        // 노출되므로, 섞여 있는 다른 타입 게이트로는 보내지 않는다).
+        var isBulk = selected.type !== 'dtl';
+        var bulkTargets = isBulk
+          ? selected.dtlList.filter(function (d) { return action !== 'gate-reverse-open' || d.gateType === '2'; })
+          : null;
+
+        if (isBulk && bulkTargets.length === 0) {
+          showResultToast(selected.type === 'loc' ? selected.locName : selected.grpName, false, '대상 게이트가 없습니다.');
+          return;
+        }
+
+        var targetLabel = !isBulk
+          ? (selected.dtlIp + ' / 레인 ' + selected.dtlLaneNo)
+          : (selected.type === 'loc' ? '위치 "' + selected.locName + '"' : '그룹 "' + selected.grpName + '"')
+            + ' 하위 게이트 ' + bulkTargets.length + '대';
+
         if (CONFIRM_MESSAGES[action]) {
-          var confirmed = window.confirm(
-            selected.dtlIp + ' / 레인 ' + selected.dtlLaneNo + '\n\n' + CONFIRM_MESSAGES[action] + '\n\n계속하시겠습니까?',
-          );
+          var confirmed = window.confirm(targetLabel + '\n\n' + CONFIRM_MESSAGES[action] + '\n\n계속하시겠습니까?');
           if (!confirmed) return;
         }
-        reportCommandResult(
-          sendCommandWithReauth(selected.dtlIp, selected.dtlLaneNo, OPERATION_COMMANDS[action]),
-          selected.dtlIp, selected.dtlLaneNo,
-        );
+
+        if (!isBulk) {
+          reportCommandResult(
+            sendCommandWithReauth(selected.dtlIp, selected.dtlLaneNo, OPERATION_COMMANDS[action]),
+            selected.dtlIp, selected.dtlLaneNo,
+          );
+        } else {
+          // 알려진 제약: 재인증이 필요한 구성(gate-control-reauth-required=true)에서는 게이트마다
+          // sendCommandWithReauth가 개별적으로 window.prompt()를 띄운다 — 여러 게이트가 동시에
+          // reauthRequired를 반환하면 창이 순차적으로(같은 비밀번호라도) 여러 번 뜬다. 재인증 자체가
+          // 드문 운영 구성이고, 세션 단위 재인증 캐싱은 이번 요청 범위를 벗어나 후속 과제로 남긴다.
+          reportBulkCommandResult(
+            bulkTargets.map(function (d) { return sendCommandWithReauth(d.dtlIp, d.dtlLaneNo, OPERATION_COMMANDS[action]); }),
+            targetLabel,
+          );
+        }
       }
     });
 

@@ -1,0 +1,26 @@
+<!--/*
+  게이트 관리 팝업 공용 모달 — 레거시 SR_Speed_Client의 SR_F_SetupLocation/SR_F_SetupGateGroup처럼
+  사이드바 "게이트 관리" 하위 항목을 대시보드 위 팝업으로 띄운다. 실제 화면(목록+등록/수정 폼)은
+  기존 페이지(/gates/locations 등)를 iframe으로 그대로 불러오므로, 컨트롤러/템플릿은 손대지 않는다.
+  레이아웃 구조만 레거시를 참고했다 — 좌: 목록, 우: 등록/수정 폼 2단 구성과 팝업 자체의 타이틀바+
+  닫기 버튼은 각 화면(locations.html/groups.html 등)과 이 모달 헤더가 그대로 재현한다.
+  트리거/열기 로직은 static/js/gate-popup-modal.js 참고.
+*/-->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="gatePopupModal">
+<div class="modal fade" id="gate-popup-modal" tabindex="-1" aria-hidden="true" aria-labelledby="gate-popup-modal-title">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="gate-popup-modal-title">게이트 관리</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+      </div>
+      <div class="modal-body p-0 position-relative" style="height: 78vh;">
+        <div id="gate-popup-modal-spinner" class="d-flex justify-content-center align-items-center h-100">
+          <div class="spinner-border text-primary" role="status"><span class="visually-hidden">불러오는 중...</span></div>
+        </div>
+        <iframe id="gate-popup-modal-frame" class="w-100 h-100 border-0 d-none" title="게이트 관리 팝업"></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+</div>

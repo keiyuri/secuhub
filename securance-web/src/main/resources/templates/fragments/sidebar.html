@@ -22,8 +22,12 @@
 
   <li th:if="${node instanceof T(kr.co.securance.secuhub.web.menu.MenuNode.Item)}"
       class="nav-item">
+    <!--/* node.popup=true인 항목은 gate-popup-modal.js가 data-popup 속성을 보고 클릭을 가로채
+         모달(iframe)로 연다. href는 그대로 실제 URL을 가리키므로 JS 비활성/새 탭 열기 등에서도
+         정상적인 전체 페이지 링크로 동작한다(점진적 향상). */-->
     <a th:href="${node.href}"
        th:classappend="${currentPath != null and (currentPath == node.href or currentPath.startsWith(node.href + '/'))} ? 'active' : ''"
+       th:attr="data-popup=${node.popup} ? 'true' : null, data-popup-title=${node.popup} ? ${node.text} : null"
        class="nav-link">
       <i th:if="${node.icon}" th:class="'nav-icon bi ' + ${node.icon}"></i>
       <p th:text="${node.text}">메뉴</p>

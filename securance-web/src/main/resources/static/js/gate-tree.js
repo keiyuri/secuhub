@@ -404,6 +404,17 @@
         return;
       }
       if (OPERATION_COMMANDS[action]) {
+        // [Codex 적대적 리뷰 수정: high] GRP/LOC 범위 명령은 하위 게이트 여러 대(때로는 위치
+        // 전체)에 즉시 전송된다 — 재인증(gate-control-reauth-required)이 기본 false라 아무런
+        // 확인 없이 클릭 한 번으로 전체 개방/폐쇄가 나갈 수 있었다. DTL(단일 레인) 범위는 기존
+        // 그대로 확인 없이 즉시 전송하되, GRP/LOC 범위는 명령명·대상 수를 보여주는
+        // window.confirm()을 반드시 거치도록 막는다.
+        if (selected.scope !== 'dtl') {
+          var commandLabel = (item.textContent || action).trim();
+          var confirmMessage = commandLabel + '\n\n대상: ' + selected.label +
+            '\n\n이 명령이 위 범위의 모든 게이트(' + selected.devices.length + '대)에 전송됩니다. 계속하시겠습니까?';
+          if (!window.confirm(confirmMessage)) return;
+        }
         reportBatchResult(
           postCommandToDevices('/api/gate-control/command', selected.devices, OPERATION_COMMANDS[action]),
           selected.label,

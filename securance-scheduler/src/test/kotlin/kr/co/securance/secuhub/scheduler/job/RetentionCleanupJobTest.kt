@@ -1,8 +1,13 @@
 package kr.co.securance.secuhub.scheduler.job
 
+import kr.co.securance.secuhub.domain.repository.DataReceiveAckRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveAnalysisRepository
+import kr.co.securance.secuhub.domain.repository.DataReceiveFailRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveRepository
+import kr.co.securance.secuhub.domain.repository.DataSendRepository
 import kr.co.securance.secuhub.domain.repository.GateLogRepository
+import kr.co.securance.secuhub.domain.repository.OprStatusOutboxRepository
+import kr.co.securance.secuhub.domain.repository.OprStatusRepository
 import kr.co.securance.secuhub.scheduler.config.SchedulerProperties
 import org.mockito.ArgumentMatchers.anyInt
 import org.mockito.ArgumentMatchers.anyString
@@ -39,12 +44,22 @@ class RetentionCleanupJobTest {
         dataReceiveRepository: DataReceiveRepository = mock(DataReceiveRepository::class.java),
         dataReceiveAnalysisRepository: DataReceiveAnalysisRepository = mock(DataReceiveAnalysisRepository::class.java),
         gateLogRepository: GateLogRepository = mock(GateLogRepository::class.java),
+        dataReceiveAckRepository: DataReceiveAckRepository = mock(DataReceiveAckRepository::class.java),
+        dataReceiveFailRepository: DataReceiveFailRepository = mock(DataReceiveFailRepository::class.java),
+        oprStatusRepository: OprStatusRepository = mock(OprStatusRepository::class.java),
+        oprStatusOutboxRepository: OprStatusOutboxRepository = mock(OprStatusOutboxRepository::class.java),
+        dataSendRepository: DataSendRepository = mock(DataSendRepository::class.java),
         properties: SchedulerProperties = SchedulerProperties(),
     ): RetentionCleanupJob {
         val job = RetentionCleanupJob()
         injectField(job, "dataReceiveRepository", dataReceiveRepository)
         injectField(job, "dataReceiveAnalysisRepository", dataReceiveAnalysisRepository)
         injectField(job, "gateLogRepository", gateLogRepository)
+        injectField(job, "dataReceiveAckRepository", dataReceiveAckRepository)
+        injectField(job, "dataReceiveFailRepository", dataReceiveFailRepository)
+        injectField(job, "oprStatusRepository", oprStatusRepository)
+        injectField(job, "oprStatusOutboxRepository", oprStatusOutboxRepository)
+        injectField(job, "dataSendRepository", dataSendRepository)
         injectField(job, "properties", properties)
         return job
     }
@@ -86,18 +101,36 @@ class RetentionCleanupJobTest {
     }
 
     @Test
-    fun `세 테이블을 모두 정리한다`() {
+    fun `여덟 테이블을 모두 정리한다`() {
+        // 코드 리뷰 지적 D-3 회귀 테스트: 최초 도입 시 tb_data_rcv/tb_data_rcv_anal/tb_gate_log
+        // 세 테이블만 대상이었는데, tb_data_rcv_ack/tb_data_rcv_fail/tb_opr_status/
+        // tb_opr_status_outbox/tb_data_snd가 정리 대상에서 빠져 무기한 증가하고 있었다.
         val dataReceiveRepository = mock(DataReceiveRepository::class.java)
         val dataReceiveAnalysisRepository = mock(DataReceiveAnalysisRepository::class.java)
         val gateLogRepository = mock(GateLogRepository::class.java)
+        val dataReceiveAckRepository = mock(DataReceiveAckRepository::class.java)
+        val dataReceiveFailRepository = mock(DataReceiveFailRepository::class.java)
+        val oprStatusRepository = mock(OprStatusRepository::class.java)
+        val oprStatusOutboxRepository = mock(OprStatusOutboxRepository::class.java)
+        val dataSendRepository = mock(DataSendRepository::class.java)
         `when`(dataReceiveRepository.deleteBatchOlderThan(anyString(), anyInt())).thenReturn(0)
         `when`(dataReceiveAnalysisRepository.deleteBatchOlderThan(anyString(), anyInt())).thenReturn(0)
         `when`(gateLogRepository.deleteBatchOlderThan(anyKt<LocalDateTime>(), anyInt())).thenReturn(0)
+        `when`(dataReceiveAckRepository.deleteBatchOlderThan(anyString(), anyInt())).thenReturn(0)
+        `when`(dataReceiveFailRepository.deleteBatchOlderThan(anyString(), anyInt())).thenReturn(0)
+        `when`(oprStatusRepository.deleteBatchOlderThan(anyString(), anyInt())).thenReturn(0)
+        `when`(oprStatusOutboxRepository.deleteProcessedOlderThan(anyKt<LocalDateTime>(), anyInt())).thenReturn(0)
+        `when`(dataSendRepository.deleteBatchOlderThan(anyString(), anyInt())).thenReturn(0)
 
         val job = buildJob(
             dataReceiveRepository = dataReceiveRepository,
             dataReceiveAnalysisRepository = dataReceiveAnalysisRepository,
             gateLogRepository = gateLogRepository,
+            dataReceiveAckRepository = dataReceiveAckRepository,
+            dataReceiveFailRepository = dataReceiveFailRepository,
+            oprStatusRepository = oprStatusRepository,
+            oprStatusOutboxRepository = oprStatusOutboxRepository,
+            dataSendRepository = dataSendRepository,
         )
         job.execute(context)
 
@@ -105,6 +138,12 @@ class RetentionCleanupJobTest {
         verify(dataReceiveAnalysisRepository, times(1)).deleteBatchOlderThan(anyString(), anyInt())
         verify(gateLogRepository, times(1))
             .deleteBatchOlderThan(anyKt<LocalDateTime>(), anyInt())
+        verify(dataReceiveAckRepository, times(1)).deleteBatchOlderThan(anyString(), anyInt())
+        verify(dataReceiveFailRepository, times(1)).deleteBatchOlderThan(anyString(), anyInt())
+        verify(oprStatusRepository, times(1)).deleteBatchOlderThan(anyString(), anyInt())
+        verify(oprStatusOutboxRepository, times(1))
+            .deleteProcessedOlderThan(anyKt<LocalDateTime>(), anyInt())
+        verify(dataSendRepository, times(1)).deleteBatchOlderThan(anyString(), anyInt())
     }
 
     @Test

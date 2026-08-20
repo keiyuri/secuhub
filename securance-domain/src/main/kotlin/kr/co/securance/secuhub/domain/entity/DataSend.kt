@@ -14,13 +14,19 @@ import java.time.LocalDateTime
  * `tb_data_snd` — 제어 명령 발송 큐. 5.5절 QUEUED 경로에서 화면/API가 이 테이블에 INSERT하면
  * `securance-scheduler`의 `SendControlJob`이 폴링해 게이트로 전송한다.
  *
- * ## 상태 전이(2차 스프린트에서 정의)
+ * ## 상태 전이(2차 스프린트에서 정의, N/F는 코드 리뷰 R-1 대응으로 4차 스프린트에서 추가)
  * | snd_yn | chk_yn | 의미 |
  * |--------|--------|------|
  * | N | N | 전송 대기(폴링 대상) |
  * | Y | N | 장비로 전송했고 ACK 대기 중 |
  * | Y | Y | 장비 ACK 확인 완료 |
  * | Y | F | ACK 미수신으로 재시도 한도 초과 — 실패 확정 |
+ * | N | F | 전송조차 되지 못한 채 유효기간(`pendingExpirySeconds`)이 지나 실패 확정 |
+ *
+ * N/F는 [kr.co.securance.secuhub.domain.repository.DataSendRepository.expireStalePending]이
+ * 만든다 — 장비 미접속/삭제된 대상 등으로 영원히 전송되지 않는 대기 행이 `findPendingCommands`의
+ * `LIMIT` 창을 영구히 점유해 그 뒤에 발행된 정상 명령이 조회 자체가 되지 않는 헤드 오브 라인
+ * 차단을 막기 위함이다.
  *
  * 레거시는 `chk_yn`을 "서버가 전송을 확인했는지"라는 모호한 의미로만 쓰고 장비 ACK와 연결하지
  * 않아, 전송만 되고 장비가 무시한 명령을 성공으로 기록했다. 여기서는 `chk_yn`을 **장비 ACK

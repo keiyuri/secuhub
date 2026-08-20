@@ -27,7 +27,9 @@ import reactor.netty.NettyOutbound
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -44,6 +46,9 @@ class GateControlDispatcherTest {
 
     private val codec = SpeedFlapGateProtocolCodec()
     private val states = mutableListOf<GateConnectionState>()
+
+    /** `tb_data_snd.snd_date` 포맷 — [GateControlDispatcher]/[QueuedGateControlService]와 동일. */
+    private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
 
     /** 테스트가 시간을 임의로 진행시킬 수 있는 시계. */
     private class MutableClock(var now: Instant) : Clock() {
@@ -127,7 +132,22 @@ class GateControlDispatcherTest {
         org.mockito.Mockito.`when`(repository.save(anyNonNull<DataSend>()))
             .thenAnswer { it.arguments[0] }
         stubClaim(repository, store)
+        stubExpireStalePending(repository, store)
         return repository
+    }
+
+    /**
+     * [DataSendRepository.expireStalePending]을 실제 벌크 UPDATE와 동등하게 흉내낸다 —
+     * `snd_yn='N' AND chk_yn='N' AND snd_date < cutoff`인 행만 `chk_yn='F'`로 바꾼다(R-1 회귀 테스트용).
+     */
+    private fun stubExpireStalePending(repository: DataSendRepository, store: List<DataSend>) {
+        org.mockito.Mockito.`when`(repository.expireStalePending(anyString()))
+            .thenAnswer { invocation ->
+                val cutoff = invocation.arguments[0] as String
+                val targets = store.filter { it.sndYn == DataSend.NO && it.chkYn == DataSend.NO && it.sndDate < cutoff }
+                targets.forEach { it.chkYn = DataSend.FAILED }
+                targets.size
+            }
     }
 
     /**
@@ -226,6 +246,33 @@ class GateControlDispatcherTest {
         assertEquals(1, summary.skipped)
         assertTrue(registry.sentPackets.isEmpty())
         assertTrue(row.isPending, "미접속 장비의 명령은 대기 상태로 남아야 한다")
+    }
+
+    @Test
+    fun `유효기간을 넘긴 미전송 대기 명령은 실패 확정되어 폴링 창을 더 이상 점유하지 않는다`() {
+        // 코드 리뷰 R-1 회귀 테스트: 미접속 게이트로 향하는 오래된 명령이 findPendingCommands의
+        // LIMIT 창을 영구 점유해, 뒤에 발행된 정상 명령(더 큰 snd_id)이 조회조차 되지 않던 문제.
+        val registry = RecordingRegistry()
+        connect(registry, "192.168.0.20") // 정상 명령의 대상 게이트만 접속돼 있다.
+        val clock = MutableClock(Instant.parse("2026-08-10T13:00:00Z"))
+        // snd_date는 dispatcher와 같은 clock/시스템 기본 시간대로 계산해, 테스트 실행 시간대와
+        // 무관하게 결정적으로 만든다.
+        val now = LocalDateTime.now(clock)
+        val staleDate = now.minusSeconds(120).format(SEND_DATE_FORMAT) // pendingExpirySeconds(60초) 초과.
+        val freshDate = now.minusSeconds(30).format(SEND_DATE_FORMAT) // 아직 유효기간 안.
+        val stale = pendingCommand(sndId = 1, dtlIp = "192.168.0.10").apply { sndDate = staleDate } // 대상 미접속.
+        val fresh = pendingCommand(sndId = 2, dtlIp = "192.168.0.20").apply { sndDate = freshDate }
+        val properties = ControlProperties(pendingExpirySeconds = 60)
+        val dispatcher = GateControlDispatcher(
+            registry, repositoryOf(stale, fresh), mock(GateFaultResolutionService::class.java), properties, clock,
+        )
+
+        val summary = dispatcher.dispatchPending()
+
+        assertEquals(1, summary.expired)
+        assertEquals(DataSend.FAILED, stale.chkYn, "유효기간이 지난 대기 명령은 실패 확정되어야 한다")
+        assertEquals(DataSend.NO, stale.sndYn, "전송 자체는 시도되지 않았으므로 snd_yn은 N으로 남는다")
+        assertEquals(1, summary.sent, "실패 확정으로 비워진 자리와 무관하게, 최근 발행된 정상 명령은 전송돼야 한다")
     }
 
     @Test

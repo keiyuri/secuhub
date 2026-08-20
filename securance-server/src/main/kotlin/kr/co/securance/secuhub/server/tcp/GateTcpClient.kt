@@ -141,8 +141,13 @@ class GateTcpClient(
      * 레거시 `ConnectToAllDevices`에 대응.
      */
     private suspend fun connectToAllDevices() {
+        // SERVER 모드(GateTcpServer.onNewConnection의 findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo)와
+        // 동일하게 analysis_yn 무관 use_yn='Y' 전체 레인을 대상으로 한다 — 모든 레인이
+        // analysis_yn='N'인 디바이스도 CLIENT 모드 연결 대상에서 누락되면 안 된다(2026-08-20 코드
+        // 리뷰 지적 수정: 과거 findByUseYnTrueAndAnalysisYnTrueOrderByDtlIp는 이 디바이스를 통째로
+        // 걸러내 ACK/실패 기록 누락으로 이어졌다).
         val devices = withContext(Dispatchers.IO) {
-            gateDetailRepository.findByUseYnTrueAndAnalysisYnTrueOrderByDtlIp()
+            gateDetailRepository.findByUseYnTrueOrderByDtlIp()
         }
         if (devices.isEmpty()) {
             logger.debug("[CLIENT 모드] 연결 대상 디바이스가 없습니다(tb_gate_dtl 조회 결과 없음).")

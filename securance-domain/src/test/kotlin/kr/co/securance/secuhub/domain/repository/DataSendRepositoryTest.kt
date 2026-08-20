@@ -103,4 +103,37 @@ class DataSendRepositoryTest {
 
         assertEquals(1, claimed)
     }
+
+    @Test
+    fun `유효기간이 지난 미전송 대기 행만 실패 확정한다`() {
+        // 오래된 대기 행 — 헤드 오브 라인 차단을 일으키던 바로 그 케이스(코드 리뷰 R-1).
+        val stale = entityManager.persistAndFlush(sample().apply { sndDate = "20260101000000" })
+        // 최근 대기 행 — 아직 유효기간 안이므로 건드리면 안 된다.
+        val fresh = entityManager.persistAndFlush(sample().apply { sndDate = "20260813120000" })
+        entityManager.clear()
+
+        val expired = repository.expireStalePending(cutoff = "20260101120000")
+
+        assertEquals(1, expired)
+        val reloadedStale = entityManager.find(DataSend::class.java, stale.sndId!!)!!
+        assertEquals("N", reloadedStale.sndYn)
+        assertEquals("F", reloadedStale.chkYn)
+        val reloadedFresh = entityManager.find(DataSend::class.java, fresh.sndId!!)!!
+        assertEquals("N", reloadedFresh.chkYn)
+    }
+
+    @Test
+    fun `이미 전송되었거나 이미 종결된 행은 유효기간 정리 대상에서 제외한다`() {
+        // 이미 전송돼 ACK 대기 중(Y,N) — 이 정리는 전송 자체를 못한 행만 대상으로 한다.
+        val awaitingAck = entityManager.persistAndFlush(sample(sndYn = "Y").apply { sndDate = "20260101000000" })
+        // 이미 실패 확정된 행(N,F) — 다시 손댈 필요 없다.
+        val alreadyFailed = entityManager.persistAndFlush(sample(chkYn = "F").apply { sndDate = "20260101000000" })
+        entityManager.clear()
+
+        val expired = repository.expireStalePending(cutoff = "20260101120000")
+
+        assertEquals(0, expired)
+        assertEquals("N", entityManager.find(DataSend::class.java, awaitingAck.sndId!!)!!.chkYn)
+        assertEquals("F", entityManager.find(DataSend::class.java, alreadyFailed.sndId!!)!!.chkYn)
+    }
 }

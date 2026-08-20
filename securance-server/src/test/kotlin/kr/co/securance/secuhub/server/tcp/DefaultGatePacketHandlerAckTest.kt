@@ -56,12 +56,12 @@ class DefaultGatePacketHandlerAckTest {
             return true
         }
 
-        override fun enqueueNetStateUpdate(state: GateConnectionState, dtlLaneNo: Int, online: Boolean) {
+        override suspend fun enqueueNetStateUpdate(state: GateConnectionState, dtlLaneNo: Int, online: Boolean) {
             if (online) onlineLanes += dtlLaneNo
         }
 
         // 핸들러는 온라인/오프라인 전이가 있을 때만 IP 기준 오버로드를 호출한다(mains 계열 로직).
-        override fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean) {
+        override suspend fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean) {
             if (online) onlineLanes += dtlLaneNo
         }
     }
@@ -83,16 +83,16 @@ class DefaultGatePacketHandlerAckTest {
             state: GateConnectionState,
             packet: GatePacket,
             laneNo: Int,
-        ): Boolean {
+        ): kotlinx.coroutines.Deferred<Long?>? {
             receiveCount++
-            return true
+            return kotlinx.coroutines.CompletableDeferred(null)
         }
 
         override fun persistAck(state: GateConnectionState, raw: ByteArray, laneNo: Int) {
             ackCount++
         }
 
-        override fun persistStatusAnalysis(state: GateConnectionState, raw: ByteArray) {
+        override fun persistStatusAnalysis(state: GateConnectionState, raw: ByteArray, rcvIdDeferred: kotlinx.coroutines.Deferred<Long?>?) {
             analysisCount++
         }
 

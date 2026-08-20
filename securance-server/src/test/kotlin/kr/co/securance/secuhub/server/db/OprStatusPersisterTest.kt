@@ -215,4 +215,68 @@ class OprStatusPersisterTest {
         assertEquals(60L, saved.currIn)
         assertEquals(false, saved.processed)
     }
+
+    // ── replayOutboxEntry (코드 리뷰 지적 R-2) ─────────────────────────
+
+    private fun outboxEntry(dtlIp: String = "192.168.0.30") = OprStatusOutbox(
+        dtlIp = dtlIp,
+        dtlLaneNo = 1,
+        dtlId = 42L,
+        dtlType = 1,
+        locId = 7L,
+        grpId = 3L,
+        oprDate = "202608120959",
+        sinceDate = "202608110959",
+        currTotal = 100L,
+        currDoor = 10L,
+        currIn = 60L,
+        gateTypeRaw = 1,
+        userModeRaw = 0,
+        securityModeRaw = 0,
+        inoutTime = 0,
+        reason = "FINAL_FAILURE",
+    )
+
+    @Test
+    fun `outbox 재처리가 정상 완료되면 true를 반환한다`() = kotlinx.coroutines.runBlocking {
+        val repository = mock(OprStatusRepository::class.java)
+        `when`(repository.findById(anyKt())).thenReturn(Optional.empty())
+        val persister =
+            OprStatusPersister(GateDbWriteQueue(shardCount = 1), repository, mock(OprStatusOutboxRepository::class.java))
+
+        val succeeded = persister.replayOutboxEntry(outboxEntry())
+
+        assertEquals(true, succeeded)
+        verify(repository, timeout(5_000)).save(anyKt())
+        Unit
+    }
+
+    /**
+     * R-2 회귀 테스트: [GateDbWriteQueue.enqueue]가 작업을 받고도 [GateDbWriteTask.execute]도
+     * [GateDbWriteTask.onDropOrFinalFailure]도 끝내 호출하지 않는 경우(셧다운 도중 워커가
+     * `CancellationException`으로 루프를 빠져나가는 경합 — [OprStatusPersister.replayOutboxEntry]
+     * KDoc 참고)를 흉내낸다. 수정 전에는 `result.await()`가 영원히 완료되지 않아 이 테스트가
+     * 타임아웃(아래 5초)에 걸려 실패했을 것이다 — 지금은 `replayAwaitTimeout`(여기서는 1초) 안에
+     * 반드시 `false`로 끝나야 한다.
+     */
+    @Test
+    fun `큐가 결과를 영원히 알려주지 않아도 지정한 시간 안에 실패로 반환하고 멈추지 않는다`() = kotlinx.coroutines.runBlocking {
+        val blackHoleQueue = object : GateDbWriteQueue(shardCount = 1) {
+            override fun enqueue(task: GateDbWriteTask) {
+                // 의도적으로 아무것도 하지 않는다 — execute도, onDropOrFinalFailure도 호출되지 않는다.
+            }
+        }
+        val persister = OprStatusPersister(
+            blackHoleQueue,
+            mock(OprStatusRepository::class.java),
+            mock(OprStatusOutboxRepository::class.java),
+            replayAwaitTimeoutMillis = 1_000L,
+        )
+
+        val succeeded = kotlinx.coroutines.withTimeout(5_000L) {
+            persister.replayOutboxEntry(outboxEntry())
+        }
+
+        assertEquals(false, succeeded)
+    }
 }

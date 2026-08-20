@@ -53,4 +53,17 @@ data class ControlProperties(
 
     /** ACK 미수신 시 최대 전송 시도 횟수(최초 전송 포함). */
     val maxSendAttempts: Int = 3,
+
+    /**
+     * 전송 자체가 되지 못한 채(`snd_yn='N'`) 대기 상태로 남을 수 있는 최대 시간(초) — 코드 리뷰
+     * 지적 R-1 대응.
+     *
+     * 대상 게이트가 장시간 미접속이면 [GateControlDispatcher.sendPendingCommands]는 그 명령을
+     * 매 폴링마다 건너뛰기만 할 뿐 상태를 바꾸지 않는다. `findPendingCommands`는 `snd_id ASC
+     * LIMIT batchSize`로 가장 오래된 행부터 읽으므로, 이런 행이 쌓이면 이후 발행된 정상 명령이
+     * 조회 창 밖으로 밀려나 영원히 전송되지 않는다(헤드 오브 라인 차단). 기본값 5분은
+     * `ackTimeoutSeconds`(장비가 이미 붙어 있을 때 한 번의 ACK를 기다리는 시간)보다 훨씬 길게
+     * 잡아, 잠깐의 재접속 지연으로 정상 명령까지 조기 실패 처리되지 않게 한다.
+     */
+    val pendingExpirySeconds: Long = 300,
 )

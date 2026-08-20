@@ -14,9 +14,17 @@ spring:
     web-application-type: servlet
 
   datasource:
-    url: ${SECURANCE_DB_URL:jdbc:mariadb://192.168.0.91:28030/securance_gate}
-    username: ${SECURANCE_DB_USER:dba}
-    password: ${SECURANCE_DB_PASSWORD:securance}
+    # 코드 리뷰 지적 S-1(2026-08-20): 예전에는 여기 실 개발 DB 주소·계정·비밀번호
+    # (192.168.0.91:28030, dba/securance)가 기본값으로 박혀 있었다 — application-prod.yml만
+    # fallback 없이 강제해, prod 프로필을 깜빡 지정하지 않은 실행(로컬/CI/테스트)은 조용히 그
+    # 실 개발 서버에 붙어버릴 수 있었다(docs/작업일지.md 0036 항목에 실제 혼선 사례 기록).
+    # 지금은 모든 프로필에서 환경변수를 fallback 없이 강제한다 — 설정을 빠뜨리면 (조용히 잘못된
+    # DB에 붙는 대신) 기동 시점에 바로 실패한다. 로컬 개발은 application-local.yml.example을
+    # application-local.yml로 복사해 값을 채우고 --spring.profiles.active=local로 실행할 것
+    # (application-local.yml은 .gitignore에 등록되어 커밋되지 않는다).
+    url: ${SECURANCE_DB_URL}
+    username: ${SECURANCE_DB_USER}
+    password: ${SECURANCE_DB_PASSWORD}
     driver-class-name: org.mariadb.jdbc.Driver
     hikari:
       # 커넥션 풀에서 커넥션을 얻지 못할 때(풀 고갈/DB 응답 없음) 대기하는 상한.
@@ -113,6 +121,7 @@ securance:
     resend-guard-seconds: 5    # 같은 명령의 물리 재전송 최소 간격(레거시 RESEND_GUARD)
     ack-timeout-seconds: 10    # 장비 ACK 대기 시간 — 초과 시 재전송 또는 실패 확정
     max-send-attempts: 3       # ACK 미수신 시 최대 전송 시도 횟수(최초 전송 포함)
+    pending-expiry-seconds: 300 # 전송조차 못한 대기 명령의 최대 대기 시간 — 초과 시 실패 확정(헤드 오브 라인 차단 방지, R-1)
 
   # 레거시 ini [LOCATION]/[CLOUD] 섹션 대응 — 설정 스캐폴드만 추가한다. 실사용처는 레거시에서도
   # 불분명했으므로 이번 작업에서는 로직을 구현하지 않는다(과도한 억측 금지).

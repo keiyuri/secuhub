@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 
 /** 폴링 1회의 처리 결과 요약. 잡 로그와 테스트 단언에 쓴다. */
@@ -21,8 +23,10 @@ data class DispatchSummary(
     val confirmed: Int = 0,
     val retried: Int = 0,
     val failed: Int = 0,
+    /** 전송 시도조차 못한 채 유효기간이 지나 실패 확정된 건수(R-1 대응, `expireStalePending`). */
+    val expired: Int = 0,
 ) {
-    val hasWork: Boolean get() = sent + confirmed + retried + failed > 0
+    val hasWork: Boolean get() = sent + confirmed + retried + failed + expired > 0
 }
 
 /**
@@ -132,18 +136,41 @@ class GateControlDispatcher(
      * 재전송되어 게이트가 두 번 동작할 수 있다.
      */
     fun dispatchPending(): DispatchSummary {
+        val expired = expireStalePending()
         val confirmed = confirmAckedCommands()
         val (retried, failed) = reapAckTimeouts()
         val (sent, skipped) = sendPendingCommands()
 
-        val summary = DispatchSummary(sent, skipped, confirmed, retried, failed)
+        val summary = DispatchSummary(sent, skipped, confirmed, retried, failed, expired)
         if (summary.hasWork) {
             logger.debug(
-                "제어 명령 폴링 결과: 전송={}, 보류={}, ACK확인={}, 재전송={}, 실패확정={}",
-                sent, skipped, confirmed, retried, failed,
+                "제어 명령 폴링 결과: 전송={}, 보류={}, ACK확인={}, 재전송={}, 실패확정={}, 유효기간초과={}",
+                sent, skipped, confirmed, retried, failed, expired,
             )
         }
         return summary
+    }
+
+    /**
+     * 전송조차 되지 못한 채 [ControlProperties.pendingExpirySeconds]를 넘긴 대기 명령을 일괄
+     * 실패 확정한다(코드 리뷰 지적 R-1) — [sendPendingCommands]/[findPendingCommands]가 겪는
+     * 헤드 오브 라인 차단을 근본적으로 막는다. 자세한 이유는
+     * [kr.co.securance.secuhub.domain.repository.DataSendRepository.expireStalePending] 참고.
+     *
+     * 단일 벌크 UPDATE라 DB 레벨에서 직렬화되므로 다중 인스턴스에서 동시에 돌아도 안전하다.
+     */
+    private fun expireStalePending(): Int {
+        val cutoff = LocalDateTime.now(clock)
+            .minusSeconds(properties.pendingExpirySeconds)
+            .format(SEND_DATE_FORMAT)
+        val expired = dataSendRepository.expireStalePending(cutoff)
+        if (expired > 0) {
+            logger.warn(
+                "전송 유효기간({}초)을 넘긴 대기 명령을 실패 확정했습니다: {}건 (게이트 미접속/잘못된 대상 등)",
+                properties.pendingExpirySeconds, expired,
+            )
+        }
+        return expired
     }
 
     /**
@@ -420,5 +447,8 @@ class GateControlDispatcher(
         /** `snd_server` 기본값 — 다중 인스턴스 배포 시 어느 서버가 보냈는지 구분하는 용도. */
         private val LOCAL_SERVER: String =
             runCatching { java.net.InetAddress.getLocalHost().hostAddress }.getOrDefault("unknown")
+
+        /** `tb_data_snd.snd_date` 포맷 — [QueuedGateControlService]/[DirectGateControlService]와 동일. */
+        private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
     }
 }

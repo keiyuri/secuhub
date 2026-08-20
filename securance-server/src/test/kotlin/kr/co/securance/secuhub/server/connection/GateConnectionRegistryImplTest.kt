@@ -5,8 +5,6 @@ import kotlinx.coroutines.runBlocking
 import kr.co.securance.secuhub.domain.entity.GateDetail
 import kr.co.securance.secuhub.domain.entity.GateGroup
 import kr.co.securance.secuhub.domain.entity.GateLocation
-import kr.co.securance.secuhub.domain.entity.NetState
-import kr.co.securance.secuhub.domain.entity.NetStateId
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
 import kr.co.securance.secuhub.protocol.GatePacket
@@ -26,10 +24,6 @@ import reactor.core.publisher.Mono
 import reactor.netty.Connection
 import reactor.netty.NettyOutbound
 import java.time.LocalDateTime
-import java.util.Optional
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -46,6 +40,47 @@ private fun <T> anyKt(): T {
     Mockito.any<T>()
     @Suppress("UNCHECKED_CAST")
     return null as T
+}
+
+/** [NetStateRepository.upsertIfNewer] 호출 1건을 그대로 기록한 값 — 검증을 매처 대신 평범한 값 비교로 한다. */
+private data class UpsertCall(
+    val dtlIp: String,
+    val dtlLaneNo: Int,
+    val locId: Long,
+    val grpId: Long,
+    val dtlState: String,
+    val checkTime: String,
+    val seq: Long,
+)
+
+/**
+ * [NetStateRepository.upsertIfNewer] 호출을 가로채 [into]에 기록한다.
+ *
+ * Kotlin 이름 붙은 인자 호출에서 `eq(...)`/`anyKt()` 매처를 섞어 쓰면 Mockito가 인자 평가 순서를
+ * 잘못 해석해 `InvalidUseOfMatchersException`/NPE로 깨지는 문제(Kotlin+Mockito의 잘 알려진 함정)를
+ * 피하기 위해, 매처 기반 `verify` 대신 이 방식으로 실제 호출 인자를 평범한 값으로 기록해 비교한다.
+ */
+private fun recordUpsertCalls(repository: NetStateRepository, into: MutableList<UpsertCall>) {
+    doAnswer { invocation ->
+        into += UpsertCall(
+            dtlIp = invocation.getArgument(0),
+            dtlLaneNo = invocation.getArgument(1),
+            locId = invocation.getArgument(2),
+            grpId = invocation.getArgument(3),
+            dtlState = invocation.getArgument(4),
+            checkTime = invocation.getArgument(5),
+            seq = invocation.getArgument(6),
+        )
+        null
+    }.`when`(repository).upsertIfNewer(
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyInt(),
+        org.mockito.ArgumentMatchers.anyLong(),
+        org.mockito.ArgumentMatchers.anyLong(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyLong(),
+    )
 }
 
 /** 테스트에서 [GateProtocolCodec]의 실제 파싱 로직은 필요 없으므로 최소한만 구현한 페이크. */
@@ -253,7 +288,7 @@ class GateConnectionRegistryImplTest {
     }
 
     @Test
-    fun `enqueueNetStateUpdate가 큐잉한 작업은 tb_gate_dtl의 실제 loc_id와 grp_id로 저장한다`() {
+    fun `enqueueNetStateUpdate가 큐잉한 작업은 tb_gate_dtl의 실제 loc_id와 grp_id로 upsert한다`() {
         // 회귀 방지 테스트: 예전에는 loc_id/grp_id를 항상 0으로 고정해 저장했다(스캐폴드 플레이스홀더).
         // 위치/그룹별로 tb_net_state를 조회하는 화면은 항상 빈 결과를 받게 되는 버그였다.
         val location = GateLocation(locId = 7L, locName = "본관")
@@ -269,8 +304,10 @@ class GateConnectionRegistryImplTest {
         val gateDetailRepository = mock(GateDetailRepository::class.java)
         `when`(gateDetailRepository.findByDtlIpAndDtlLaneNo("192.168.0.20", 1)).thenReturn(gateDetail)
 
+        val upsertCalls = mutableListOf<UpsertCall>()
         val netStateRepository = mock(NetStateRepository::class.java)
-        `when`(netStateRepository.findById(anyKt())).thenReturn(Optional.empty())
+        recordUpsertCalls(netStateRepository, upsertCalls)
+        `when`(netStateRepository.nextSeq()).thenReturn(1L)
 
         val dbWriteQueue = mock(GateDbWriteQueue::class.java)
         var capturedTask: GateDbWriteTask? = null
@@ -283,45 +320,49 @@ class GateConnectionRegistryImplTest {
             gateDetailRepository = gateDetailRepository,
         )
 
-        registry.enqueueNetStateUpdate("192.168.0.20", 1, online = true)
+        runBlocking { registry.enqueueNetStateUpdate("192.168.0.20", 1, online = true) }
         runBlocking { capturedTask!!.execute() }
 
-        verify(netStateRepository).save(
-            org.mockito.ArgumentMatchers.argThat { saved: NetState ->
-                saved.id == NetStateId(dtlIp = "192.168.0.20", dtlLaneNo = 1, locId = 7L, grpId = 3L) &&
-                    saved.dtlState == "Y"
-            },
-        )
+        val call = upsertCalls.single()
+        assertEquals("192.168.0.20", call.dtlIp)
+        assertEquals(1, call.dtlLaneNo)
+        assertEquals(7L, call.locId)
+        assertEquals(3L, call.grpId)
+        assertEquals("Y", call.dtlState)
+        // seq는 이제 DB 전역 시퀀스(NetStateRepository.nextSeq)로 발급된다(코드 리뷰 지적, P1,
+        // 2026-08-20 — GateConnectionRegistryImpl 클래스 상단 주석 참고). 고정값 대신 "발급됐다"만
+        // 검증한다.
+        assertTrue(call.seq > 0L, "seq가 발급돼야 한다")
+        assertTrue(call.checkTime.isNotBlank())
     }
 
+    /**
+     * 코드 리뷰 지적 R-8(2026-08-20) 이후 회귀 테스트 — 순서 역전 방지 로직 자체는
+     * [NetStateRepository.upsertIfNewer]의 조건부 UPSERT(`applied_seq <= VALUES(applied_seq)`)로
+     * 옮겨졌으므로(그 조건부 로직 검증은 SQL 레벨이라 리포지토리 쪽 책임 — upsertIfNewer KDoc의
+     * "테스트 커버리지의 한계" 참고), 이 레지스트리가 여전히 책임지는 부분만 검증한다: 이벤트
+     * **발생 순서 그대로** 단조증가하는 seq를 발급해 매번 `upsertIfNewer`에 넘기는지.
+     *
+     * 예전에는 이 파일에 인메모리 락/시퀀스 맵의 동시성 정확성을 직접 검증하는 테스트 3개
+     * (지연 실행 역전 방지, 실제 스레드 경합, 그룹 재배정 시 캐시 정규화)가 있었다 — 그 인메모리
+     * 상태 자체가 이번에 제거되었으므로 함께 제거한다.
+     */
     @Test
-    fun `enqueueNetStateUpdate는 오래된 시도가 뒤늦게 완료돼도 더 최신 갱신을 덮어쓰지 않는다`() {
-        // 적대적 리뷰(codex) 지적 회귀 테스트: GateDbWriteQueue는 타임아웃된 시도를 백그라운드에
-        // 버려둔 채 다음 작업으로 넘어간다 — 그 버려진(더 오래된) 시도가 뒤늦게 실제로 DB에 도달하면,
-        // 이미 반영된 더 최신 상태를 과거 값으로 되돌려 순서를 역전시킬 수 있었다. 여기서는 OFFLINE
-        // 이벤트(먼저 발생)를 나타내는 작업을 ONLINE 이벤트(나중에 발생)보다 "나중에" 실행시켜
-        // 그 역전 시나리오를 그대로 재현한다.
+    fun `enqueueNetStateUpdate는 호출(발생) 순서 그대로 단조증가하는 시퀀스를 발급한다`() {
         val location = GateLocation(locId = 7L, locName = "본관")
         val group = GateGroup(grpId = 3L, location = location, grpName = "1층", gateTypeCode = 1)
         val gateDetail = GateDetail(
-            dtlId = 1L,
-            location = location,
-            group = group,
-            dtlIp = "192.168.0.30",
-            dtlLaneNo = 1,
-            dtlType = 1,
+            dtlId = 1L, location = location, group = group,
+            dtlIp = "192.168.0.30", dtlLaneNo = 1, dtlType = 1,
         )
         val gateDetailRepository = mock(GateDetailRepository::class.java)
         `when`(gateDetailRepository.findByDtlIpAndDtlLaneNo("192.168.0.30", 1)).thenReturn(gateDetail)
 
-        val savedStates = mutableListOf<String>()
+        val upsertCalls = mutableListOf<UpsertCall>()
         val netStateRepository = mock(NetStateRepository::class.java)
-        `when`(netStateRepository.findById(anyKt())).thenReturn(Optional.empty())
-        doAnswer { invocation ->
-            savedStates.add((invocation.getArgument(0) as NetState).dtlState)
-            null
-        }.`when`(netStateRepository).save(anyKt())
-
+        recordUpsertCalls(netStateRepository, upsertCalls)
+        // DB 전역 시퀀스(NEXT VALUE FOR)를 흉내낸다 — 호출될 때마다 1씩 커지는 값을 반환.
+        `when`(netStateRepository.nextSeq()).thenReturn(1L, 2L)
         val capturedTasks = mutableListOf<GateDbWriteTask>()
         val dbWriteQueue = mock(GateDbWriteQueue::class.java)
         doAnswer { invocation -> capturedTasks.add(invocation.getArgument(0)); null }
@@ -333,153 +374,35 @@ class GateConnectionRegistryImplTest {
             gateDetailRepository = gateDetailRepository,
         )
 
-        // 발생 순서(호출 순서) 그대로 시퀀스가 발급된다: OFFLINE(오래된 이벤트) 먼저, ONLINE(최신 이벤트) 나중.
-        registry.enqueueNetStateUpdate("192.168.0.30", 1, online = false)
-        registry.enqueueNetStateUpdate("192.168.0.30", 1, online = true)
+        // OFFLINE(먼저 발생) 다음 ONLINE(나중 발생) — 실행 순서와 무관하게 "발생 순서"가 seq에 반영돼야 한다.
+        runBlocking {
+            registry.enqueueNetStateUpdate("192.168.0.30", 1, online = false)
+            registry.enqueueNetStateUpdate("192.168.0.30", 1, online = true)
+        }
         assertEquals(2, capturedTasks.size)
 
-        // 하지만 "실행"은 역순으로 완료된다고 가정한다 — ONLINE(최신)이 먼저 끝나고, OFFLINE(과거,
-        // 타임아웃 후 버려졌던 시도)이 뒤늦게 도착한다.
-        runBlocking { capturedTasks[1].execute() } // ONLINE 먼저 반영됨.
-        runBlocking { capturedTasks[0].execute() } // 뒤늦게 도착한 OFFLINE — 반영되면 안 됨.
+        // 실행은 역순으로 완료된다고 가정해도(ONLINE 먼저, OFFLINE 뒤늦게), 발급된 seq 자체는
+        // enqueue 호출 시점(=이벤트 발생 순서) 기준으로 이미 고정돼 있어야 한다.
+        runBlocking { capturedTasks[1].execute() } // ONLINE(나중 발생, seq 더 큼)을 먼저 실행.
+        runBlocking { capturedTasks[0].execute() } // OFFLINE(먼저 발생, seq 더 작음)을 뒤늦게 실행.
 
-        assertEquals(listOf("Y"), savedStates, "뒤늦게 도착한 과거 이벤트가 최신 상태를 덮어쓰면 안 된다")
+        assertEquals(2, upsertCalls.size)
+        val offlineCall = upsertCalls.single { it.dtlState == "N" }
+        val onlineCall = upsertCalls.single { it.dtlState == "Y" }
+        // seq는 이제 DB 전역 시퀀스(NetStateRepository.nextSeq)로 발급된다 — 고정값(1L/2L) 대신
+        // "먼저 발생한 쪽이 더 작은 seq를 받았다"는 상대적 순서만 검증한다.
+        assertTrue(offlineCall.seq < onlineCall.seq, "먼저 발생한 OFFLINE이 더 작은 seq를 가져야 한다")
     }
 
     @Test
-    fun `실제로 동시에 실행되는 오래된 실행과 최신 실행 사이에서도 클레임과 저장이 끼어들지 않는다`() {
-        // 2차 적대적 리뷰(codex) 지적 회귀 테스트: "시퀀스 클레임 → findById → save"를 락 없이
-        // 순서대로만 하면, 클레임 직후(오래된 실행이 이미 통과) findById/save가 DB 지연으로 느려지는
-        // 동안 더 최신 실행이 끼어들어 먼저 클레임+저장을 끝내고, 그 뒤 오래된 실행이 재개돼 최신
-        // 값을 덮어쓰는 TOCTOU 윈도우가 있었다(직전 테스트는 execute() 호출 자체를 순차적으로 완료시켜
-        // 이 윈도우를 재현하지 못했다). 여기서는 실제 두 스레드로 오래된 실행을 DB 조회 도중 멈춰
-        // 세워두고 최신 실행이 그 사이 끼어들 수 있는지 검증한다 — 락이 없다면 실행 순서가
-        // [oldFind, newFind, newSave, oldSave]처럼 뒤섞일 수 있지만, 락이 있으면 절대 뒤섞이지 않는다.
-        val location = GateLocation(locId = 7L, locName = "본관")
-        val group = GateGroup(grpId = 3L, location = location, grpName = "1층", gateTypeCode = 1)
-        val gateDetail = GateDetail(
-            dtlId = 1L,
-            location = location,
-            group = group,
-            dtlIp = "192.168.0.31",
-            dtlLaneNo = 1,
-            dtlType = 1,
-        )
-        val gateDetailRepository = mock(GateDetailRepository::class.java)
-        `when`(gateDetailRepository.findByDtlIpAndDtlLaneNo("192.168.0.31", 1)).thenReturn(gateDetail)
-
-        val events = ConcurrentLinkedQueue<String>()
-        val oldFindStarted = CountDownLatch(1)
-        val releaseOldFind = CountDownLatch(1)
-
-        val netStateRepository = mock(NetStateRepository::class.java)
-        doAnswer { invocation ->
-            events.add("find")
-            // 첫 호출(오래된 실행)만 인위적으로 지연시킨다 — 그 사이 최신 실행이 락을 뚫고
-            // 끼어들 수 있는지가 이 테스트의 핵심이다.
-            if (oldFindStarted.count > 0) {
-                oldFindStarted.countDown()
-                assertTrue(releaseOldFind.await(5, TimeUnit.SECONDS), "오래된 실행이 제때 풀려나지 못했습니다")
-            }
-            Optional.empty<NetState>()
-        }.`when`(netStateRepository).findById(anyKt())
-        doAnswer { invocation ->
-            events.add("save:" + (invocation.getArgument(0) as NetState).dtlState)
-            null
-        }.`when`(netStateRepository).save(anyKt())
-
-        val capturedTasks = mutableListOf<GateDbWriteTask>()
-        val dbWriteQueue = mock(GateDbWriteQueue::class.java)
-        doAnswer { invocation -> capturedTasks.add(invocation.getArgument(0)); null }
-            .`when`(dbWriteQueue).enqueue(anyKt())
-
-        val registry = newRegistry(
-            netStateRepository = netStateRepository,
-            dbWriteQueue = dbWriteQueue,
-            gateDetailRepository = gateDetailRepository,
-        )
-
-        // OFFLINE(오래된 이벤트, seq=1)을 먼저 큐잉하고, ONLINE(최신 이벤트, seq=2)을 나중에 큐잉한다.
-        registry.enqueueNetStateUpdate("192.168.0.31", 1, online = false)
-        registry.enqueueNetStateUpdate("192.168.0.31", 1, online = true)
-        assertEquals(2, capturedTasks.size)
-
-        val oldThread = Thread { runBlocking { capturedTasks[0].execute() } }
-        oldThread.start()
-        assertTrue(oldFindStarted.await(5, TimeUnit.SECONDS), "오래된 실행이 findById에 도달하지 못했습니다")
-
-        // 오래된 실행이 findById 안(락을 쥔 채)에 멈춰 있는 동안 최신 실행을 시작한다 — 락이 없다면
-        // 여기서 최신 실행의 find/save가 오래된 실행보다 먼저 끝날 수 있다.
-        val newThread = Thread { runBlocking { capturedTasks[1].execute() } }
-        newThread.start()
-
-        // 락이 정상 동작한다면 최신 실행은 오래된 실행이 unlock할 때까지 진입조차 못 해야 한다.
-        Thread.sleep(200)
-        assertEquals(listOf("find"), events.toList(), "락이 없으면 최신 실행이 오래된 실행보다 먼저 끼어들 수 있다")
-
-        releaseOldFind.countDown()
-        oldThread.join(5000)
-        newThread.join(5000)
-
-        assertFalse(oldThread.isAlive)
-        assertFalse(newThread.isAlive)
-        // 완전히 직렬화되어야 한다: 오래된 실행의 find/save가 전부 끝난 뒤에야 최신 실행의 find/save가 시작된다.
-        assertEquals(listOf("find", "save:N", "find", "save:Y"), events.toList())
-    }
-
-    @Test
-    fun `그룹-위치가 재배정돼 NetStateId가 바뀌어도 시퀀스 순서 역전 가드는 계속 유지된다`() {
-        // 3차 리뷰 지적 회귀 테스트: 예전에는 시퀀스/락 키가 NetStateId(locId/grpId 포함) 전체였다 —
-        // 같은 물리 장치가 그룹을 재배정받아 grpId가 바뀌면 lastAppliedNetStateSeq가 새 키 기준으로
-        // 비어 있어 순서 역전 가드가 리셋됐다. 키를 (dtlIp, dtlLaneNo)로 정규화한 뒤에는 grpId가
-        // 바뀌어도 뒤늦게 도착한 과거 이벤트가 여전히 걸러져야 한다.
-        val locationA = GateLocation(locId = 7L, locName = "본관")
-        val groupA = GateGroup(grpId = 3L, location = locationA, grpName = "1층", gateTypeCode = 1)
-        val locationB = GateLocation(locId = 9L, locName = "별관")
-        val groupB = GateGroup(grpId = 5L, location = locationB, grpName = "2층", gateTypeCode = 1)
-
-        val gateDetailRepository = mock(GateDetailRepository::class.java)
-        // 첫 번째(OFFLINE, seq=1) 큐잉 시점에는 그룹A 소속이었지만, 실행 시점(뒤늦게 도착)에는
-        // 이미 그룹B로 재배정된 뒤라고 가정한다 — findByDtlIpAndDtlLaneNo는 항상 "현재" 소속을 반환한다.
-        `when`(gateDetailRepository.findByDtlIpAndDtlLaneNo("192.168.0.40", 1))
-            .thenReturn(groupA.let { GateDetail(dtlId = 1L, location = locationA, group = it, dtlIp = "192.168.0.40", dtlLaneNo = 1, dtlType = 1) })
-            .thenReturn(groupB.let { GateDetail(dtlId = 1L, location = locationB, group = it, dtlIp = "192.168.0.40", dtlLaneNo = 1, dtlType = 1) })
-
-        val savedStates = mutableListOf<String>()
-        val netStateRepository = mock(NetStateRepository::class.java)
-        `when`(netStateRepository.findById(anyKt())).thenReturn(Optional.empty())
-        doAnswer { invocation ->
-            savedStates.add((invocation.getArgument(0) as NetState).dtlState)
-            null
-        }.`when`(netStateRepository).save(anyKt())
-
-        val capturedTasks = mutableListOf<GateDbWriteTask>()
-        val dbWriteQueue = mock(GateDbWriteQueue::class.java)
-        doAnswer { invocation -> capturedTasks.add(invocation.getArgument(0)); null }
-            .`when`(dbWriteQueue).enqueue(anyKt())
-
-        val registry = newRegistry(
-            netStateRepository = netStateRepository,
-            dbWriteQueue = dbWriteQueue,
-            gateDetailRepository = gateDetailRepository,
-        )
-
-        registry.enqueueNetStateUpdate("192.168.0.40", 1, online = false) // seq=1, 실행 시 그룹A로 조회됨
-        registry.enqueueNetStateUpdate("192.168.0.40", 1, online = true) // seq=2, 실행 시 그룹B로 조회됨
-
-        // ONLINE(최신, seq=2, 그룹B)이 먼저 실행되어 반영되고, OFFLINE(과거, seq=1, 그룹A)이 뒤늦게 실행된다.
-        runBlocking { capturedTasks[1].execute() }
-        runBlocking { capturedTasks[0].execute() }
-
-        assertEquals(listOf("Y"), savedStates, "grpId가 바뀌었더라도 뒤늦게 도착한 과거 이벤트가 최신 상태를 덮어쓰면 안 된다")
-    }
-
-    @Test
-    fun `enqueueNetStateUpdate는 tb_gate_dtl에 없는 레인이면 저장을 건너뛴다`() {
+    fun `enqueueNetStateUpdate는 tb_gate_dtl에 없는 레인이면 upsert를 건너뛴다`() {
         val gateDetailRepository = mock(GateDetailRepository::class.java)
         `when`(gateDetailRepository.findByDtlIpAndDtlLaneNo("10.0.0.99", 1)).thenReturn(null)
 
+        val upsertCalls = mutableListOf<UpsertCall>()
         val netStateRepository = mock(NetStateRepository::class.java)
+        recordUpsertCalls(netStateRepository, upsertCalls)
+        `when`(netStateRepository.nextSeq()).thenReturn(1L)
         val dbWriteQueue = mock(GateDbWriteQueue::class.java)
         var capturedTask: GateDbWriteTask? = null
         doAnswer { invocation -> capturedTask = invocation.getArgument(0); null }
@@ -491,9 +414,9 @@ class GateConnectionRegistryImplTest {
             gateDetailRepository = gateDetailRepository,
         )
 
-        registry.enqueueNetStateUpdate("10.0.0.99", 1, online = true)
+        runBlocking { registry.enqueueNetStateUpdate("10.0.0.99", 1, online = true) }
         runBlocking { capturedTask!!.execute() }
 
-        verify(netStateRepository, never()).save(anyKt())
+        assertTrue(upsertCalls.isEmpty())
     }
 }

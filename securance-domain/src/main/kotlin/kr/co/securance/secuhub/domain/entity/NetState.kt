@@ -43,6 +43,16 @@ class NetState(
     @Column(name = "check_time", length = 20)
     var checkTime: String? = null,
 
+    /**
+     * 이 행에 마지막으로 반영된 [kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl]
+     * 의 `netStateWriteSequence` 값(코드 리뷰 지적 R-8, V31 마이그레이션) — 더 오래된(작은) seq의
+     * 지연 쓰기가 이 행을 덮어쓰지 못하게 막는 조건부 UPSERT([NetStateRepository.upsertIfNewer]
+     * 참고)에 쓴다. 이 필드 자체는 JPA로 직접 갱신하지 않는다(엔티티는 조회 전용, 쓰기는 네이티브
+     * UPSERT를 거친다) — 여기 있는 값은 화면 표시/디버깅용 참고치일 뿐이다.
+     */
+    @Column(name = "applied_seq", nullable = false)
+    var appliedSeq: Long = 0,
+
     @Column(name = "mod_date", insertable = false, updatable = false)
     val modDate: LocalDateTime? = null,
 ) {

@@ -28,7 +28,9 @@ class GateResetGridService(
         // 같은 레인 번호를 쓸 때 한쪽 상태가 다른 쪽에 덮어써진다. tb_net_state의 실제 복합키
         // (dtlIp, dtlLaneNo, ...)와 동일하게 (dtlIp, dtlLaneNo) 조합으로 키를 만든다.
         val netStateByKey = netStateRepository.findByIdGrpId(grpId).associateBy { it.id.dtlIp to it.id.dtlLaneNo }
-        return detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(grpId).map { detail ->
+        // 관리(CRUD) 목록 화면이 아니므로 '사용=Y'·'분석=Y' 대상만 노출한다
+        // (2026-08-20 "예외 없이 전체 목록 조회에 적용" 지시).
+        return detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(grpId).map { detail ->
             GateResetRow(
                 dtlId = requireNotNull(detail.dtlId),
                 dtlLaneNo = detail.dtlLaneNo,
@@ -40,13 +42,18 @@ class GateResetGridService(
     }
 
     /**
-     * 요청된 dtlId 목록 중 실제로 grpId에 속한 것만 남긴다(전체 프로젝트 재감사 지적 — 서버는
-     * 이전까지 dtlId 존재 여부만 확인하고 grpId 소속은 확인하지 않아, 클라이언트가 화면에 표시된
-     * 그룹과 다른 dtlId를 함께 보내도 그대로 처리됐다). grpId가 없으면(그룹 미선택 화면) 소속
-     * 검증 없이 그대로 통과시킨다.
+     * 요청된 dtlId 목록 중 실제로 grpId에 속하고 사용/분석 대상(둘 다 'Y')인 것만 남긴다(전체
+     * 프로젝트 재감사 지적 — 서버는 이전까지 dtlId 존재 여부만 확인하고 grpId 소속은 확인하지
+     * 않아, 클라이언트가 화면에 표시된 그룹과 다른 dtlId를 함께 보내도 그대로 처리됐다).
+     *
+     * grpId가 없으면 전량 거부한다 — 화면(reset.html)은 그룹을 선택해야만 리셋 버튼을 노출하므로
+     * 정상 경로에서는 grpId가 항상 채워져 있다. 예전에는 grpId가 없으면 소속 검증 자체를 생략하고
+     * 요청받은 dtlId를 그대로 통과시켰는데, 이는 grpId 파라미터를 비운 조작된 POST로 소속/상태
+     * 검증을 완전히 우회할 수 있는 구멍이었다(2026-08-20 Codex 적대적 리뷰 지적).
      */
     fun filterByGroupMembership(grpId: Long?, dtlIds: List<Long>): List<Long> {
-        if (grpId == null || dtlIds.isEmpty()) return dtlIds
+        if (dtlIds.isEmpty()) return dtlIds
+        if (grpId == null) return emptyList()
         val validIds = detailRepository.findByDtlIdInAndGroup_GrpId(dtlIds, grpId).mapNotNull { it.dtlId }.toSet()
         return dtlIds.filter { it in validIds }
     }
@@ -77,8 +84,8 @@ class GateResetController(
     ): String {
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "게이트 일괄 리셋")
-        model.addAttribute("allLocations", locationService.findAll())
-        model.addAttribute("allGroups", groupService.findByLocation(locId))
+        model.addAttribute("allLocations", locationService.findAllActive())
+        model.addAttribute("allGroups", groupService.findAllActiveByLocation(locId))
         model.addAttribute("selectedLocId", locId)
         model.addAttribute("selectedGrpId", grpId)
         model.addAttribute("rows", gateResetGridService.rowsFor(grpId))

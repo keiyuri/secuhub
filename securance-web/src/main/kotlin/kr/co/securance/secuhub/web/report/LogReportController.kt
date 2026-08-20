@@ -207,8 +207,8 @@ class LogReportController(
     private fun populateCommon(model: Model, filter: LogSearchFilter) {
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "통신/운영 로그 조회")
-        model.addAttribute("allLocations", locationService.findAll())
-        model.addAttribute("allGroups", groupService.findByLocation(filter.locId))
+        model.addAttribute("allLocations", locationService.findAllActive())
+        model.addAttribute("allGroups", groupService.findAllActiveByLocation(filter.locId))
         model.addAttribute("filter", filter)
         model.addAttribute("selectedLocId", filter.locId)
         model.addAttribute("selectedGrpId", filter.grpId)

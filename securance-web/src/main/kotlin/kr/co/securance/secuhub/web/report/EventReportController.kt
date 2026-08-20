@@ -142,8 +142,8 @@ class EventReportController(
     private fun populateCommon(model: Model, filter: EventSearchFilter, locId: Long?) {
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "이벤트 이력 조회")
-        model.addAttribute("allLocations", locationService.findAll())
-        model.addAttribute("allGroups", groupService.findByLocation(locId))
+        model.addAttribute("allLocations", locationService.findAllActive())
+        model.addAttribute("allGroups", groupService.findAllActiveByLocation(locId))
         model.addAttribute("filter", filter)
         model.addAttribute("selectedLocId", filter.locId)
         model.addAttribute("selectedGrpId", filter.grpId)

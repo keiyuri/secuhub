@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.servlet.mvc.support.RedirectAttributes
 
 /**
@@ -32,7 +33,17 @@ class UserManagementService(
     private val userRepository: AppUserRepository,
     private val passwordEncoder: PasswordEncoder,
 ) {
-    fun findAll(): List<AppUser> = userRepository.findAll(org.springframework.data.domain.Sort.by("userId"))
+    /**
+     * 사용자 관리(CRUD) 목록 — 기본은 '사용=Y'인 계정만 노출하고, [showInactive]가 true일 때만
+     * 비활성 계정까지 전부 보여준다(2026-08-20 지시: 관리 화면도 기본은 사용=Y만, 비활성 항목은
+     * 별도 보기 기능으로). 비활성 계정을 재활성화하려면 먼저 이 토글로 찾아야 한다.
+     */
+    fun findAll(showInactive: Boolean = false): List<AppUser> =
+        if (showInactive) {
+            userRepository.findAll(org.springframework.data.domain.Sort.by("userId"))
+        } else {
+            userRepository.findByUseYnTrueOrderByUserId()
+        }
 
     fun findByIdOrNull(userId: String): AppUser? = userRepository.findById(userId).orElse(null)
 
@@ -107,16 +118,20 @@ class UserController(
     private val menuProvider: MenuProvider,
 ) {
     @GetMapping
-    fun list(model: Model): String {
-        populateCommon(model)
+    fun list(@RequestParam(required = false, defaultValue = "false") showInactive: Boolean, model: Model): String {
+        populateCommon(model, showInactive)
         model.addAttribute("form", UserForm())
         return "admin/users"
     }
 
     @GetMapping("/{userId}/edit")
-    fun edit(@PathVariable userId: String, model: Model): String {
+    fun edit(
+        @PathVariable userId: String,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
+        model: Model,
+    ): String {
         val user = userManagementService.findByIdOrNull(userId) ?: return "redirect:/admin/users"
-        populateCommon(model)
+        populateCommon(model, showInactive)
         model.addAttribute("editingId", userId)
         model.addAttribute(
             "form",
@@ -136,6 +151,7 @@ class UserController(
     fun create(
         @Validated @ModelAttribute("form") form: UserForm,
         binding: BindingResult,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
         model: Model,
         redirectAttributes: RedirectAttributes,
     ): String {
@@ -143,7 +159,7 @@ class UserController(
             binding.rejectValue("password", "required", "신규 등록 시 비밀번호는 필수입니다")
         }
         if (binding.hasErrors()) {
-            populateCommon(model)
+            populateCommon(model, showInactive)
             return "admin/users"
         }
         // UserManagementService.create는 중복 아이디를 require(...)(IllegalArgumentException)로
@@ -156,10 +172,10 @@ class UserController(
             redirectAttributes.addFlashAttribute("message", "사용자가 등록되었습니다.")
         } catch (ex: IllegalArgumentException) {
             binding.rejectValue("userId", "duplicate", ex.message ?: "사용자 등록에 실패했습니다.")
-            populateCommon(model)
+            populateCommon(model, showInactive)
             return "admin/users"
         }
-        return "redirect:/admin/users"
+        return "redirect:/admin/users?showInactive=$showInactive"
     }
 
     @PostMapping("/{userId}")
@@ -167,31 +183,37 @@ class UserController(
         @PathVariable userId: String,
         @Validated @ModelAttribute("form") form: UserForm,
         binding: BindingResult,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
         model: Model,
         redirectAttributes: RedirectAttributes,
     ): String {
         if (binding.hasErrors()) {
-            populateCommon(model)
+            populateCommon(model, showInactive)
             model.addAttribute("editingId", userId)
             return "admin/users"
         }
         userManagementService.update(userId, form)
         redirectAttributes.addFlashAttribute("message", "사용자 정보가 수정되었습니다.")
-        return "redirect:/admin/users"
+        return "redirect:/admin/users?showInactive=$showInactive"
     }
 
     @PostMapping("/{userId}/delete")
-    fun delete(@PathVariable userId: String, redirectAttributes: RedirectAttributes): String {
+    fun delete(
+        @PathVariable userId: String,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
+        redirectAttributes: RedirectAttributes,
+    ): String {
         val currentUserId = SecurityContextHolder.getContext().authentication?.name
         runCatching { userManagementService.delete(userId, currentUserId) }
             .onSuccess { redirectAttributes.addFlashAttribute("message", "사용자가 삭제되었습니다.") }
             .onFailure { redirectAttributes.addFlashAttribute("error", it.message) }
-        return "redirect:/admin/users"
+        return "redirect:/admin/users?showInactive=$showInactive"
     }
 
-    private fun populateCommon(model: Model) {
+    private fun populateCommon(model: Model, showInactive: Boolean) {
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "사용자 관리")
-        model.addAttribute("users", userManagementService.findAll())
+        model.addAttribute("users", userManagementService.findAll(showInactive))
+        model.addAttribute("showInactive", showInactive)
     }
 }

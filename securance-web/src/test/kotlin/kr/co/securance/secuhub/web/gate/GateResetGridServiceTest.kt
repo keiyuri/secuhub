@@ -48,7 +48,7 @@ class GateResetGridServiceTest {
         // 덮어썼다. tb_net_state의 실제 복합키(dtlIp, dtlLaneNo, ...)와 동일하게 (dtlIp, dtlLaneNo)
         // 조합으로 키를 만들면 두 장비 상태가 독립적으로 유지되어야 한다.
         val detailRepository = mock(GateDetailRepository::class.java)
-        `when`(detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(1L)).thenReturn(
+        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(1L)).thenReturn(
             listOf(
                 detail(dtlId = 1L, dtlIp = "192.168.0.1", laneNo = 1),
                 detail(dtlId = 2L, dtlIp = "192.168.0.2", laneNo = 1),
@@ -83,7 +83,7 @@ class GateResetGridServiceTest {
     @Test
     fun `net_state 정보가 없는 레인은 오프라인으로 취급한다`() {
         val detailRepository = mock(GateDetailRepository::class.java)
-        `when`(detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(1L)).thenReturn(
+        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(1L)).thenReturn(
             listOf(detail(dtlId = 1L, dtlIp = "192.168.0.1", laneNo = 1)),
         )
         val netStateRepository = mock(NetStateRepository::class.java)
@@ -96,14 +96,18 @@ class GateResetGridServiceTest {
     }
 
     @Test
-    fun `grpId가 null이면 소속 검증 없이 요청된 dtlId를 그대로 통과시킨다`() {
+    fun `grpId가 없으면 소속 검증을 생략하지 않고 전량 거부한다`() {
+        // Codex 적대적 리뷰 지적(2026-08-20) 회귀 방지: grpId를 비운 조작된 POST로 소속/상태
+        // 검증 자체를 우회할 수 있던 구멍을 막는다 — 정상 화면(reset.html)은 그룹을 선택해야만
+        // 리셋 버튼이 노출되므로 정상 경로에서는 grpId가 항상 채워져 있다.
         val detailRepository = mock(GateDetailRepository::class.java)
         val netStateRepository = mock(NetStateRepository::class.java)
         val service = GateResetGridService(detailRepository, netStateRepository)
 
         val result = service.filterByGroupMembership(null, listOf(1L, 2L))
 
-        assertEquals(listOf(1L, 2L), result)
+        assertEquals(emptyList(), result)
+        Mockito.verify(detailRepository, Mockito.never()).findByDtlIdInAndGroup_GrpId(anyKt(), Mockito.anyLong())
     }
 
     @Test

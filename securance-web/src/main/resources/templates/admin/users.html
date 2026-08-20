@@ -13,7 +13,14 @@
   <div class="row">
     <div class="col-lg-7">
       <div class="card card-outline card-primary">
-        <div class="card-header"><h3 class="card-title">사용자 목록</h3></div>
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h3 class="card-title mb-0">사용자 목록</h3>
+          <form method="get" th:action="@{/admin/users}" class="form-check mb-0">
+            <input type="checkbox" class="form-check-input" id="showInactive" name="showInactive"
+                   value="true" th:checked="${showInactive}" onchange="this.form.submit()"/>
+            <label class="form-check-label" for="showInactive">비활성 사용자 표시</label>
+          </form>
+        </div>
         <div class="table-responsive">
           <table class="table table-sm table-striped mb-0">
             <thead><tr><th>아이디</th><th>이름</th><th>사용</th><th>조회</th><th>제어</th><th>관리</th><th></th></tr></thead>
@@ -29,9 +36,11 @@
                 <td th:text="${user.authControl} ? 'Y' : 'N'">N</td>
                 <td th:text="${user.authAdmin} ? 'Y' : 'N'">N</td>
                 <td class="text-end text-nowrap">
-                  <a class="btn btn-sm btn-outline-secondary" th:href="@{/admin/users/{id}/edit(id=${user.userId})}">수정</a>
+                  <a class="btn btn-sm btn-outline-secondary"
+                     th:href="@{/admin/users/{id}/edit(id=${user.userId},showInactive=${showInactive})}">수정</a>
                   <form th:action="@{/admin/users/{id}/delete(id=${user.userId})}" method="post" class="d-inline"
                         onsubmit="return confirm('삭제하시겠습니까?');">
+                    <input type="hidden" name="showInactive" th:value="${showInactive}"/>
                     <button type="submit" class="btn btn-sm btn-outline-danger"
                             th:disabled="${user.userId == #authentication.name}">삭제</button>
                   </form>
@@ -51,6 +60,7 @@
         <div class="card-body">
           <form th:action="${editingId} ? @{/admin/users/{id}(id=${editingId})} : @{/admin/users}"
                 th:object="${form}" method="post">
+            <input type="hidden" name="showInactive" th:value="${showInactive}"/>
             <div class="mb-3">
               <label class="form-label">아이디</label>
               <input type="text" class="form-control" th:field="*{userId}" th:readonly="${editingId} != null"
@@ -89,7 +99,7 @@
               <label class="form-check-label">관리자 권한(ROLE_ADMIN)</label>
             </div>
             <button type="submit" class="btn btn-primary" th:text="${editingId} ? '수정' : '등록'">등록</button>
-            <a th:if="${editingId}" class="btn btn-secondary" th:href="@{/admin/users}">취소</a>
+            <a th:if="${editingId}" class="btn btn-secondary" th:href="@{/admin/users(showInactive=${showInactive})}">취소</a>
           </form>
         </div>
       </div>

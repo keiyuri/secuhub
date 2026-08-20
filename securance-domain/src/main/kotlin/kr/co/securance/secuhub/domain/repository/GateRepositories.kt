@@ -27,7 +27,10 @@ data class GateLaneInfo(
     val dtlName: String? = null,
 )
 
-interface GateLocationRepository : JpaRepository<GateLocation, Long>
+interface GateLocationRepository : JpaRepository<GateLocation, Long> {
+    /** 대시보드 트리뷰 전체 조회 — GateLocation은 '분석' 컬럼이 없으므로 '사용'(useYn)만으로 필터한다. */
+    fun findByUseYnTrueOrderByLocName(): List<GateLocation>
+}
 
 interface GateGroupRepository : JpaRepository<GateGroup, Long> {
     // Opus 전체 리뷰 지적: GateGroup.location은 LAZY고 open-in-view: false라, 단순 파생 쿼리로
@@ -38,6 +41,27 @@ interface GateGroupRepository : JpaRepository<GateGroup, Long> {
 
     @Query("select g from GateGroup g join fetch g.location")
     override fun findAll(): List<GateGroup>
+
+    /** 대시보드 트리뷰 전체 조회 — GateGroup도 '분석' 컬럼이 없으므로 '사용'(useYn)만으로 필터한다. */
+    @Query("select g from GateGroup g join fetch g.location where g.useYn = true")
+    fun findAllByUseYnTrue(): List<GateGroup>
+
+    /**
+     * 관리(CRUD) 목록이 아닌 화면(리포트/스케줄/리셋/배치도 등)의 위치별 그룹 드롭다운 — GateGroup은
+     * '분석' 컬럼이 없으므로 '사용'(useYn)만으로 필터한다(2026-08-20 "예외 없이 전체 목록 조회에
+     * 적용" 지시, 단 위치/그룹/사용자 관리 화면 자체는 사용자 확인에 따라 제외).
+     */
+    @Query("select g from GateGroup g join fetch g.location where g.location.locId = :locId and g.useYn = true")
+    fun findByLocation_LocIdAndUseYnTrue(@Param("locId") locId: Long): List<GateGroup>
+
+    /**
+     * 단건 조회에도 `location`을 함께 로딩한다 — 기본 [JpaRepository.findById]는 fetch join이
+     * 없어, 결과를 뷰 렌더링 단계(트랜잭션 밖)에서 `.location.locName`처럼 실제 컬럼을 읽으면
+     * LazyInitializationException이 난다(2026-08-20 Codex 리뷰 지적: 레인 관리 화면의 그룹
+     * 콤보에 비활성 그룹을 끼워 넣을 때 이 문제가 재현됐다. 위 40번째 줄 주석과 동일한 근본 원인).
+     */
+    @Query("select g from GateGroup g join fetch g.location where g.grpId = :grpId")
+    fun findByIdWithLocation(@Param("grpId") grpId: Long): GateGroup?
 }
 
 interface GateDetailRepository : JpaRepository<GateDetail, Long> {
@@ -73,21 +97,76 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
     @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.group.grpId = :grpId order by d.dtlLaneNo")
     fun findByGroup_GrpIdOrderByDtlLaneNo(@Param("grpId") grpId: Long): List<GateDetail>
 
+    /** #4 SetupGateGroup 화면 — 사용/분석 대상(둘 다 'Y')인 레인만 목록에 노출할 때 사용. */
+    @Query(
+        "select d from GateDetail d join fetch d.location join fetch d.group " +
+            "where d.group.grpId = :grpId and d.useYn = true and d.analysisYn = true order by d.dtlLaneNo",
+    )
+    fun findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(@Param("grpId") grpId: Long): List<GateDetail>
+
     /**
      * #3 SR_F_GateReset — 클라이언트가 보낸 dtlId 목록이 실제로 grpId에 속하는지 서버에서
      * 교차 검증할 때 사용(전체 프로젝트 재감사 지적: 이전에는 dtlId 존재 여부만 확인하고
      * grpId/locId 소속은 확인하지 않았다).
+     *
+     * 목록 화면(GateResetGridService.rowsFor)이 useYn=true·analysisYn=true인 레인만 보여주므로,
+     * 이 교차 검증 쿼리도 같은 조건을 강제한다 — 그렇지 않으면 화면에는 보이지 않는 비활성/미분석
+     * dtlId를 조작된 POST로 직접 전송했을 때 소속 검증만 통과하고 그대로 리셋 명령까지 도달한다
+     * (2026-08-20 Codex 적대적 리뷰 지적: UI 필터가 신뢰 경계에서 강제되지 않던 문제).
+     *
+     * 상위 그룹/위치의 `useYn`도 함께 강제한다 — 레인 자신은 useYn=true·analysisYn=true라도
+     * 소속 그룹이나 위치를 관리자가 비활성화했다면(운영 제외 의도) 조작된 POST로 grpId만 활성
+     * 그룹의 것을 넣거나 비활성 그룹/위치 아래 여전히 useYn=true인 레인의 dtlId를 직접 보내는
+     * 방식으로 리셋 명령이 등록되면 안 된다(2026-08-20 Codex 적대적 리뷰 지적 — 상위 계층 비활성화
+     * 우회 경로).
      */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.dtlId in :dtlIds and d.group.grpId = :grpId")
+    @Query(
+        "select d from GateDetail d join fetch d.location join fetch d.group " +
+            "where d.dtlId in :dtlIds and d.group.grpId = :grpId " +
+            "and d.useYn = true and d.analysisYn = true and d.group.useYn = true and d.location.useYn = true",
+    )
     fun findByDtlIdInAndGroup_GrpId(@Param("dtlIds") dtlIds: Collection<Long>, @Param("grpId") grpId: Long): List<GateDetail>
 
-    /** #6 SetupSchedule(Phase 5) — 위치 단위로 예약 모드를 일괄 적용할 때 사용. */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.location.locId = :locId and d.useYn = true")
+    /**
+     * #6 SetupSchedule(Phase 5) — 위치 단위로 예약 모드를 일괄 적용할 때 사용. 예약 명령은
+     * `analysisYn` 여부와 무관하게 적용 대상이므로(레거시 `SelectGateDtlIPList`/`InsertSendDataAll`과
+     * 동일 — [findByUseYnTrueOrderByDtlIp] 주석 참고, 2026-08-20 사용자 확인: "분석=N도 포함,
+     * 사용=Y만 필터") 레인 자신의 `analysisYn`은 확인하지 않는다.
+     *
+     * 다만 이 위치 자신과 그 아래 그룹의 `useYn`은 함께 강제한다 — 위치·그룹 콤보는 활성 항목만
+     * 보여주므로(GateLocationService.findAllActive/GateGroupService.findAllActiveByLocation) 정상
+     * 경로에서는 비활성 위치/그룹의 locId/grpId가 애초에 선택되지 않지만, 조작된 POST로 비활성
+     * 위치의 locId를 직접 보내면 그 아래 useYn=true인 레인에까지 예약 명령이 나갈 수 있었다
+     * (2026-08-20 Codex 적대적 리뷰 지적 — 상위 계층 비활성화 우회 경로, GateResetController의
+     * findByDtlIdInAndGroup_GrpId와 동일한 문제).
+     */
+    @Query(
+        "select d from GateDetail d join fetch d.location join fetch d.group " +
+            "where d.location.locId = :locId and d.useYn = true and d.location.useYn = true and d.group.useYn = true",
+    )
     fun findByLocation_LocIdAndUseYnTrue(@Param("locId") locId: Long): List<GateDetail>
 
-    /** #6 SetupSchedule(Phase 5) — 그룹 단위로 예약 모드를 일괄 적용할 때 사용. */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.group.grpId = :grpId and d.useYn = true")
+    /**
+     * #6 SetupSchedule(Phase 5) — 그룹 단위로 예약 모드를 일괄 적용/스케줄 화면의 레인 콤보에 쓴다.
+     * 위 [findByLocation_LocIdAndUseYnTrue]와 동일한 이유로 레인 자신의 `analysisYn`은 확인하지
+     * 않지만, 그룹·위치의 `useYn`은 함께 강제한다(같은 이유 — 조작된 POST로 비활성 그룹의 grpId를
+     * 직접 보내는 우회 경로 차단).
+     */
+    @Query(
+        "select d from GateDetail d join fetch d.location join fetch d.group " +
+            "where d.group.grpId = :grpId and d.useYn = true and d.group.useYn = true and d.location.useYn = true",
+    )
     fun findByGroup_GrpIdAndUseYnTrue(@Param("grpId") grpId: Long): List<GateDetail>
+
+    /**
+     * #6 SetupSchedule(Phase 5) — 단건(dtlId) 예약 모드 대상. [findByGroup_GrpIdAndUseYnTrue]와
+     * 동일한 이유로 레인 자신의 `useYn`뿐 아니라 그룹·위치의 `useYn`도 함께 강제한다.
+     */
+    @Query(
+        "select d from GateDetail d join fetch d.location join fetch d.group " +
+            "where d.dtlId = :dtlId and d.useYn = true and d.group.useYn = true and d.location.useYn = true",
+    )
+    fun findByIdAndUseYnTrueWithActiveParents(@Param("dtlId") dtlId: Long): GateDetail?
 
     /**
      * #7/#15(Phase 5) 타임존 저장/동기화 — 레거시 `SelectGateDtlIPList`/`InsertSendDataAll`과 동일하게
@@ -119,7 +198,13 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
      * Phase 10 대시보드 게이트 트리뷰 — LOC/GRP/DTL 전체를 한 번에 조회한다. `location`/`group`은
      * LAZY + open-in-view:false라 [GateGroupRepository.findAll]과 동일한 이유로 JOIN FETCH가
      * 필요하다(컨트롤러 트랜잭션 밖에서 접근 시 LazyInitializationException).
+     *
+     * GateDetail은 '사용'(useYn)과 '분석'(analysisYn) 컬럼을 모두 가지므로 둘 다 true인
+     * 레인만 조회한다(GateLocation/GateGroup은 '분석' 컬럼이 없어 useYn만으로 필터한다).
      */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true order by d.dtlLaneNo")
+    @Query(
+        "select d from GateDetail d join fetch d.location join fetch d.group " +
+            "where d.useYn = true and d.analysisYn = true order by d.dtlLaneNo",
+    )
     fun findAllForTree(): List<GateDetail>
 }

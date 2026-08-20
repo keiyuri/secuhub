@@ -13,7 +13,6 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
-import java.util.Optional
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -23,7 +22,13 @@ class ScheduleApplyServiceTest {
     private val location = mock(GateLocation::class.java)
     private val group = mock(GateGroup::class.java)
 
-    private fun detail(dtlId: Long, dtlIp: String, laneNo: Int, useYn: Boolean = true) = GateDetail(
+    private fun detail(
+        dtlId: Long,
+        dtlIp: String,
+        laneNo: Int,
+        useYn: Boolean = true,
+        analysisYn: Boolean = true,
+    ) = GateDetail(
         dtlId = dtlId,
         location = location,
         group = group,
@@ -31,36 +36,70 @@ class ScheduleApplyServiceTest {
         dtlLaneNo = laneNo,
         dtlType = 1,
         useYn = useYn,
+        analysisYn = analysisYn,
     )
 
     @Test
-    fun `dtlId가 주어지면 그룹-위치보다 우선하고 useYn=false면 빈 목록을 반환한다`() {
+    fun `dtlId가 주어지면 그룹-위치보다 우선하고 useYn=false(또는 상위 비활성)면 빈 목록을 반환한다`() {
+        // 리포지토리 쿼리(findByIdAndUseYnTrueWithActiveParents) 자체가 레인·그룹·위치의 useYn을
+        // 모두 걸고 있으므로, useYn=false거나 상위가 비활성이면 null을 반환한다고 모킹한다.
         val detailRepository = mock(GateDetailRepository::class.java)
         val dataSendRepository = mock(DataSendRepository::class.java)
         val service = ScheduleApplyService(detailRepository, dataSendRepository)
 
-        `when`(detailRepository.findById(1L)).thenReturn(Optional.of(detail(1L, "192.168.0.1", 1, useYn = false)))
+        `when`(detailRepository.findByIdAndUseYnTrueWithActiveParents(1L)).thenReturn(null)
 
         // dtlId가 지정되면 grpId/locId는 무시되어야 한다(레포지토리 조회가 아예 호출되지 않아야 함).
         val result = service.targets(locId = 99L, grpId = 88L, dtlId = 1L)
 
-        assertEquals(emptyList(), result, "useYn=false인 게이트는 예약 대상에서 제외되어야 한다")
+        assertEquals(emptyList(), result, "useYn=false(또는 상위 비활성)인 게이트는 예약 대상에서 제외되어야 한다")
         verify(detailRepository, never()).findByGroup_GrpIdAndUseYnTrue(anyLong())
         verify(detailRepository, never()).findByLocation_LocIdAndUseYnTrue(anyLong())
     }
 
     @Test
-    fun `dtlId가 없고 grpId가 있으면 그룹 단위로 조회한다`() {
+    fun `dtlId가 주어지면 analysisYn=false여도 useYn=true(상위도 활성)면 예약 대상에 포함한다`() {
+        // 2026-08-20 사용자 확인: 예약 명령은 analysisYn과 무관하게 적용 대상이다(레거시
+        // SelectGateDtlIPList/InsertSendDataAll과 동일 — TimeZoneService.broadcastToAllGates 참고).
         val detailRepository = mock(GateDetailRepository::class.java)
         val dataSendRepository = mock(DataSendRepository::class.java)
         val service = ScheduleApplyService(detailRepository, dataSendRepository)
 
-        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrue(1L)).thenReturn(listOf(detail(1L, "192.168.0.1", 1)))
+        `when`(detailRepository.findByIdAndUseYnTrueWithActiveParents(1L))
+            .thenReturn(detail(1L, "192.168.0.1", 1, analysisYn = false))
+
+        val result = service.targets(locId = null, grpId = null, dtlId = 1L)
+
+        assertEquals(1, result.size, "analysisYn=false여도 useYn=true면 예약 대상에서 제외되면 안 된다")
+    }
+
+    @Test
+    fun `dtlId가 없고 grpId가 있으면 그룹 단위로(사용=Y만) 조회한다`() {
+        val detailRepository = mock(GateDetailRepository::class.java)
+        val dataSendRepository = mock(DataSendRepository::class.java)
+        val service = ScheduleApplyService(detailRepository, dataSendRepository)
+
+        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrue(1L))
+            .thenReturn(listOf(detail(1L, "192.168.0.1", 1)))
 
         val result = service.targets(locId = 99L, grpId = 1L, dtlId = null)
 
         assertEquals(1, result.size)
         verify(detailRepository, never()).findByLocation_LocIdAndUseYnTrue(anyLong())
+    }
+
+    @Test
+    fun `dtlId·grpId가 없고 locId가 있으면 위치 단위로(사용=Y만) 조회한다`() {
+        val detailRepository = mock(GateDetailRepository::class.java)
+        val dataSendRepository = mock(DataSendRepository::class.java)
+        val service = ScheduleApplyService(detailRepository, dataSendRepository)
+
+        `when`(detailRepository.findByLocation_LocIdAndUseYnTrue(9L))
+            .thenReturn(listOf(detail(1L, "192.168.0.1", 1)))
+
+        val result = service.targets(locId = 9L, grpId = null, dtlId = null)
+
+        assertEquals(1, result.size)
     }
 
     @Test

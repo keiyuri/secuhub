@@ -4,7 +4,6 @@ import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.GateGroupRepository
 import kr.co.securance.secuhub.domain.repository.GateLocationRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
-import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RestController
@@ -90,12 +89,15 @@ class GateTreeService(
     }
 
     private fun buildTreeUncached(): List<GateTreeLocationNode> {
-        // 트리 정렬 순서 — 위치 ID → 그룹 ID → 게이트(레인) ID(2026-08-19 사용자 요청, SR_Speed_Client
-        // 트리뷰의 InsertNodeSorted와 동일하게 이름이 아닌 ID 기준으로 정렬한다).
-        val locations = locationRepository.findAll(Sort.by("locId"))
-        // GateGroupRepository.findAll()/GateDetailRepository.findAllForTree()는 JOIN FETCH로
+        // 전체 목록 조회 — '사용'(useYn)이 false인 항목은 제외한다. GateDetail은 '분석'(analysisYn)
+        // 컬럼도 있어 그 값까지 true인 레인만(findAllForTree), GateLocation/GateGroup은 '분석' 컬럼이
+        // 없으므로 useYn만으로 필터한다. 정렬은 위치 ID → 그룹 ID → 게이트(레인) ID 순(2026-08-19
+        // 사용자 요청, SR_Speed_Client 트리뷰의 InsertNodeSorted와 동일하게 이름이 아닌 ID 기준) —
+        // 리포지토리 메서드 자체는 이름순이라 여기서 다시 ID로 정렬한다.
+        val locations = locationRepository.findByUseYnTrueOrderByLocName().sortedBy { it.locId }
+        // GateGroupRepository.findAllByUseYnTrue()/GateDetailRepository.findAllForTree()는 JOIN FETCH로
         // location/group을 함께 읽어온다(둘 다 LAZY + open-in-view:false, 계획서 4.2절 대응).
-        val groupsByLoc = groupRepository.findAll().groupBy { it.location.locId }
+        val groupsByLoc = groupRepository.findAllByUseYnTrue().groupBy { it.location.locId }
         val detailsByGrp = detailRepository.findAllForTree().groupBy { it.group.grpId }
         // (dtlIp, dtlLaneNo) 복합키로 온라인 여부를 조회한다 — GateResetGridService와 동일한 이유로
         // dtlLaneNo만으로는 IP가 다른 두 장비의 상태가 서로 덮어써질 수 있다.

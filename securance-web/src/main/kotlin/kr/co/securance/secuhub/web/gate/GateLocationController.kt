@@ -41,6 +41,21 @@ class GateLocationService(
 ) {
     fun findAll(): List<GateLocation> = locationRepository.findAll(org.springframework.data.domain.Sort.by("locName"))
 
+    /**
+     * 위치 관리(CRUD) 목록 화면이 아닌 곳(리포트/스케줄/리셋/그룹 관리의 위치 드롭다운 등)에서 사용 —
+     * '사용=Y'인 위치만 노출한다(2026-08-20 "예외 없이 전체 목록 조회에 적용" 지시, 단 이 화면
+     * 자신의 findAll()은 비활성 위치도 재활성화할 수 있어야 하므로 사용자 확인에 따라 그대로 둔다).
+     */
+    fun findAllActive(): List<GateLocation> = locationRepository.findByUseYnTrueOrderByLocName()
+
+    /**
+     * 위치 관리(CRUD) 목록 자체의 조회 — 기본은 '사용=Y'만 보여주고, [showInactive]가 true일
+     * 때만 비활성 위치까지 전부 노출한다(2026-08-20 지시: 관리 화면도 기본은 사용=Y만, 비활성
+     * 항목은 별도 보기 기능으로 확인). 비활성 위치를 재활성화하려면 먼저 이 토글로 찾아야 한다.
+     */
+    fun findAllForManagement(showInactive: Boolean): List<GateLocation> =
+        if (showInactive) findAll() else findAllActive()
+
     fun findByIdOrNull(locId: Long): GateLocation? = locationRepository.findById(locId).orElse(null)
 
     @Transactional
@@ -128,21 +143,27 @@ class GateLocationController(
     private val menuProvider: MenuProvider,
 ) {
     @GetMapping
-    fun list(model: Model): String {
+    fun list(@RequestParam(required = false, defaultValue = "false") showInactive: Boolean, model: Model): String {
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "위치 관리")
-        model.addAttribute("locations", locationService.findAll())
+        model.addAttribute("locations", locationService.findAllForManagement(showInactive))
+        model.addAttribute("showInactive", showInactive)
         model.addAttribute("form", GateLocationForm())
         return "gates/locations"
     }
 
     @GetMapping("/{locId}/edit")
-    fun edit(@PathVariable locId: Long, model: Model): String {
+    fun edit(
+        @PathVariable locId: Long,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
+        model: Model,
+    ): String {
         val location = locationService.findByIdOrNull(locId)
             ?: return "redirect:/gates/locations"
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "위치 관리")
-        model.addAttribute("locations", locationService.findAll())
+        model.addAttribute("locations", locationService.findAllForManagement(showInactive))
+        model.addAttribute("showInactive", showInactive)
         model.addAttribute("editingId", locId)
         model.addAttribute("form", GateLocationForm(locName = location.locName, useYn = location.useYn))
         return "gates/locations"
@@ -152,18 +173,20 @@ class GateLocationController(
     fun create(
         @Validated @ModelAttribute("form") form: GateLocationForm,
         binding: BindingResult,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
         model: Model,
         redirectAttributes: RedirectAttributes,
     ): String {
         if (binding.hasErrors()) {
             model.addAttribute("menu", menuProvider.menu())
             model.addAttribute("pageTitle", "위치 관리")
-            model.addAttribute("locations", locationService.findAll())
+            model.addAttribute("locations", locationService.findAllForManagement(showInactive))
+            model.addAttribute("showInactive", showInactive)
             return "gates/locations"
         }
         locationService.create(form)
         redirectAttributes.addFlashAttribute("message", "위치가 등록되었습니다.")
-        return "redirect:/gates/locations"
+        return "redirect:/gates/locations?showInactive=$showInactive"
     }
 
     @PostMapping("/{locId}")
@@ -171,23 +194,29 @@ class GateLocationController(
         @PathVariable locId: Long,
         @Valid @ModelAttribute("form") form: GateLocationForm,
         binding: BindingResult,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
         model: Model,
         redirectAttributes: RedirectAttributes,
     ): String {
         if (binding.hasErrors()) {
             model.addAttribute("menu", menuProvider.menu())
             model.addAttribute("pageTitle", "위치 관리")
-            model.addAttribute("locations", locationService.findAll())
+            model.addAttribute("locations", locationService.findAllForManagement(showInactive))
+            model.addAttribute("showInactive", showInactive)
             model.addAttribute("editingId", locId)
             return "gates/locations"
         }
         locationService.update(locId, form)
         redirectAttributes.addFlashAttribute("message", "위치 정보가 수정되었습니다.")
-        return "redirect:/gates/locations"
+        return "redirect:/gates/locations?showInactive=$showInactive"
     }
 
     @PostMapping("/{locId}/delete")
-    fun delete(@PathVariable locId: Long, redirectAttributes: RedirectAttributes): String {
+    fun delete(
+        @PathVariable locId: Long,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
+        redirectAttributes: RedirectAttributes,
+    ): String {
         // 하위 그룹/게이트가 남아있는 위치를 삭제하면 FK 제약(fk_gate_dtl_loc 등) 위반으로
         // DataIntegrityViolationException이 던져진다 — 잡지 않으면 500 에러 페이지로 직행한다
         // (2026-08-20 Opus 전체 리뷰 지적). UserController.delete와 동일한 패턴으로 안내 메시지로
@@ -198,6 +227,6 @@ class GateLocationController(
         } catch (ex: DataIntegrityViolationException) {
             redirectAttributes.addFlashAttribute("error", "하위 그룹/게이트가 남아있어 위치를 삭제할 수 없습니다.")
         }
-        return "redirect:/gates/locations"
+        return "redirect:/gates/locations?showInactive=$showInactive"
     }
 }

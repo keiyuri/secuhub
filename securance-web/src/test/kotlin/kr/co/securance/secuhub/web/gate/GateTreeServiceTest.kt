@@ -10,10 +10,10 @@ import kr.co.securance.secuhub.domain.repository.GateGroupRepository
 import kr.co.securance.secuhub.domain.repository.GateLocationRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
-import org.springframework.data.domain.Sort
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -22,8 +22,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * [GateTreeService]의 TTL 캐시(2026-08-20 Opus 전체 리뷰 지적 — `/api/gate-tree`가 탭당 5초
- * 주기로 폴링되며 매 호출마다 4개 테이블을 전량 조회하던 문제) 회귀 테스트.
+ * [GateTreeService]의 (1) TTL 캐시(2026-08-20 Opus 전체 리뷰 지적 — `/api/gate-tree`가 탭당 5초
+ * 주기로 폴링되며 매 호출마다 4개 테이블을 전량 조회하던 문제)와 (2) 목록 조회 필터(코드 리뷰 지적,
+ * 2026-08-20 — 대시보드 트리뷰가 '사용'(useYn)만 가진 GateLocation/GateGroup은 useYn 필터만,
+ * '사용'+'분석'(analysisYn) 둘 다 가진 GateDetail은 두 필터를 모두 건 조회 메서드로 위임하는지)에
+ * 대한 회귀 테스트.
  */
 class GateTreeServiceTest {
 
@@ -41,10 +44,10 @@ class GateTreeServiceTest {
     private fun newService(
         clock: Clock,
         locationRepository: GateLocationRepository = mock(GateLocationRepository::class.java).also {
-            `when`(it.findAll(Sort.by("locId"))).thenReturn(listOf(loc))
+            `when`(it.findByUseYnTrueOrderByLocName()).thenReturn(listOf(loc))
         },
         groupRepository: GateGroupRepository = mock(GateGroupRepository::class.java).also {
-            `when`(it.findAll()).thenReturn(listOf(grp))
+            `when`(it.findAllByUseYnTrue()).thenReturn(listOf(grp))
         },
         detailRepository: GateDetailRepository = mock(GateDetailRepository::class.java).also {
             `when`(it.findAllForTree()).thenReturn(listOf(dtl))
@@ -71,6 +74,31 @@ class GateTreeServiceTest {
         assertEquals(1, tree[0].groups.size)
         assertEquals(1, tree[0].groups[0].details.size)
         assertTrue(tree[0].groups[0].details[0].online, "tb_net_state에 Y로 기록된 레인은 online=true여야 한다")
+    }
+
+    @Test
+    fun `트리는 필터가 걸린 조회 메서드로만 위임하고 필터 없는 findAll은 호출하지 않는다`() {
+        val locationRepository = mock(GateLocationRepository::class.java).also {
+            `when`(it.findByUseYnTrueOrderByLocName()).thenReturn(listOf(loc))
+        }
+        val groupRepository = mock(GateGroupRepository::class.java).also {
+            `when`(it.findAllByUseYnTrue()).thenReturn(listOf(grp))
+        }
+        val detailRepository = mock(GateDetailRepository::class.java).also {
+            `when`(it.findAllForTree()).thenReturn(listOf(dtl))
+        }
+        val netStateRepository = mock(NetStateRepository::class.java).also {
+            `when`(it.findAll()).thenReturn(emptyList())
+        }
+
+        val service = GateTreeService(locationRepository, groupRepository, detailRepository, netStateRepository)
+        val tree = service.buildTree()
+
+        assertEquals(1, tree.size)
+        assertEquals(1, tree.single().groups.single().details.size)
+        // 필터 없는 전체 조회(findAll)는 호출되지 않아야 한다 — 비활성/미분석 항목이 섞여 들어오면 안 된다.
+        verify(groupRepository, never()).findAll()
+        verify(detailRepository, never()).findByGroup_GrpIdOrderByDtlLaneNo(1L)
     }
 
     @Test

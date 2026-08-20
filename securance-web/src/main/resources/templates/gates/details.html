@@ -21,6 +21,11 @@
                     th:selected="${grp.grpId == selectedGrpId}"></option>
           </select>
         </div>
+        <div class="col-auto form-check mb-1">
+          <input type="checkbox" class="form-check-input" id="showInactive" name="showInactive"
+                 value="true" th:checked="${showInactive}" onchange="this.form.submit()"/>
+          <label class="form-check-label" for="showInactive">비활성/미분석 레인 표시</label>
+        </div>
       </form>
     </div>
   </div>
@@ -54,10 +59,12 @@
                        이 Object Code(0x50)를 이해하지 못하므로 진입 버튼 자체를 숨긴다(GateControlController.fastMotorForm의
                        서버측 재검증과 이중 방어). */-->
                   <a th:if="${dtl.dtlType == 4}" class="btn btn-sm btn-outline-info" th:href="@{/gates/details/{id}/fast-motor(id=${dtl.dtlId})}">Fast모터</a>
-                  <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/details/{id}/edit(id=${dtl.dtlId})}">수정</a>
+                  <a class="btn btn-sm btn-outline-secondary"
+                     th:href="@{/gates/details/{id}/edit(id=${dtl.dtlId},showInactive=${showInactive})}">수정</a>
                   <form th:action="@{/gates/details/{id}/delete(id=${dtl.dtlId})}" method="post" class="d-inline"
                         onsubmit="return confirm('삭제하시겠습니까?');">
                     <input type="hidden" name="grpId" th:value="${selectedGrpId}"/>
+                    <input type="hidden" name="showInactive" th:value="${showInactive}"/>
                     <button type="submit" class="btn btn-sm btn-outline-danger">삭제</button>
                   </form>
                 </td>
@@ -77,6 +84,7 @@
           <form th:action="${editingId} ? @{/gates/details/{id}(id=${editingId})} : @{/gates/details}"
                 th:object="${form}" method="post">
             <input type="hidden" th:field="*{grpId}"/>
+            <input type="hidden" name="showInactive" th:value="${showInactive}"/>
             <div class="mb-3">
               <label class="form-label">레인 번호</label>
               <input type="number" min="0" class="form-control" th:field="*{dtlLaneNo}"
@@ -119,7 +127,7 @@
               <label class="form-check-label">분석/제어 대상</label>
             </div>
             <button type="submit" class="btn btn-primary" th:text="${editingId} ? '수정' : '등록'">등록</button>
-            <a class="btn btn-secondary" th:href="@{/gates/details(grpId=${selectedGrpId})}">취소</a>
+            <a class="btn btn-secondary" th:href="@{/gates/details(grpId=${selectedGrpId},showInactive=${showInactive})}">취소</a>
           </form>
         </div>
       </div>

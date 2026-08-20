@@ -37,7 +37,7 @@ class LocationMapController(
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "위치 배치도 — ${location.locName}")
         model.addAttribute("location", location)
-        model.addAttribute("groups", groupService.findByLocation(locId))
+        model.addAttribute("groups", groupService.findAllActiveByLocation(locId))
         return "gates/location-map"
     }
 

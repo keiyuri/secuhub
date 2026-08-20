@@ -20,6 +20,11 @@
                     th:selected="${loc.locId == selectedLocId}"></option>
           </select>
         </div>
+        <div class="col-auto form-check mb-1">
+          <input type="checkbox" class="form-check-input" id="showInactive" name="showInactive"
+                 value="true" th:checked="${showInactive}" onchange="this.form.submit()"/>
+          <label class="form-check-label" for="showInactive">비활성 그룹 표시</label>
+        </div>
       </form>
     </div>
   </div>
@@ -43,10 +48,12 @@
                 <td th:text="${grp.useYn} ? '사용' : '미사용'">사용</td>
                 <td class="text-end text-nowrap">
                   <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/details(grpId=${grp.grpId})}">레인</a>
-                  <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/groups/{id}/edit(id=${grp.grpId})}">수정</a>
+                  <a class="btn btn-sm btn-outline-secondary"
+                     th:href="@{/gates/groups/{id}/edit(id=${grp.grpId},showInactive=${showInactive})}">수정</a>
                   <form th:action="@{/gates/groups/{id}/delete(id=${grp.grpId})}" method="post" class="d-inline"
                         onsubmit="return confirm('삭제하시겠습니까? 하위 레인이 있으면 실패합니다.');">
                     <input type="hidden" name="locId" th:value="${selectedLocId}"/>
+                    <input type="hidden" name="showInactive" th:value="${showInactive}"/>
                     <button type="submit" class="btn btn-sm btn-outline-danger">삭제</button>
                   </form>
                 </td>
@@ -65,6 +72,7 @@
         <div class="card-body">
           <form th:action="${editingId} ? @{/gates/groups/{id}(id=${editingId})} : @{/gates/groups}"
                 th:object="${form}" method="post">
+            <input type="hidden" name="showInactive" th:value="${showInactive}"/>
             <div class="mb-3">
               <label class="form-label">위치</label>
               <select class="form-select" th:field="*{locId}"
@@ -108,7 +116,7 @@
               <label class="form-check-label">사용</label>
             </div>
             <button type="submit" class="btn btn-primary" th:text="${editingId} ? '수정' : '등록'">등록</button>
-            <a class="btn btn-secondary" th:href="@{/gates/groups(locId=${selectedLocId})}">취소</a>
+            <a class="btn btn-secondary" th:href="@{/gates/groups(locId=${selectedLocId},showInactive=${showInactive})}">취소</a>
           </form>
         </div>
       </div>

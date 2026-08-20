@@ -218,10 +218,23 @@ class ScheduleApplyService(
     private val detailRepository: GateDetailRepository,
     private val dataSendRepository: DataSendRepository,
 ) {
+    /**
+     * 예약 모드 명령은 `analysisYn`(분석/제어 대상) 여부와 무관하게 적용 대상이다 — 레거시
+     * `SelectGateDtlIPList`/`InsertSendDataAll`(타임존 동기화, [TimeZoneService.broadcastToAllGates]
+     * 참고)과 동일하게 레인 자신의 `useYn`만 확인하고 `analysisYn`은 확인하지 않는다(2026-08-20
+     * 사용자 확인: "분석=N도 포함, 사용=Y만 필터"). 화면(ScheduleController.index)의 레인 콤보도
+     * 동일 조건([GateDetailService.findByGroupForSchedule])을 쓴다.
+     *
+     * 다만 소속 그룹·위치의 `useYn`은 레인 자신의 useYn과 별개로 항상 강제한다 — 위치/그룹 콤보는
+     * 활성 항목만 보여주므로 정상 경로에서는 비활성 위치/그룹이 선택되지 않지만, 조작된 POST로
+     * 비활성 위치·그룹의 locId/grpId/dtlId를 직접 보내면 그 아래 useYn=true인 레인에까지 예약
+     * 명령이 나갈 수 있었다(2026-08-20 Codex 적대적 리뷰 지적 — 상위 계층 비활성화 우회 경로,
+     * GateResetController.filterByGroupMembership과 동일한 문제).
+     */
     fun targets(locId: Long?, grpId: Long?, dtlId: Long?): List<GateDetail> {
         if (dtlId != null) {
-            val detail = detailRepository.findById(dtlId).orElse(null) ?: return emptyList()
-            return if (detail.useYn) listOf(detail) else emptyList()
+            val detail = detailRepository.findByIdAndUseYnTrueWithActiveParents(dtlId) ?: return emptyList()
+            return listOf(detail)
         }
         if (grpId != null) return detailRepository.findByGroup_GrpIdAndUseYnTrue(grpId)
         if (locId != null) return detailRepository.findByLocation_LocIdAndUseYnTrue(locId)
@@ -334,9 +347,13 @@ class ScheduleController(
         model.addAttribute("timezones", timeZoneService.findAllActive())
         model.addAttribute("timezoneForm", TimeZoneForm())
 
-        model.addAttribute("allLocations", locationService.findAll())
-        model.addAttribute("groupsForLoc", locId?.let { groupService.findByLocation(it) } ?: emptyList<Any>())
-        model.addAttribute("detailsForGrp", grpId?.let { detailService.findByGroup(it) } ?: emptyList<Any>())
+        // 관리(CRUD) 목록 화면이 아니므로 '사용=Y' 대상만 노출한다(2026-08-20 "예외 없이 전체 목록
+        // 조회에 적용" 지시). 단, 레인 콤보(detailsForGrp)는 예약 명령이 analysisYn과 무관하게
+        // 적용되므로 '분석' 컬럼은 확인하지 않는다(2026-08-20 사용자 확인: "분석=N도 포함, 사용=Y만
+        // 필터" — GateDetailService.findByGroupForSchedule 참고).
+        model.addAttribute("allLocations", locationService.findAllActive())
+        model.addAttribute("groupsForLoc", locId?.let { groupService.findAllActiveByLocation(it) } ?: emptyList<Any>())
+        model.addAttribute("detailsForGrp", grpId?.let { detailService.findByGroupForSchedule(it) } ?: emptyList<Any>())
         model.addAttribute("selectedLocId", locId)
         model.addAttribute("selectedGrpId", grpId)
         model.addAttribute("selectedDtlId", dtlId)

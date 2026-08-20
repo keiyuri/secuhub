@@ -4,6 +4,7 @@ import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import kr.co.securance.secuhub.domain.entity.GateDetail
+import kr.co.securance.secuhub.domain.entity.GateGroup
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.GateGroupRepository
 import kr.co.securance.secuhub.domain.repository.GateLocationRepository
@@ -33,8 +34,30 @@ class GateDetailService(
     private val detailRepository: GateDetailRepository,
     private val groupRepository: GateGroupRepository,
 ) {
-    fun findByGroup(grpId: Long?): List<GateDetail> =
-        if (grpId == null) emptyList() else detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(grpId)
+    /**
+     * 레인 관리(CRUD) 목록 자체의 조회 — 기본은 사용/분석 대상(둘 다 'Y')인 레인만 보여주고,
+     * [showInactive]가 true일 때만 비활성·미분석 레인까지 전부 노출한다(2026-08-20 코드 리뷰
+     * 지적 — Location/Group/User 관리 화면에만 있던 "비활성 항목 표시" 토글이 이 화면에는 빠져
+     * 있어 비활성/미분석 레인을 목록에서 찾아 재활성화할 방법이 없었다). 그룹 미선택(grpId=null)
+     * 시에는 토글 여부와 무관하게 빈 목록을 반환한다.
+     */
+    fun findAllForManagement(grpId: Long?, showInactive: Boolean): List<GateDetail> =
+        if (grpId == null) {
+            emptyList()
+        } else if (showInactive) {
+            detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(grpId)
+        } else {
+            detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(grpId)
+        }
+
+    /**
+     * 스케줄 화면(#6 SetupSchedule)의 레인 콤보 — 예약 명령은 `analysisYn` 여부와 무관하게 적용
+     * 대상이므로(레거시 `SelectGateDtlIPList`/`InsertSendDataAll`과 동일, [ScheduleApplyService.targets]
+     * 참고) `useYn=true`인 레인만 필터하고 `analysisYn`은 확인하지 않는다(2026-08-20 사용자 확인:
+     * "분석=N도 포함, 사용=Y만 필터").
+     */
+    fun findByGroupForSchedule(grpId: Long?): List<GateDetail> =
+        if (grpId == null) emptyList() else detailRepository.findByGroup_GrpIdAndUseYnTrue(grpId)
 
     fun findByIdOrNull(dtlId: Long): GateDetail? = detailRepository.findById(dtlId).orElse(null)
 
@@ -117,16 +140,24 @@ class GateDetailController(
     private val menuProvider: MenuProvider,
 ) {
     @GetMapping
-    fun list(@RequestParam(required = false) grpId: Long?, model: Model): String {
-        populateCommon(model, grpId)
+    fun list(
+        @RequestParam(required = false) grpId: Long?,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
+        model: Model,
+    ): String {
+        populateCommon(model, grpId, showInactive)
         model.addAttribute("form", GateDetailForm(grpId = grpId))
         return "gates/details"
     }
 
     @GetMapping("/{dtlId}/edit")
-    fun edit(@PathVariable dtlId: Long, model: Model): String {
+    fun edit(
+        @PathVariable dtlId: Long,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
+        model: Model,
+    ): String {
         val detail = detailService.findByIdOrNull(dtlId) ?: return "redirect:/gates/details"
-        populateCommon(model, detail.group.grpId)
+        populateCommon(model, detail.group.grpId, showInactive)
         model.addAttribute("editingId", dtlId)
         model.addAttribute(
             "form",
@@ -148,16 +179,17 @@ class GateDetailController(
     fun create(
         @Validated @ModelAttribute("form") form: GateDetailForm,
         binding: BindingResult,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
         model: Model,
         redirectAttributes: RedirectAttributes,
     ): String {
         if (binding.hasErrors()) {
-            populateCommon(model, form.grpId)
+            populateCommon(model, form.grpId, showInactive)
             return "gates/details"
         }
         detailService.create(form)
         redirectAttributes.addFlashAttribute("message", "게이트 상세(레인)가 등록되었습니다.")
-        return "redirect:/gates/details" + (form.grpId?.let { "?grpId=$it" } ?: "")
+        return "redirect:/gates/details" + queryString(form.grpId, showInactive)
     }
 
     @PostMapping("/{dtlId}")
@@ -165,23 +197,25 @@ class GateDetailController(
         @PathVariable dtlId: Long,
         @Validated @ModelAttribute("form") form: GateDetailForm,
         binding: BindingResult,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
         model: Model,
         redirectAttributes: RedirectAttributes,
     ): String {
         if (binding.hasErrors()) {
-            populateCommon(model, form.grpId)
+            populateCommon(model, form.grpId, showInactive)
             model.addAttribute("editingId", dtlId)
             return "gates/details"
         }
         detailService.update(dtlId, form)
         redirectAttributes.addFlashAttribute("message", "게이트 상세(레인) 정보가 수정되었습니다.")
-        return "redirect:/gates/details" + (form.grpId?.let { "?grpId=$it" } ?: "")
+        return "redirect:/gates/details" + queryString(form.grpId, showInactive)
     }
 
     @PostMapping("/{dtlId}/delete")
     fun delete(
         @PathVariable dtlId: Long,
         @RequestParam(required = false) grpId: Long?,
+        @RequestParam(required = false, defaultValue = "false") showInactive: Boolean,
         redirectAttributes: RedirectAttributes,
     ): String {
         // 다른 테이블(제어 이력 등)이 이 dtlId를 FK로 참조하는 경우
@@ -193,16 +227,40 @@ class GateDetailController(
         } catch (ex: DataIntegrityViolationException) {
             redirectAttributes.addFlashAttribute("error", "연관된 데이터가 남아있어 이 게이트(레인)를 삭제할 수 없습니다.")
         }
-        return "redirect:/gates/details" + (grpId?.let { "?grpId=$it" } ?: "")
+        return "redirect:/gates/details" + queryString(grpId, showInactive)
     }
 
-    private fun populateCommon(model: Model, grpId: Long?) {
+    private fun queryString(grpId: Long?, showInactive: Boolean): String {
+        val params = buildList {
+            grpId?.let { add("grpId=$it") }
+            if (showInactive) add("showInactive=true")
+        }
+        return if (params.isEmpty()) "" else "?" + params.joinToString("&")
+    }
+
+    /**
+     * 그룹 선택 콤보 목록 — 기본은 활성 그룹만 보여주되, 현재 선택된 그룹([grpId])이 비활성이라
+     * 이 목록에 없으면 별도로 조회해 끼워 넣는다(2026-08-20 Codex 리뷰 지적: 비활성 그룹의
+     * `레인` 링크로 들어오면 `selectedGrpId`는 설정돼도 콤보에 그 그룹이 없어 선택이 빈 값으로
+     * 렌더링되고, 이후 "비활성 레인 표시" 체크박스를 누르면 폼이 빈 grpId를 제출해 그룹 선택
+     * 자체가 사라졌다). `showInactive=true`일 때는 처음부터 비활성 그룹까지 전부 보여준다.
+     */
+    private fun groupOptions(grpId: Long?, showInactive: Boolean): List<GateGroup> {
+        if (showInactive) return groupService.findByLocation(null)
+        val active = groupService.findAllActiveByLocation(null)
+        if (grpId == null || active.any { it.grpId == grpId }) return active
+        val selected = groupService.findByIdOrNull(grpId) ?: return active
+        return active + selected
+    }
+
+    private fun populateCommon(model: Model, grpId: Long?, showInactive: Boolean) {
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "게이트 상세(레인) 관리")
-        model.addAttribute("allLocations", locationService.findAll())
-        model.addAttribute("allGroups", groupService.findByLocation(null))
+        model.addAttribute("allLocations", locationService.findAllActive())
+        model.addAttribute("allGroups", groupOptions(grpId, showInactive))
         model.addAttribute("gateTypes", gateTypeCodeService.gateTypes())
         model.addAttribute("selectedGrpId", grpId)
-        model.addAttribute("details", detailService.findByGroup(grpId))
+        model.addAttribute("showInactive", showInactive)
+        model.addAttribute("details", detailService.findAllForManagement(grpId, showInactive))
     }
 }

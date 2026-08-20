@@ -74,8 +74,8 @@ class AccessReportControllerTest {
     @WithMockUser
     fun `위치 그룹 파라미터 없이 조회하면 화면만 렌더링되고 서비스는 호출되지 않는다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
-        `when`(groupService.findByLocation(null)).thenReturn(emptyList())
+        `when`(locationService.findAllActive()).thenReturn(emptyList())
+        `when`(groupService.findAllActiveByLocation(null)).thenReturn(emptyList())
 
         mockMvc.get("/reports/access") { with(csrf()) }.andExpect {
             status { isOk() }
@@ -87,8 +87,8 @@ class AccessReportControllerTest {
     @WithMockUser
     fun `위치와 그룹을 지정하면 조회 결과를 모델에 담는다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
-        `when`(groupService.findByLocation(1L)).thenReturn(emptyList())
+        `when`(locationService.findAllActive()).thenReturn(emptyList())
+        `when`(groupService.findAllActiveByLocation(1L)).thenReturn(emptyList())
         `when`(accessReportService.search(anyLong(), anyLong(), anyLocalDate(), anyLocalDate()))
             .thenReturn(emptyResult)
 
@@ -106,8 +106,8 @@ class AccessReportControllerTest {
     @WithMockUser
     fun `조회 기간이 3개월을 넘으면 상한으로 잘리고 안내 메시지가 뜬다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
-        `when`(groupService.findByLocation(1L)).thenReturn(emptyList())
+        `when`(locationService.findAllActive()).thenReturn(emptyList())
+        `when`(groupService.findAllActiveByLocation(1L)).thenReturn(emptyList())
         `when`(accessReportService.search(anyLong(), anyLong(), anyLocalDate(), anyLocalDate()))
             .thenReturn(emptyResult)
 

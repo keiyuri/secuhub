@@ -1,6 +1,7 @@
 package kr.co.securance.secuhub.server.db
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import kr.co.securance.secuhub.domain.entity.OprStatus
 import kr.co.securance.secuhub.domain.entity.OprStatusId
 import kr.co.securance.secuhub.domain.entity.OprStatusOutbox
@@ -76,6 +77,20 @@ class OprStatusPersister(
     private val dbWriteQueue: GateDbWriteQueue,
     private val oprStatusRepository: OprStatusRepository,
     private val oprStatusOutboxRepository: OprStatusOutboxRepository,
+    /**
+     * [replayOutboxEntry]가 `result.await()`를 무한정 기다리지 않도록 두는 상한(밀리초, R-2 대응) —
+     * 테스트가 셧다운 경합을 빠르게 재현할 수 있도록 생성자에서 주입 가능하게 뒀다
+     * ([GateControlDispatcher]의 `clock` 주입과 동일한 패턴). 기본값은 [GateDbWriteTask]의 기본
+     * 재시도 정책(`maxAttempts=3`, 시도당 `timeout=5초`, 백오프 최대 2초)이 정상적으로 실패로
+     * 확정되기까지 걸리는 최대 시간(약 21초)보다 넉넉히 크게 잡았다.
+     *
+     * **타입이 `Long`(밀리초)인 이유**: `kotlin.time.Duration`은 인라인 값 클래스(value class)라,
+     * 기본값이 있는 생성자 파라미터로 두면 Kotlin이 만드는 합성(디폴트용) 생성자를 Spring이
+     * 빈 생성 시점에 잘못 고른다 — `DefaultConstructorMarker` 타입의 빈을 찾다가 기동 자체가
+     * 실패했다(2026-08-20 실제 재현: `SecuranceApplicationTests` 컨텍스트 로드 실패). `Clock`처럼
+     * 인라인이 아닌 일반 타입이면 문제없다([GateControlDispatcher]의 `clock` 파라미터 참고).
+     */
+    private val replayAwaitTimeoutMillis: Long = 30_000L,
 ) {
     private val logger = LoggerFactory.getLogger(OprStatusPersister::class.java)
 
@@ -185,6 +200,22 @@ class OprStatusPersister(
      * 그 직렬화를 우회해 같은 분(分) 버킷 행을 락 없이 동시에 findById→save할 수 있었다(유실/갱신
      * 손실 위험). 재처리도 동일 파티션키([OprStatusOutbox.dtlIp])로 큐에 태워, 라이브 쓰기와 순서가
      * 보장되게 한다 — 재처리는 저빈도라 큐를 한 단계 더 거치는 지연은 문제되지 않는다.
+     *
+     * ## `result`가 영원히 완료되지 않을 수 있는 경로 (코드 리뷰 지적 R-2)
+     * [result]는 (1) [upsert] 성공 시, 또는 (2) [GateDbWriteTask.onDropOrFinalFailure] 콜백 실행
+     * 시에만 완료된다. 그런데 [GateDbWriteQueue.shutdown]이 호출된 직후, 마침 이 작업을 처리하던
+     * 샤드 워커가 `withTimeout { execution.await() }`에서 대기하던 도중이면 `workerJob.cancel()`이
+     * 만든 [kotlinx.coroutines.CancellationException]이 그 자리에서 그대로 전파되어 워커 루프
+     * 자체가 끝나버린다 — 처리 중이던 이 작업도, 채널에 남아 있던 나머지 작업도 [onDropOrFinalFailure]가
+     * 호출되지 않은 채 버려진다([GateDbWriteQueue.runShardWorker] 참고).
+     *
+     * 이 클래스만으로는 그 경합을 막을 수 없으므로(큐 쪽 종료 순서 문제), 호출부(Quartz 잡)의
+     * `runBlocking`이 `@DisallowConcurrentExecution` 잡 스레드를 영구히 붙잡지 않도록
+     * [withTimeoutOrNull]로 상한을 둔다. `GateDbWriteTask`의 기본 재시도 정책(`maxAttempts=3`,
+     * `timeout=5초`, 최대 백오프 2초)이 정상 실패 경로에서 걸리는 최대 시간보다 넉넉히 크게 잡아,
+     * 정상적인 재시도 중인 작업을 성급하게 포기 처리하지 않는다. 시간 초과 시 실패로 간주해도
+     * outbox 행 자체는 지워지지 않으므로([OprStatusOutboxReplayJob]이 실패 시 `retryCount`만 올리고
+     * 행은 남겨둔다) 데이터 유실은 없다 — 다음 잡 실행에서 다시 시도된다.
      */
     suspend fun replayOutboxEntry(entry: OprStatusOutbox): Boolean {
         val result = CompletableDeferred<Boolean>()
@@ -202,7 +233,15 @@ class OprStatusPersister(
                 result.complete(true)
             },
         )
-        return result.await()
+        val completed = withTimeoutOrNull(replayAwaitTimeoutMillis) { result.await() }
+        if (completed == null) {
+            logger.error(
+                "outbox 재처리 응답을 {}ms 안에 받지 못했습니다(큐 셧다운 경합 등) — 이번 시도는 실패로 " +
+                    "간주합니다: dtlIp={}, lane={}, oprDate={}",
+                replayAwaitTimeoutMillis, entry.dtlIp, entry.dtlLaneNo, entry.oprDate,
+            )
+        }
+        return completed ?: false
     }
 
     private fun upsert(

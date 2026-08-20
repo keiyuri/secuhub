@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import org.springframework.transaction.annotation.Transactional
 
 interface DataReceiveRepository : JpaRepository<DataReceive, Long> {
 
@@ -16,7 +17,15 @@ interface DataReceiveRepository : JpaRepository<DataReceive, Long> {
      * 작성했다 — 대상 행이 수백만 건일 수 있는 고빈도 적재 테이블이라, 한 트랜잭션에서 전부 지우면
      * 락을 오래 쥐게 되므로 [kr.co.securance.secuhub.scheduler.job.RetentionCleanupJob]이 이 메서드를
      * 반복 호출해 조금씩 지운다.
+     *
+     * **`@Transactional` 필수(Codex 적대적 리뷰 지적, 2026-08-20, [high])**: Spring Data JPA는
+     * `find`/`get`/`read`/... 로 시작하는 조회 메서드에만 기본 트랜잭션(readOnly)을 자동으로 씌운다
+     * — `deleteBatchOlderThan`처럼 이름이 그 패턴에 안 맞는 커스텀 `@Modifying` 메서드는 호출부가
+     * 트랜잭션 안에 있지 않으면 `TransactionRequiredException`으로 실패한다. 호출부인
+     * `RetentionCleanupJob.executeInternal`은 트랜잭션이 아니므로(배치 삭제를 잘게 쪼개 락을 짧게
+     * 쥐려는 의도, 클래스 KDoc "배치 삭제인 이유" 참고) 메서드 자체에 트랜잭션을 씌운다.
      */
+    @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "DELETE FROM tb_data_rcv WHERE rcv_date < :cutoff LIMIT :batchSize", nativeQuery = true)
     fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
@@ -43,9 +52,36 @@ interface DataReceiveRepository : JpaRepository<DataReceive, Long> {
     fun findTopByDtlIpOrderByRcvIdDesc(dtlIp: String): DataReceive?
 }
 
-interface DataReceiveFailRepository : JpaRepository<DataReceiveFail, Long>
+interface DataReceiveFailRepository : JpaRepository<DataReceiveFail, Long> {
 
-interface DataReceiveAckRepository : JpaRepository<DataReceiveAck, Long>
+    /**
+     * 코드 리뷰 지적 D-3 대응: `tb_data_rcv_fail`은 D5 보관 정책(2026-08-12) 도입 당시 정리 대상에서
+     * 빠져 있었다 — 체크섬 실패마다 1행씩 무한정 쌓이는 고빈도 테이블인데도 삭제 쿼리 자체가
+     * 없었다. `fail_date`는 `yyyyMMddHHmmss`(초 단위) 문자열이라 사전식 비교가 시간 비교와
+     * 일치한다([GatePacketPersister]의 `TIMESTAMP_FORMAT`).
+     */
+    // `@Transactional` 필요 이유는 DataReceiveRepository.deleteBatchOlderThan KDoc 참고
+    // (Codex 적대적 리뷰 지적, 2026-08-20, [high]).
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "DELETE FROM tb_data_rcv_fail WHERE fail_date < :cutoff LIMIT :batchSize", nativeQuery = true)
+    fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
+}
+
+interface DataReceiveAckRepository : JpaRepository<DataReceiveAck, Long> {
+
+    /**
+     * 코드 리뷰 지적 D-3 대응: `tb_data_rcv_ack`는 장비 ACK 수신마다 1행씩 쌓이는 고빈도 테이블인데도
+     * D5 보관 정책 대상에서 빠져 있었다. `ack_date`는 `yyyyMMddHHmmss`(초 단위) 문자열이라 사전식
+     * 비교가 시간 비교와 일치한다.
+     */
+    // `@Transactional` 필요 이유는 DataReceiveRepository.deleteBatchOlderThan KDoc 참고
+    // (Codex 적대적 리뷰 지적, 2026-08-20, [high]).
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "DELETE FROM tb_data_rcv_ack WHERE ack_date < :cutoff LIMIT :batchSize", nativeQuery = true)
+    fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
+}
 
 // DataReceiveLogRepository(tb_gate_log_event)는 2026-08-12 제거됐다 — 자세한 경위는
 // DataReceive.kt의 관련 주석과 docs/작업일지.md 0011 참고.

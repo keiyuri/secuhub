@@ -1,8 +1,13 @@
 package kr.co.securance.secuhub.scheduler.job
 
+import kr.co.securance.secuhub.domain.repository.DataReceiveAckRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveAnalysisRepository
+import kr.co.securance.secuhub.domain.repository.DataReceiveFailRepository
 import kr.co.securance.secuhub.domain.repository.DataReceiveRepository
+import kr.co.securance.secuhub.domain.repository.DataSendRepository
 import kr.co.securance.secuhub.domain.repository.GateLogRepository
+import kr.co.securance.secuhub.domain.repository.OprStatusOutboxRepository
+import kr.co.securance.secuhub.domain.repository.OprStatusRepository
 import kr.co.securance.secuhub.scheduler.config.SchedulerProperties
 import org.quartz.DisallowConcurrentExecution
 import org.quartz.JobExecutionContext
@@ -19,6 +24,16 @@ import java.time.format.DateTimeFormatter
  * 상태 패킷이 초 단위로 쌓이는 고빈도 적재 테이블인데도 정리하는 잡·쿼리가 신규 코드베이스에도
  * 전무했다. 사용자 결정에 따라 보관 기간을 [SchedulerProperties.retentionDays](기본 365일)로 두고,
  * 컷오프보다 오래된 행을 배치 단위로 영구 삭제한다.
+ *
+ * ## 정리 대상 확장(코드 리뷰 지적 D-3, 2026-08-20)
+ * 최초 도입 시 `tb_data_rcv`/`tb_data_rcv_anal`/`tb_gate_log` 세 테이블만 대상으로 삼았는데,
+ * 아래 테이블들도 동일하게 고빈도로 쌓이면서도 정리 대상에서 빠져 있었다 — 무기한 증가한다:
+ * - `tb_data_rcv_ack`(장비 ACK 수신마다 1행), `tb_data_rcv_fail`(체크섬 실패마다 1행)
+ * - `tb_opr_status`(레인 × 분 버킷마다 1행)
+ * - `tb_data_snd`(제어 명령 발행마다 1행 — 단, 아직 처리 중인 행은 지우면 안 되므로 **종결된
+ *   행만**([DataSendRepository.deleteBatchOlderThan] 참고) 대상으로 한다)
+ * - `tb_opr_status_outbox`(큐 드롭/최종실패 시 durable 저장 — 삭제 쿼리[OprStatusOutboxRepository.deleteProcessedOlderThan]는
+ *   이미 있었으나 호출하는 곳이 없어 죽은 코드였다)
  *
  * **배치 삭제인 이유**: 대상 테이블이 수백만 건 규모일 수 있어 `DELETE ... WHERE date < cutoff`를
  * 한 번에 실행하면 트랜잭션/락을 오래 쥐게 된다. [SchedulerProperties.retentionBatchSize] 단위로
@@ -42,6 +57,21 @@ class RetentionCleanupJob : QuartzJobBean() {
     private lateinit var gateLogRepository: GateLogRepository
 
     @Autowired
+    private lateinit var dataReceiveAckRepository: DataReceiveAckRepository
+
+    @Autowired
+    private lateinit var dataReceiveFailRepository: DataReceiveFailRepository
+
+    @Autowired
+    private lateinit var oprStatusRepository: OprStatusRepository
+
+    @Autowired
+    private lateinit var oprStatusOutboxRepository: OprStatusOutboxRepository
+
+    @Autowired
+    private lateinit var dataSendRepository: DataSendRepository
+
+    @Autowired
     private lateinit var properties: SchedulerProperties
 
     private val logger = LoggerFactory.getLogger(RetentionCleanupJob::class.java)
@@ -53,9 +83,12 @@ class RetentionCleanupJob : QuartzJobBean() {
         }
 
         val cutoffDateTime = LocalDateTime.now().minusDays(properties.retentionDays)
-        // tb_data_rcv/tb_data_rcv_anal은 rcv_date/anal_date가 `yyyyMMddHHmm` 문자열 컬럼이라
-        // 같은 형식으로 컷오프를 만들어야 사전식 비교(<)가 시간 비교와 일치한다.
+        // tb_data_rcv/tb_data_rcv_anal/tb_opr_status는 날짜 컬럼이 `yyyyMMddHHmm` 문자열이라 같은
+        // 형식으로 컷오프를 만들어야 사전식 비교(<)가 시간 비교와 일치한다.
         val cutoffKey = cutoffDateTime.format(DATE_KEY_FORMAT)
+        // tb_data_rcv_ack/tb_data_rcv_fail/tb_data_snd는 초 단위 `yyyyMMddHHmmss` 문자열이다
+        // ([GatePacketPersister]의 TIMESTAMP_FORMAT, [GateControlDispatcher]의 SEND_DATE_FORMAT).
+        val cutoffTimestampKey = cutoffDateTime.format(TIMESTAMP_KEY_FORMAT)
 
         val dataReceiveDeleted = deleteInBatches("tb_data_rcv") {
             dataReceiveRepository.deleteBatchOlderThan(cutoffKey, properties.retentionBatchSize)
@@ -66,13 +99,35 @@ class RetentionCleanupJob : QuartzJobBean() {
         val gateLogDeleted = deleteInBatches("tb_gate_log") {
             gateLogRepository.deleteBatchOlderThan(cutoffDateTime, properties.retentionBatchSize)
         }
+        val ackDeleted = deleteInBatches("tb_data_rcv_ack") {
+            dataReceiveAckRepository.deleteBatchOlderThan(cutoffTimestampKey, properties.retentionBatchSize)
+        }
+        val failDeleted = deleteInBatches("tb_data_rcv_fail") {
+            dataReceiveFailRepository.deleteBatchOlderThan(cutoffTimestampKey, properties.retentionBatchSize)
+        }
+        val oprStatusDeleted = deleteInBatches("tb_opr_status") {
+            oprStatusRepository.deleteBatchOlderThan(cutoffKey, properties.retentionBatchSize)
+        }
+        val oprStatusOutboxDeleted = deleteInBatches("tb_opr_status_outbox") {
+            oprStatusOutboxRepository.deleteProcessedOlderThan(cutoffDateTime, properties.retentionBatchSize)
+        }
+        val dataSendDeleted = deleteInBatches("tb_data_snd") {
+            dataSendRepository.deleteBatchOlderThan(cutoffTimestampKey, properties.retentionBatchSize)
+        }
 
         logger.info(
-            "[Retention] 정리 완료(cutoff={}): tb_data_rcv={}건, tb_data_rcv_anal={}건, tb_gate_log={}건 삭제",
+            "[Retention] 정리 완료(cutoff={}): tb_data_rcv={}건, tb_data_rcv_anal={}건, tb_gate_log={}건, " +
+                "tb_data_rcv_ack={}건, tb_data_rcv_fail={}건, tb_opr_status={}건, tb_opr_status_outbox={}건, " +
+                "tb_data_snd={}건 삭제",
             cutoffKey,
             dataReceiveDeleted,
             analysisDeleted,
             gateLogDeleted,
+            ackDeleted,
+            failDeleted,
+            oprStatusDeleted,
+            oprStatusOutboxDeleted,
+            dataSendDeleted,
         )
     }
 
@@ -97,5 +152,6 @@ class RetentionCleanupJob : QuartzJobBean() {
 
     private companion object {
         val DATE_KEY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmm")
+        val TIMESTAMP_KEY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
     }
 }

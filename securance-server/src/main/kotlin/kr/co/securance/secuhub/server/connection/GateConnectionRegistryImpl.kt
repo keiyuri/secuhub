@@ -1,8 +1,9 @@
 package kr.co.securance.secuhub.server.connection
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.reactive.awaitFirstOrNull
+import kotlinx.coroutines.withContext
 import kr.co.securance.secuhub.common.exception.GateTaskRejectedException
-import kr.co.securance.secuhub.domain.entity.NetState
 import kr.co.securance.secuhub.domain.entity.NetStateId
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
@@ -16,8 +17,6 @@ import java.time.Duration
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeoutException
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.locks.ReentrantLock
 
 /**
  * [GateConnectionRegistry]의 기본 구현. [kr.co.securance.secuhub.server.tcp.GateTcpServer]/
@@ -42,58 +41,48 @@ class GateConnectionRegistryImpl(
     // 시도/작업으로 넘어간다(GateDbWriteQueue.kt KDoc 참고) — 그 버려진 실행이 뒤늦게 실제로 DB에
     // 도달하면, 이미 재시도나 그 뒤의 더 최신 이벤트(예: OFFLINE 다음에 온 ONLINE)가 먼저 반영된
     // net_state 행을 오래된 값으로 덮어써 순서가 역전될 수 있다. enqueueNetStateUpdate 호출 시점에
-    // (실행 시점이 아니라!) 파티션키(NetStateId)별 단조증가 시퀀스를 발급해두고, 실제 저장 직전에
-    // "내 시퀀스가 이미 적용된 시퀀스보다 새롭지 않으면 쓰지 않는다"를 강제해 역전을 막는다.
+    // (실행 시점이 아니라!) 파티션키(dtlIp, dtlLaneNo)별 단조증가 시퀀스를 발급해두고, 실제 저장은
+    // [NetStateRepository.upsertIfNewer]의 `WHERE applied_seq <= VALUES(applied_seq)` 조건부
+    // UPSERT로 넘긴다.
     //
-    // **2차 적대적 리뷰 지적**: "클레임 후 findById/save"를 락 없이 순서대로만 하면, 오래된 실행이
-    // 클레임에는 통과했지만 그 뒤 findById/save가 DB 지연으로 느려지는 동안 더 최신 실행이 끼어들어
-    // 먼저 클레임+저장을 끝내고, 그 다음 오래된 실행이 재개돼 181행에서 최신 값을 덮어쓰는 TOCTOU
-    // 윈도우가 남는다. 시퀀스 값 자체를 DB 행에 저장해 조건부 UPDATE(`WHERE applied_seq < :seq`)를
-    // 쓰는 것이 정석이지만 스키마 변경이 필요하다 — 대신 [netStateWriteLocks]로 "클레임+조회+저장"
-    // 전체를 같은 키에 대해 상호 배제해, 그 사이에 다른 실행이 끼어들 수 없게 한다.
-    // (이 실행들은 이미 [GateDbWriteQueue]의 전용 블로킹 스레드풀에서 돌기 때문에, 여기서 블로킹
-    // 락을 잡아도 다른 파티션/샤드의 처리량에는 영향이 없다.)
+    // **코드 리뷰 지적 R-8(2026-08-20)**: 이전에는 이 순서 보장을 인메모리 시퀀스 맵
+    // (`lastAppliedNetStateSeq`) + 인메모리 락(`netStateWriteLocks`, `ReentrantLock`)으로 구현했다.
+    // "클레임 후 findById/save"를 락 없이 순서대로만 하면, 오래된 실행이 클레임에는 통과했지만 그
+    // 뒤 findById/save가 DB 지연으로 느려지는 동안 더 최신 실행이 끼어들어 먼저 클레임+저장을 끝내고
+    // 그 다음 오래된 실행이 재개돼 최신 값을 덮어쓰는 TOCTOU 윈도우가 있었다 — 그래서 클레임+조회+
+    // 저장 전체를 (dtlIp, dtlLaneNo)별로 락으로 상호 배제했었다. 이 방식은 두 가지 근본적인 약점이
+    // 있었다: (1) 락은 인스턴스 로컬이라 다중 인스턴스 배포에서는 애초에 순서 역전을 막지 못했고,
+    // (2) 락 맵/시퀀스 맵에 완전한 TTL/크기 상한 evict을 넣을 수 없었다(사용 중인 락을 다른 스레드가
+    // 임의로 제거하면, 그 사이 새로 들어온 호출이 computeIfAbsent로 별도의 새 Lock 인스턴스를 얻어
+    // 같은 키에 대해 서로 다른 락 객체로 "동시에" 임계구역에 들어갈 수 있어 상호 배제 자체가 깨진다).
     //
-    // **3차 리뷰 지적(캐시 무제한 증가)**: 예전에는 이 두 맵의 키가 [NetStateId](dtlIp, dtlLaneNo,
-    // locId, grpId) 전체였다 — 같은 물리 장치가 그룹/위치를 재배정받을 때마다(tb_gate_dtl.loc_id/
-    // grp_id 변경) NetStateId가 바뀌어 새 엔트리가 쌓이고, 옛 엔트리는 영원히 남는 단순 메모리
-    // 누수였을 뿐 아니라 **정합성 버그**이기도 했다: 재배정 직후 첫 쓰기는 새 NetStateId 기준
-    // lastAppliedNetStateSeq가 비어 있으니 무조건 통과되어, 재배정 전에 이미 적용된 더 최신 시퀀스를
-    // 무시하고 순서 역전 가드가 사실상 리셋되는 셈이었다. 시퀀스/락의 대상은 "이 물리 장치·레인에 대한
-    // 쓰기 순서"이지 tb_gate_dtl의 loc_id/grp_id 소속이 아니므로, 키를 (dtlIp, dtlLaneNo)로 정규화해
-    // 두 문제를 함께 해결한다 — 카디널리티도 이제 "지금까지 존재했던 물리 장치·레인 수"로 묶여
-    // NetStateId보다 훨씬 느리게 증가한다.
+    // V31 마이그레이션으로 `tb_net_state.applied_seq` 컬럼을 추가해 이 조건부 검증을 DB의 단일
+    // 원자적 UPSERT 문장(`INSERT ... ON DUPLICATE KEY UPDATE ... IF(applied_seq <= ...)`) 안으로
+    // 옮겼다 — 인메모리 상태가 전혀 없으므로 두 약점이 모두 해소된다: 다중 인스턴스에서도 DB 행
+    // 자체가 진실의 원천이라 정확하고, evict을 걱정할 캐시도 없다. `netStateWriteSequence`(seq
+    // 발급기)만 남기고, 시퀀스 맵과 락은 전부 제거한다.
     //
-    // 완전한 TTL/크기 상한 evict은 도입하지 않는다: [netStateWriteLocks]에서 사용 중인 락을 다른
-    // 스레드가 임의로 제거하면, 그 사이 새로 들어온 호출이 computeIfAbsent로 별도의 새 Lock 인스턴스를
-    // 얻어 같은 키에 대해 서로 다른 락 객체로 "동시에" 임계구역에 들어갈 수 있다 — 상호 배제 자체가
-    // 깨지는 레이스라 이번 라운드에서는 채택하지 않는다. 정석 해법(228행 주석 참고: DB에 applied_seq
-    // 컬럼을 두고 조건부 UPDATE)은 스키마 변경이 필요해 범위 밖으로 남겨둔다.
-    private val netStateWriteSequence = AtomicLong(0)
-    private val lastAppliedNetStateSeq = ConcurrentHashMap<Pair<String, Int>, Long>()
-    private val netStateWriteLocks = ConcurrentHashMap<Pair<String, Int>, ReentrantLock>()
-
-    private fun lockFor(key: Pair<String, Int>): ReentrantLock = netStateWriteLocks.computeIfAbsent(key) { ReentrantLock() }
-
-    /**
-     * [key](dtlIp, dtlLaneNo)에 대해 [seq]가 지금까지 적용된 시퀀스보다 새로울 때만(또는 같은 작업
-     * 자신의 재시도일 때만) 원자적으로 "적용됨"으로 표시한다. 실패하면 이미 더 최신(또는 동일 시점의
-     * 경쟁) 쓰기가 적용됐다는 뜻이므로 호출자는 실제 DB 쓰기를 건너뛰어야 한다. 반드시 [lockFor]로
-     * 해당 [key]를 잠근 상태에서만 호출해야 한다 — 클레임과 실제 저장이 같은 락 구간 안에 있어야
-     * 그 사이에 다른 실행이 끼어들지 못한다.
-     */
-    private fun tryClaimNetStateSeq(key: Pair<String, Int>, seq: Long): Boolean {
-        var claimed = false
-        lastAppliedNetStateSeq.compute(key) { _, current ->
-            if (current == null || seq >= current) {
-                claimed = true
-                seq
-            } else {
-                current
-            }
-        }
-        return claimed
-    }
+    // **코드 리뷰 지적(codex, P1, 2026-08-20)**: `AtomicLong(0)`으로 초기화하면 DB에는
+    // `applied_seq`가 영구 보존되는데 이 카운터는 프로세스 재시작마다 0부터 다시 시작한다.
+    // 재시작 직후 발급되는 seq(1, 2, 3, ...)는 재시작 전 이미 DB에 적용된 값보다 작으므로,
+    // `upsertIfNewer`의 `applied_seq <= VALUES(applied_seq)` 조건에 걸려 재시작 후 한동안(과거
+    // 최대 seq를 다시 따라잡을 때까지) 모든 온라인/오프라인 net_state 갱신이 조용히 거부된다.
+    // 다중 인스턴스 배포에서도 인스턴스마다 카운터가 독립적이라 크기 비교가 이벤트 발생 순서와
+    // 무관해져 같은 문제가 재발한다 — 벽시계 기반(currentTimeMillis) 시드 + 인스턴스 판별자로
+    // 한 차례 완화를 시도했으나(이 주석의 이전 버전), 아래 최종 지적으로 그 완화안 자체가
+    // 근본적으로 불충분함이 드러나 전역 DB 시퀀스로 교체했다.
+    //
+    // **Codex 적대적 리뷰 재지적(2026-08-20, [P1], 최종)**: 벽시계+판별자 조합은 "값 충돌"만
+    // 줄일 뿐 "실제 발생 순서"는 보장하지 못한다 — 두 인스턴스가 같은 밀리초에 같은 레인의
+    // 상태를 갱신하면, 나중에 발생한 이벤트가 우연히 더 작은 판별자를 뽑아 더 작은 seq를 받을
+    // 수 있고, 그러면 `upsertIfNewer`가 그 최신 이벤트를 "더 오래된 쓰기"로 오판해 거부한다.
+    // 인스턴스 로컬 카운터로는 인스턴스 간 순서를 원천적으로 표현할 수 없다는 뜻이므로, seq
+    // 발급 자체를 DB로 옮겼다 — [NetStateRepository.nextSeq]가 MariaDB `SEQUENCE`(V32
+    // 마이그레이션, `tb_net_state_seq`)에서 `NEXT VALUE FOR`로 전역 단조증가 값을 발급받는다.
+    // `enqueueNetStateUpdate` 호출부는 GATE_STATUS 패킷마다가 아니라 온라인/오프라인 "전이"가
+    // 있을 때만 호출되므로(적대적 리뷰 지적, DefaultGatePacketHandler.kt 참고) 매 호출마다
+    // DB 왕복이 하나 늘어도 고빈도 패킷 처리 경로(Dispatchers.IO 기반 커넥션 코루틴)에 실질적인
+    // 부담이 되지 않는다.
 
     /**
      * 새 커넥션을 등록한다. 같은 IP의 기존 커넥션이 있으면 (DB 오프라인 반영 없이) 먼저 닫는다 —
@@ -137,7 +126,7 @@ class GateConnectionRegistryImpl(
         return true
     }
 
-    private fun finalizeClose(dtlIp: String, state: GateConnectionState, updateNetState: Boolean) {
+    private suspend fun finalizeClose(dtlIp: String, state: GateConnectionState, updateNetState: Boolean) {
         state.actor.close()
         // 물리 소켓도 함께 dispose한다(적대적 리뷰 지적) — 예전에는 여기서 registry/액터만 정리하고
         // 실제 Reactor Netty 커넥션은 그대로 열어뒀다. 보통은 onDispose(소켓이 이미 닫혀서 이 경로가
@@ -240,11 +229,12 @@ class GateConnectionRegistryImpl(
      * 등록된 실제 loc_id/grp_id로 채워야 한다(loc_id=0/grp_id=0으로 고정하면 위치/그룹별로
      * `tb_net_state`를 조회·집계하는 화면이 항상 빈 결과를 받는다).
      */
-    fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean) {
+    suspend fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean) {
         // 실행 시점이 아니라 "이 이벤트가 실제로 발생한 순서"를 반영해야 하므로 큐에 넣기 전,
         // 즉 호출 시점에 시퀀스를 발급한다(GateDbWriteQueue의 타임아웃/버려진 실행 재시도로 인한
-        // 순서 역전 방지 — 클래스 상단 주석 참고).
-        val seq = netStateWriteSequence.incrementAndGet()
+        // 순서 역전 방지 — 클래스 상단 주석 참고). DB가 발급하는 전역 시퀀스라 블로킹 JDBC 호출을
+        // Dispatchers.IO로 옮긴다(GateTcpServer/GateTcpClient의 다른 DB 조회 호출과 동일한 패턴).
+        val seq = withContext(Dispatchers.IO) { netStateRepository.nextSeq() }
         enqueueGuardedNetStateWrite(dtlIp, dtlLaneNo, online, seq) {
             val gateDetail = gateDetailRepository.findByDtlIpAndDtlLaneNo(dtlIp, dtlLaneNo)
             if (gateDetail == null) {
@@ -274,14 +264,14 @@ class GateConnectionRegistryImpl(
      * (레거시 M-8: 패킷마다 `tb_gate_dtl`을 재조회하던 N+1 제거). 캐시에 해당 레인이 없고 대표
      * 레인 정보조차 없을 때만 DB 조회 경로([enqueueNetStateUpdate])로 위임한다.
      */
-    fun enqueueNetStateUpdate(state: GateConnectionState, dtlLaneNo: Int, online: Boolean) {
+    suspend fun enqueueNetStateUpdate(state: GateConnectionState, dtlLaneNo: Int, online: Boolean) {
         val info = state.laneInfoOf(dtlLaneNo) ?: state.primaryLaneInfo
         if (info == null) {
             // 캐시가 비어 있는 커넥션(연결 수립 직후 등) — DB에서 직접 확인하는 경로로 넘긴다.
             enqueueNetStateUpdate(state.dtlIp, dtlLaneNo, online)
             return
         }
-        val seq = netStateWriteSequence.incrementAndGet()
+        val seq = withContext(Dispatchers.IO) { netStateRepository.nextSeq() }
         val id = NetStateId(dtlIp = state.dtlIp, dtlLaneNo = dtlLaneNo, locId = info.locId, grpId = info.grpId)
         enqueueGuardedNetStateWrite(state.dtlIp, dtlLaneNo, online, seq) { id }
     }
@@ -307,32 +297,18 @@ class GateConnectionRegistryImpl(
                 operationName = "UpdateNetState($dtlIp,$dtlLaneNo,$online)",
             ) {
                 val id = resolveId() ?: return@GateDbWriteTask
-                val writeKey = dtlIp to dtlLaneNo
-                // 클레임부터 실제 저장까지를 같은 [writeKey]에 대해 통째로 상호 배제한다(2차 적대적
-                // 리뷰 지적) — 클레임만 원자적으로 하고 조회/저장은 락 밖에서 하면, 그 사이의 DB 지연
-                // 동안 더 최신 실행이 끼어들어 먼저 끝낼 수 있고 이후 오래된 실행이 재개돼 최신
-                // 값을 덮어쓰는 순서 역전 창이 남는다.
-                val lock = lockFor(writeKey)
-                lock.lock()
-                try {
-                    // 이미 더 최신(더 큰 seq) 쓰기가 적용된 뒤라면(예: 이 실행이 타임아웃 후
-                    // 버려졌다가 뒤늦게 여기 도달한 경우) 쓰지 않고 건너뛴다. 같은 작업 자신의
-                    // 재시도(seq 동일)는 정상적으로 다시 클레임된다.
-                    if (!tryClaimNetStateSeq(writeKey, seq)) {
-                        logger.warn(
-                            "net_state 갱신을 건너뜁니다: 더 최신 갱신이 이미 적용되었습니다(dtlIp={}, lane={}, seq={})",
-                            dtlIp, dtlLaneNo, seq,
-                        )
-                        return@GateDbWriteTask
-                    }
-                    val entity = netStateRepository.findById(id).orElseGet { NetState(id = id) }
-                    entity.dtlState = if (online) "Y" else "N"
-                    entity.checkTime = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"))
-                    netStateRepository.save(entity)
-                } finally {
-                    lock.unlock()
-                }
-                Unit
+                // 순서 역전 방지는 이제 DB의 조건부 UPSERT(`applied_seq <= VALUES(applied_seq)`)가
+                // 전담한다 — 인메모리 락/시퀀스 맵 없이도 원자적이다(R-8, NetStateRepository.upsertIfNewer
+                // KDoc 참고). 이미 더 최신 seq가 적용된 뒤라면 이 UPSERT는 조용히 no-op이 된다.
+                netStateRepository.upsertIfNewer(
+                    dtlIp = id.dtlIp,
+                    dtlLaneNo = id.dtlLaneNo,
+                    locId = id.locId,
+                    grpId = id.grpId,
+                    dtlState = if (online) "Y" else "N",
+                    checkTime = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm")),
+                    seq = seq,
+                )
             },
         )
     }

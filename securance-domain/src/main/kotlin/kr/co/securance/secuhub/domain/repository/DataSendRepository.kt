@@ -88,4 +88,51 @@ interface DataSendRepository : JpaRepository<DataSend, Long>, JpaSpecificationEx
     @Transactional
     @Query("UPDATE DataSend s SET s.sndYn = 'N', s.version = s.version + 1 WHERE s.sndId = :id")
     fun releaseClaim(@Param("id") id: Long): Int
+
+    /**
+     * [findPendingCommands]가 헤드 오브 라인 차단에 빠지지 않도록, 오래도록 전송조차 되지 못한
+     * 대기 명령을 일괄 실패 확정한다(코드 리뷰 지적 R-1 대응).
+     *
+     * `findPendingCommands`는 `snd_id ASC LIMIT n`으로 가장 오래된 대기 행부터 읽는다. 대상
+     * 게이트가 장시간 미접속이거나(레인 자체가 철거됨 등) 존재하지 않는 IP로 잘못 발행된 명령은
+     * [GateControlDispatcher.sendPendingCommands]가 매 폴링마다 `skipped`로 건너뛸 뿐 상태를
+     * 바꾸지 않는다 — 그 결과 그 행들이 폴링 창(`batchSize`)의 앞자리를 영구히 점유해, 이후
+     * 발행된 정상 명령(더 큰 `snd_id`)이 조회 자체가 되지 않는다. 화면은 "명령 접수 완료"를
+     * 보여주지만 실제로는 전송이 시도조차 되지 않는 상태로 굳는다.
+     *
+     * `sndDate`는 `yyyyMMddHHmmss` 고정 폭 숫자 문자열이라 사전식 비교가 시각 비교와 동일하다
+     * ([kr.co.securance.secuhub.web.control.ControlHistoryController]가 이미 같은 방식으로 범위
+     * 조회에 쓰고 있다). [cutoff]보다 오래된 미전송 대기 행만 `chk_yn='F'`로 실패 확정해 폴링
+     * 대상에서 제거한다 — 게이트가 이후 재접속하더라도 이미 유효기간이 지난 명령을 뒤늦게
+     * 실행하지 않는 편이 안전하다(예: 오래전 요청한 개방 명령이 지금 갑자기 실행되는 사고 방지).
+     *
+     * `snd_yn='N'`(전송 자체를 시도하지 않은) 행만 대상으로 한다 — 이미 전송되어 ACK를 기다리는
+     * 행(`snd_yn='Y'`)은 [GateControlDispatcher.reapAckTimeouts]가 별도로 재시도/실패 확정한다.
+     *
+     * @return 이번 호출로 실패 확정된 행 수.
+     */
+    @Modifying
+    @Transactional
+    @Query(
+        """
+        UPDATE DataSend s SET s.chkYn = 'F', s.version = s.version + 1
+        WHERE s.sndYn = 'N' AND s.chkYn = 'N' AND s.sndDate < :cutoff
+        """,
+    )
+    fun expireStalePending(@Param("cutoff") cutoff: String): Int
+
+    /**
+     * 코드 리뷰 지적 D-3 대응: `tb_data_snd`는 제어 명령을 발행할 때마다 1행씩 쌓이는데도 D5 보관
+     * 정책(2026-08-12) 대상에서 빠져 있었다. `chk_yn IN ('Y','F')`(확인 완료 또는 실패 확정 —
+     * [DataSend]의 상태 전이표 참고)로 **종결된 행만** 대상으로 한다 — 아직 대기 중(N,N)이거나
+     * 전송 후 ACK 대기 중(Y,N)인 행은 오래됐더라도 지우면 안 된다(전송 이력/재시도 근거가 사라짐).
+     * `snd_date`는 `yyyyMMddHHmmss` 문자열이라 사전식 비교가 시간 비교와 일치한다.
+     */
+    @Modifying
+    @Transactional
+    @Query(
+        value = "DELETE FROM tb_data_snd WHERE chk_yn IN ('Y', 'F') AND snd_date < :cutoff LIMIT :batchSize",
+        nativeQuery = true,
+    )
+    fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
 }

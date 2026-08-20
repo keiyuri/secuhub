@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 
 /**
@@ -26,7 +27,11 @@ interface OprStatusOutboxRepository : JpaRepository<OprStatusOutbox, Long> {
     /**
      * 재처리에 성공(또는 재시도 상한 도달로 포기)한 오래된 행을 정리한다 — D5 데이터 보관 정책과
      * 별도로, 이 outbox 테이블 자체가 무한정 쌓이는 것을 막기 위한 자체 정리다.
+     *
+     * `@Transactional` 필요 이유는 [DataReceiveRepository.deleteBatchOlderThan] KDoc 참고
+     * (Codex 적대적 리뷰 지적, 2026-08-20, [high]).
      */
+    @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "DELETE FROM tb_opr_status_outbox WHERE processed = TRUE AND processed_date < :cutoff LIMIT :batchSize", nativeQuery = true)
     fun deleteProcessedOlderThan(@Param("cutoff") cutoff: LocalDateTime, @Param("batchSize") batchSize: Int): Int

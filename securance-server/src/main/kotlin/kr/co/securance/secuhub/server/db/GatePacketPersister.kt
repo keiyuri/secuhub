@@ -1,5 +1,7 @@
 package kr.co.securance.secuhub.server.db
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kr.co.securance.secuhub.common.util.HexCodec
 import kr.co.securance.secuhub.domain.entity.DataReceive
 import kr.co.securance.secuhub.domain.entity.DataReceiveAck
@@ -49,19 +51,22 @@ class GatePacketPersister(
     private val logger = LoggerFactory.getLogger(GatePacketPersister::class.java)
 
     /**
-     * 객체 코드별 상세 저장. 저장 대상이 없는(정보성) 패킷이면 false를 반환한다.
+     * 객체 코드별 상세 저장. 저장 대상이 없는(정보성) 패킷이면 null을 반환한다.
      *
      * @param laneNo 이 패킷의 대표 레인 번호(상태 블록 첫 바이트).
+     * @return 이 패킷의 `tb_data_rcv` 원시 INSERT가 최종적으로 어떤 `rcv_id`로 끝났는지 알려주는
+     *   [Deferred] — 저장 대상이 없으면 null. [persistStatusAnalysis]에 그대로 넘기면 D-1 리뷰
+     *   지적(아래 [resolveRcvId] KDoc 참고)이 막는 잘못된 `rcv_id` 연결을 피할 수 있다. 큐 드롭/
+     *   최종 실패 시에는 `null`로 완료된다 — 그 경우 호출부는 [resolveRcvId]로 **폴백하지 않고**
+     *   0(미상)으로 기록한다(아래 [awaitRcvId] KDoc — Codex 적대적 리뷰 지적, 2026-08-20).
      */
-    fun persistReceivedPacket(state: GateConnectionState, packet: GatePacket, laneNo: Int): Boolean {
+    fun persistReceivedPacket(state: GateConnectionState, packet: GatePacket, laneNo: Int): Deferred<Long?>? {
         val objectCode = packet.objectCode
         val raw = packet.raw
         return when (objectCode) {
             // 게이트 상태(0x4D) — 가장 고빈도. 원시 패킷을 tb_data_rcv에 적재한다.
-            SpeedGateProtocolConstants.ObjectCode.GATE_STATUS -> {
+            SpeedGateProtocolConstants.ObjectCode.GATE_STATUS ->
                 enqueueReceiveInsert(state, raw, laneNo, "상태 수신 데이터 저장")
-                true
-            }
 
             // 설정/모터/스케줄/휴일 — 레거시 BUG-02(저장 호출 누락으로 콘텐츠 영구 유실) 대응 분기.
             // 현재 스키마에서는 네 종류 모두 tb_data_rcv 한 곳에 원시 패킷으로 적재한다
@@ -70,10 +75,8 @@ class GatePacketPersister(
             SpeedGateProtocolConstants.ObjectCode.GATE_MOTOR,
             SpeedGateProtocolConstants.ObjectCode.TIME_ZONE,
             SpeedGateProtocolConstants.ObjectCode.HOLIDAY,
-            -> {
+            ->
                 enqueueReceiveInsert(state, raw, laneNo, "패킷 콘텐츠 저장(objectCode=0x%02X)".format(objectCode))
-                true
-            }
 
             // 게이트 로그(0x61)는 여기서 다루지 않는다 — DefaultGatePacketHandler가 GATE_STATUS에
             // 내장된 로그 구간(핵심 경로) 또는 독립 GATE_LOG 패킷(하위 호환 경로) 모두를
@@ -89,7 +92,7 @@ class GatePacketPersister(
                     "커넥션[{}] 미매핑 objectCode=0x{} 패킷 — 원본(복구용): {}",
                     state.dtlIp, "%02X".format(objectCode), HexCodec.toHex(raw),
                 )
-                false
+                null
             }
         }
     }
@@ -170,8 +173,14 @@ class GatePacketPersister(
      * 동일하면 새 행 대신 `rcv_date`만 갱신"하는 방식으로 정상 상태 레인의 증가를 막는다.
      * `err_type=3`(장애)만은 예외로, 요구사항대로 매번 새 행을 INSERT해 장애 이력을 전부 보존한다
      * (레거시의 "장애는 append-only 로그" 원칙을 그대로 유지).
+     *
+     * @param rcvIdDeferred (코드 리뷰 지적 D-1) 이 원시 패킷을 [enqueueReceiveInsert]가 적재한
+     *   `tb_data_rcv` 행의 `rcv_id` — [DefaultGatePacketHandler]가 [persistReceivedPacket]의
+     *   반환값을 그대로 넘겨준다. 넘기면 [resolveRcvId]의 "가장 최신 행 재조회"(다른 패킷이
+     *   끼어들면 엉뚱한 원본을 가리킬 수 있다) 대신 이번 수신의 원본 행을 정확히 가리킨다. null이면
+     *   기존처럼 [resolveRcvId]로 폴백한다(테스트 등 이 흐름 밖에서 직접 호출하는 경우).
      */
-    fun persistStatusAnalysis(state: GateConnectionState, raw: ByteArray) {
+    fun persistStatusAnalysis(state: GateConnectionState, raw: ByteArray, rcvIdDeferred: Deferred<Long?>? = null) {
         val analyses = GateStatusAnalyzer.analyze(raw)
         if (analyses.isEmpty()) return
 
@@ -211,9 +220,13 @@ class GatePacketPersister(
             if (!info.analysisYn) continue
 
             if (analysis.errType == GateStatusAnalyzer.ErrorCheck.ERROR) {
-                enqueueAnalysisInsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex)
+                enqueueAnalysisInsert(
+                    state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex, rcvIdDeferred,
+                )
             } else {
-                enqueueStatusUpsert(state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex)
+                enqueueStatusUpsert(
+                    state, analysis, info, analDate, rawHex, headerHex, tailHex, headerFields, laneCount, laneCountHex, rcvIdDeferred,
+                )
                 enqueueRecovery(state, analysis)
             }
         }
@@ -276,6 +289,7 @@ class GatePacketPersister(
         headerFields: AnalDataHeaderFields,
         laneCount: Int,
         laneCountHex: String,
+        rcvIdDeferred: Deferred<Long?>?,
     ) {
         dbWriteQueue.enqueue(
             GateDbWriteTask(
@@ -283,7 +297,7 @@ class GatePacketPersister(
                 operationName = "InsertReceiveAnal(${state.dtlIp},${analysis.laneNumber},${analysis.analysisType})",
             ) {
                 val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
-                val rcvId = resolveRcvId(state.dtlIp)
+                val rcvId = awaitRcvId(state.dtlIp, rcvIdDeferred)
                 dataReceiveAnalysisRepository.save(
                     buildAnalysisEntity(
                         state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount, laneCountHex,
@@ -339,6 +353,7 @@ class GatePacketPersister(
         headerFields: AnalDataHeaderFields,
         laneCount: Int,
         laneCountHex: String,
+        rcvIdDeferred: Deferred<Long?>?,
     ) {
         val today = analDate.substring(0, 8) // yyyyMMdd
 
@@ -361,17 +376,19 @@ class GatePacketPersister(
                     // 머물러 있어, "이 행은 최신 시각에 수신됐다"는 rcv_date와 실제로 가리키는 원본
                     // 패킷(rcv_id)이 서로 다른 시점을 가리키는 모순이 생겼다 — 운영자가 감사/장애
                     // 분석에서 rcv_date로 원본 패킷을 역추적하면 엉뚱한 과거 행과 대조하게 된다.
-                    // rcvId는 enqueueReceiveInsert가 먼저 큐잉한 원시 INSERT를 가리키므로
-                    // resolveRcvId로 다시 조회해야 이번 수신의 원본 행을 가리킨다(resolveRcvId KDoc 참고).
+                    // rcvId는 enqueueReceiveInsert가 먼저 큐잉한 원시 INSERT의 결과다 — rcvIdDeferred가
+                    // 있으면 그 결과를 그대로 쓰고(실패해 null이면 resolveRcvId로 폴백하지 않고 0으로
+                    // 남긴다 — awaitRcvId KDoc의 D-1 재지적 참고), 없으면(테스트 등) 기존처럼
+                    // resolveRcvId로 최신 행을 재조회한다.
                     latest.rcvDate = analDate
-                    latest.rcvId = resolveRcvId(state.dtlIp)
+                    latest.rcvId = awaitRcvId(state.dtlIp, rcvIdDeferred)
                     latest.rcvRaw = rawHex
                     latest.analHeader = headerHex
                     latest.analTail = tailHex
                     dataReceiveAnalysisRepository.save(latest)
                 } else {
                     val identity = resolveLaneIdentity(state.dtlIp, analysis.laneNumber, info)
-                    val rcvId = resolveRcvId(state.dtlIp)
+                    val rcvId = awaitRcvId(state.dtlIp, rcvIdDeferred)
                     dataReceiveAnalysisRepository.save(
                         buildAnalysisEntity(
                             state, analysis, identity, analDate, rawHex, headerHex, tailHex, rcvId, headerFields, laneCount, laneCountHex,
@@ -403,44 +420,143 @@ class GatePacketPersister(
         existing: DataReceiveAnalysis,
         analysis: GateStatusAnalyzer.LaneStatusAnalysis,
         laneCount: Int,
-    ): Boolean =
-        existing.analTp == analysis.analysisType.name &&
-            existing.descGateLaneCount == laneCount.toString() &&
-            existing.descGateLaneNumber == analysis.laneNumber.toString() &&
-            existing.descGateType == GateStatusAnalyzer.describeGateType(analysis.gateType) &&
-            existing.descUserMode == GateStatusAnalyzer.describeUserMode(analysis.userMode) &&
-            existing.descSecurityMode == GateStatusAnalyzer.describeSecurityMode(analysis.securityMode) &&
-            existing.descInoutTime == analysis.inoutTime.toString() &&
-            existing.descUserCount == analysis.userCount.toString() &&
-            existing.descTotalCount == analysis.totalCount.toString() &&
-            existing.descOperation01 == analysis.descOperation[0] &&
-            existing.descOperation02 == analysis.descOperation[1] &&
-            existing.descOperation03 == analysis.descOperation[2] &&
-            existing.descOperation04 == analysis.descOperation[3] &&
-            existing.descSafety01 == analysis.descSafety[0] &&
-            existing.descSafety02 == analysis.descSafety[1] &&
-            existing.descSafety03 == analysis.descSafety[2] &&
-            existing.descSafety04 == analysis.descSafety[3] &&
-            existing.descOperation05 == analysis.descOperation2[0] &&
-            existing.descOperation06 == analysis.descOperation2[1] &&
-            existing.descOperation07 == analysis.descOperation2[2] &&
-            existing.descOperation08 == analysis.descOperation2[3] &&
-            existing.descMotorCount == analysis.motorCount &&
-            existing.descMasterInTotal == analysis.masterInTotal &&
-            existing.descGateStatus01 == analysis.descGateStatus[0] &&
-            existing.descGateStatus02 == analysis.descGateStatus[1] &&
-            existing.descGateStatus03 == analysis.descGateStatus[2] &&
-            existing.descGateStatus04 == analysis.descGateStatus[3] &&
-            existing.descGateStatus05 == analysis.descGateStatus[4] &&
-            existing.descGateStatus06 == analysis.descGateStatus[5] &&
-            existing.descGateStatus07 == analysis.descGateStatus[6] &&
-            existing.descGateStatus08 == analysis.descGateStatus[7] &&
-            existing.descGateStatus09 == analysis.descGateStatus[8] &&
-            existing.descGateStatus10 == analysis.descGateStatus[9] &&
-            existing.descGateStatus11 == analysis.descGateStatus[10] &&
-            existing.descGateStatus12 == analysis.descGateStatus[11] &&
-            existing.errType == analysis.errType &&
-            existing.resolveYn == analysis.resolveYn
+    ): Boolean = AnalysisContentSnapshot.of(existing) == AnalysisContentSnapshot.of(analysis, laneCount)
+
+    /**
+     * [isSameContent]가 비교하는 "내용" 필드들만 모은 스냅샷 — 코드 리뷰 지적 M-1(2026-08-20) 대응.
+     *
+     * 이전에는 `existing.필드 == analysis.필드`를 33줄의 `&&` 체인으로 손으로 나열했다.
+     * [DataReceiveAnalysis]에 비교 대상 필드가 추가돼도 이 체인을 갱신하지 않으면 **컴파일이
+     * 그대로 통과**해, 새 필드가 조용히 비교에서 빠진 채(=항상 "동일"로 오판) 실제로는 달라진
+     * 상태가 upsert 분기에서 새 INSERT 대신 `rcv_date`만 갱신되는 방식으로 뒤섞일 수 있었다.
+     *
+     * 이제는 [of] 두 오버로드가 이 data class의 생성자를 채운다 — 필드를 추가하면 생성자 인자가
+     * 하나 늘어나므로, 두 [of] 중 하나라도 그 필드를 채우지 않으면 **컴파일 에러**가 난다. `==`는
+     * data class가 생성해주는 전체 필드 비교를 그대로 쓴다.
+     */
+    private data class AnalysisContentSnapshot(
+        val analTp: String,
+        val descGateLaneCount: String,
+        val descGateLaneNumber: String,
+        val descGateType: String,
+        val descUserMode: String,
+        val descSecurityMode: String,
+        val descInoutTime: String,
+        val descUserCount: String,
+        val descTotalCount: String,
+        val descOperation01: String,
+        val descOperation02: String,
+        val descOperation03: String,
+        val descOperation04: String,
+        val descSafety01: String,
+        val descSafety02: String,
+        val descSafety03: String,
+        val descSafety04: String,
+        val descOperation05: String,
+        val descOperation06: String,
+        val descOperation07: String,
+        val descOperation08: String,
+        val descMotorCount: Int,
+        val descMasterInTotal: Int,
+        val descGateStatus01: String,
+        val descGateStatus02: String,
+        val descGateStatus03: String,
+        val descGateStatus04: String,
+        val descGateStatus05: String,
+        val descGateStatus06: String,
+        val descGateStatus07: String,
+        val descGateStatus08: String,
+        val descGateStatus09: String,
+        val descGateStatus10: String,
+        val descGateStatus11: String,
+        val descGateStatus12: String,
+        val errType: Int?,
+        val resolveYn: String,
+    ) {
+        companion object {
+            /** 직전에 저장된 행에서 스냅샷을 뽑는다. */
+            fun of(existing: DataReceiveAnalysis) = AnalysisContentSnapshot(
+                analTp = existing.analTp,
+                descGateLaneCount = existing.descGateLaneCount,
+                descGateLaneNumber = existing.descGateLaneNumber,
+                descGateType = existing.descGateType,
+                descUserMode = existing.descUserMode,
+                descSecurityMode = existing.descSecurityMode,
+                descInoutTime = existing.descInoutTime,
+                descUserCount = existing.descUserCount,
+                descTotalCount = existing.descTotalCount,
+                descOperation01 = existing.descOperation01,
+                descOperation02 = existing.descOperation02,
+                descOperation03 = existing.descOperation03,
+                descOperation04 = existing.descOperation04,
+                descSafety01 = existing.descSafety01,
+                descSafety02 = existing.descSafety02,
+                descSafety03 = existing.descSafety03,
+                descSafety04 = existing.descSafety04,
+                descOperation05 = existing.descOperation05,
+                descOperation06 = existing.descOperation06,
+                descOperation07 = existing.descOperation07,
+                descOperation08 = existing.descOperation08,
+                descMotorCount = existing.descMotorCount,
+                descMasterInTotal = existing.descMasterInTotal,
+                descGateStatus01 = existing.descGateStatus01,
+                descGateStatus02 = existing.descGateStatus02,
+                descGateStatus03 = existing.descGateStatus03,
+                descGateStatus04 = existing.descGateStatus04,
+                descGateStatus05 = existing.descGateStatus05,
+                descGateStatus06 = existing.descGateStatus06,
+                descGateStatus07 = existing.descGateStatus07,
+                descGateStatus08 = existing.descGateStatus08,
+                descGateStatus09 = existing.descGateStatus09,
+                descGateStatus10 = existing.descGateStatus10,
+                descGateStatus11 = existing.descGateStatus11,
+                descGateStatus12 = existing.descGateStatus12,
+                errType = existing.errType,
+                resolveYn = existing.resolveYn,
+            )
+
+            /** 방금 분석한 새 패킷에서 같은 모양의 스냅샷을 뽑는다 — [buildAnalysisEntity]가 채우는 값과 1:1 대응. */
+            fun of(analysis: GateStatusAnalyzer.LaneStatusAnalysis, laneCount: Int) = AnalysisContentSnapshot(
+                analTp = analysis.analysisType.name,
+                descGateLaneCount = laneCount.toString(),
+                descGateLaneNumber = analysis.laneNumber.toString(),
+                descGateType = GateStatusAnalyzer.describeGateType(analysis.gateType),
+                descUserMode = GateStatusAnalyzer.describeUserMode(analysis.userMode),
+                descSecurityMode = GateStatusAnalyzer.describeSecurityMode(analysis.securityMode),
+                descInoutTime = analysis.inoutTime.toString(),
+                descUserCount = analysis.userCount.toString(),
+                descTotalCount = analysis.totalCount.toString(),
+                descOperation01 = analysis.descOperation[0],
+                descOperation02 = analysis.descOperation[1],
+                descOperation03 = analysis.descOperation[2],
+                descOperation04 = analysis.descOperation[3],
+                descSafety01 = analysis.descSafety[0],
+                descSafety02 = analysis.descSafety[1],
+                descSafety03 = analysis.descSafety[2],
+                descSafety04 = analysis.descSafety[3],
+                descOperation05 = analysis.descOperation2[0],
+                descOperation06 = analysis.descOperation2[1],
+                descOperation07 = analysis.descOperation2[2],
+                descOperation08 = analysis.descOperation2[3],
+                descMotorCount = analysis.motorCount,
+                descMasterInTotal = analysis.masterInTotal,
+                descGateStatus01 = analysis.descGateStatus[0],
+                descGateStatus02 = analysis.descGateStatus[1],
+                descGateStatus03 = analysis.descGateStatus[2],
+                descGateStatus04 = analysis.descGateStatus[3],
+                descGateStatus05 = analysis.descGateStatus[4],
+                descGateStatus06 = analysis.descGateStatus[5],
+                descGateStatus07 = analysis.descGateStatus[6],
+                descGateStatus08 = analysis.descGateStatus[7],
+                descGateStatus09 = analysis.descGateStatus[8],
+                descGateStatus10 = analysis.descGateStatus[9],
+                descGateStatus11 = analysis.descGateStatus[10],
+                descGateStatus12 = analysis.descGateStatus[11],
+                errType = analysis.errType,
+                resolveYn = analysis.resolveYn,
+            )
+        }
+    }
 
     /**
      * `dtl_type`/`dtl_name`/`loc_id`/`grp_id`를 실제 행을 저장(INSERT)하는 순간에 `tb_gate_dtl`에서
@@ -471,12 +587,19 @@ class GatePacketPersister(
     }
 
     /**
-     * `tb_data_rcv_anal.rcv_id` — 이 상태 패킷이 [enqueueReceiveInsert]로 함께 적재한 원본
-     * `tb_data_rcv` 행의 PK를 찾아 채운다(2026-08-14 코드 리뷰 지적: 이전에는 항상 0으로 고정돼
-     * 두 테이블 간 추적이 불가능했다). 같은 파티션 키(dtlIp)로 큐잉되는 원시 INSERT 작업이 이
-     * 분석 INSERT 작업보다 먼저 enqueue되고, [GateDbWriteQueue]가 파티션 내 실행 순서를
-     * 보장하므로 정상 경로에서는 이 조회가 방금 저장된 원시 행을 찾는다. 못 찾으면(레코드가
-     * 아직 없거나 드문 재시도 경합) 0으로 폴백한다 — 엔티티 KDoc이 이미 0을 허용값으로 규정한다.
+     * `tb_data_rcv_anal.rcv_id` 폴백 경로 — 이 상태 패킷이 [enqueueReceiveInsert]로 함께 적재한
+     * 원본 `tb_data_rcv` 행의 PK를 "가장 최근에 저장된 행"으로 추정해 채운다.
+     *
+     * **코드 리뷰 지적 D-1(2026-08-20)**: 이 추정은 정확하지 않을 수 있다 — 같은 파티션 키(dtlIp)로
+     * 먼저 enqueue된 원시 INSERT가 [GateDbWriteQueue]의 순서 보장 덕에 보통 먼저 실행되지만,
+     * 그 INSERT가 큐 드롭이나 재시도 소진으로 끝내 실패하면 "가장 최근 행"은 **이전 패킷**의 것을
+     * 가리킨다 — 0으로 폴백하는 대신 조용히 엉뚱한 원본과 연결되어, 감사/장애 역추적 시 실제로는
+     * 무관한 과거 패킷과 대조하게 된다. 그래서 [persistStatusAnalysis]/[enqueueAnalysisInsert]/
+     * [enqueueStatusUpsert]는 이제 [enqueueReceiveInsert]가 돌려주는 `Deferred<Long?>`를 우선
+     * 사용한다 — 같은 파티션에서 먼저 실행되도록 순서가 보장되므로 "이번 패킷"의 결과를 정확히
+     * 가리키고, 실패 시에는 null로 완료되어 이 메서드로 명시적으로 폴백한다. 이 메서드는 그
+     * Deferred를 넘기지 않는 극히 드문 호출부(테스트 등)를 위한 예전 방식의 최선 추정으로만
+     * 남아있다 — 못 찾으면 0으로 폴백한다(엔티티 KDoc이 이미 0을 허용값으로 규정한다).
      *
      * **레인으로 필터링하지 않는다**(2026-08-14 재검토로 발견한 버그 수정 — [DataReceiveRepository]
      * KDoc 참고) — `tb_data_rcv`는 원시 패킷 1건당 대표 레인 하나로만 태그된 행 1건을 만드는 반면,
@@ -486,6 +609,25 @@ class GatePacketPersister(
      */
     private fun resolveRcvId(dtlIp: String): Long =
         dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc(dtlIp)?.rcvId ?: 0
+
+    /**
+     * [enqueueAnalysisInsert]/[enqueueStatusUpsert]가 `rcv_id`를 채울 때 쓰는 공통 경로.
+     *
+     * **Codex 적대적 리뷰 지적(2026-08-20, [high])**: 기존에는 `rcvIdDeferred?.await() ?: resolveRcvId(dtlIp)`
+     * 형태로, `rcvIdDeferred`가 **제공됐지만 null로 완료된 경우**(원시 `tb_data_rcv` INSERT가 큐
+     * 드롭이나 재시도 소진으로 끝내 실패한 경우)에도 [resolveRcvId]로 폴백했다. 이 폴백은 "이번
+     * 패킷"이 아니라 **이전 패킷**이 남긴 최신 행을 찾아 잘못 연결하는데(resolveRcvId KDoc의 D-1
+     * 지적 그대로), 이는 애초에 `rcvIdDeferred`를 도입해 막으려던 문제가 실패 경로에서는 전혀
+     * 해결되지 않은 채 그대로 남아있었다는 뜻이다 — 이번 원시 저장이 실패했다는 사실 자체를
+     * 숨기고 무관한 과거 패킷을 가리켜, 감사/장애 역추적을 오도한다.
+     *
+     * 따라서 `rcvIdDeferred`가 제공된 호출(정상 경로)에서는 그 결과가 null이어도(=원시 저장 실패)
+     * [resolveRcvId]로 대체하지 않고 0(엔티티 KDoc이 규정한 "미상" 값)으로 명시적으로 남긴다.
+     * [resolveRcvId]의 최선 추정은 애초에 `rcvIdDeferred` 자체를 넘기지 않는 극히 드문 호출부
+     * (테스트 등, resolveRcvId KDoc 참고)에서만 쓴다.
+     */
+    private suspend fun awaitRcvId(dtlIp: String, rcvIdDeferred: Deferred<Long?>?): Long =
+        if (rcvIdDeferred != null) rcvIdDeferred.await() ?: 0L else resolveRcvId(dtlIp)
 
     /** [analysis]/[identity]로부터 `tb_data_rcv_anal` 1행(엔티티)을 만든다 — INSERT 경로 전용 공통 로직. */
     private fun buildAnalysisEntity(
@@ -636,13 +778,23 @@ class GatePacketPersister(
         )
     }
 
-    /** `tb_data_rcv` 적재 작업을 파티션 큐에 넣는다(Header/Data/Tail 구간을 나눠 저장). */
+    /**
+     * `tb_data_rcv` 적재 작업을 파티션 큐에 넣는다(Header/Data/Tail 구간을 나눠 저장).
+     *
+     * @return 이 INSERT가 최종적으로 어떤 `rcv_id`로 끝났는지 알려주는 [Deferred](코드 리뷰 지적
+     *   D-1 대응) — 저장이 성공하면 생성된 PK, 큐 드롭/최종 실패로 끝내 저장되지 못하면 null로
+     *   완료된다. [resolveRcvId]와 달리 "이번 패킷"의 INSERT를 정확히 가리킨다(같은 파티션에서
+     *   먼저 enqueue된 이 작업이 뒤이어 enqueue되는 분석 작업보다 먼저 실행되도록
+     *   [GateDbWriteQueue]가 순서를 보장하므로, 분석 작업이 이 Deferred를 캡처해 await하면 항상
+     *   완료된 상태이거나 곧 완료된다 — 데드락 위험이 없다).
+     */
     private fun enqueueReceiveInsert(
         state: GateConnectionState,
         raw: ByteArray,
         laneNo: Int,
         operationName: String,
-    ) {
+    ): Deferred<Long?> {
+        val rcvIdResult = CompletableDeferred<Long?>()
         val info = state.laneInfoOf(laneNo) ?: state.primaryLaneInfo
         val rcvDate = LocalDateTime.now().format(RCV_DATE_FORMAT)
 
@@ -668,8 +820,14 @@ class GatePacketPersister(
         val laneData = HexCodec.toHex(raw.copyOfRange(dataInfoEnd, tailStart))
 
         dbWriteQueue.enqueue(
-            GateDbWriteTask(partitionKey = state.dtlIp, operationName = "$operationName(${state.dtlIp},$laneNo)") {
-                dataReceiveRepository.save(
+            GateDbWriteTask(
+                partitionKey = state.dtlIp,
+                operationName = "$operationName(${state.dtlIp},$laneNo)",
+                // 큐 드롭 또는 재시도 소진(최종 실패)로 이 INSERT가 끝내 반영되지 못하면 null로
+                // 완료한다 — 그러지 않으면 이 Deferred를 await하는 분석 작업이 영원히 대기한다.
+                onDropOrFinalFailure = { rcvIdResult.complete(null) },
+            ) {
+                val saved = dataReceiveRepository.save(
                     DataReceive(
                         rcvDate = rcvDate,
                         dtlIp = state.dtlIp,
@@ -685,9 +843,10 @@ class GatePacketPersister(
                         rcvTail = tail,
                     ),
                 )
-                Unit
+                rcvIdResult.complete(saved.rcvId)
             },
         )
+        return rcvIdResult
     }
 
     companion object {

@@ -4,8 +4,10 @@ import kr.co.securance.secuhub.domain.entity.OprStatus
 import kr.co.securance.secuhub.domain.entity.OprStatusId
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import org.springframework.transaction.annotation.Transactional
 
 /** `tb_opr_status` 리포지토리 — 대시보드 통행량 위젯(`uvw_user_cnt` 대응, 계획서 5.2절)의 원본 데이터. */
 interface OprStatusRepository : JpaRepository<OprStatus, OprStatusId> {
@@ -52,4 +54,18 @@ interface OprStatusRepository : JpaRepository<OprStatus, OprStatusId> {
         """,
     )
     fun sumUserCountToday(@Param("fromDateKey") fromDateKey: String, @Param("toDateKey") toDateKey: String): Long
+
+    /**
+     * 코드 리뷰 지적 D-3 대응: `tb_opr_status`는 레인 × 분(分) 버킷마다 1행씩 쌓이는 고빈도
+     * 테이블인데도 D5 보관 정책(2026-08-12) 대상에서 빠져 있었다. `opr_date`는 `yyyyMMddHHmm`
+     * 문자열이라 사전식 비교가 시간 비교와 일치한다([OprStatusPersister]의 `MINUTE_FORMAT`).
+     * 복합키(`opr_date`+`opr_seq`+`dtl_ip`+`dtl_lane_no`) 엔티티라 JPQL DELETE로는 `LIMIT`을 쓸 수
+     * 없어 [DataReceiveRepository.deleteBatchOlderThan]과 동일하게 네이티브 쿼리로 작성했다.
+     *
+     * `@Transactional` 필요 이유도 동일 KDoc 참고(Codex 적대적 리뷰 지적, 2026-08-20, [high]).
+     */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "DELETE FROM tb_opr_status WHERE opr_date < :cutoff LIMIT :batchSize", nativeQuery = true)
+    fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
 }

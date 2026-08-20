@@ -93,7 +93,7 @@ data class GateDbWriteTask(
  * 자연 복구되거나(멱등 UPSERT, net_state는 다음 상태 패킷이 갱신) 손실 허용 범위로 판단해 그대로
  * 두었고, `OprStatusPersister`(통행량 집계, codex 적대적 리뷰 지적)만 이 콜백을 채워 넣는다.
  */
-class GateDbWriteQueue(
+open class GateDbWriteQueue(
     private val shardCount: Int,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     /**
@@ -129,7 +129,7 @@ class GateDbWriteQueue(
     }
 
     /** 작업을 파티션 큐에 넣는다. 큐가 가득 차면 드롭하고 카운터만 올린다(계획서 3.5절 방어적 설계). */
-    fun enqueue(task: GateDbWriteTask) {
+    open fun enqueue(task: GateDbWriteTask) {
         val shardIndex = shardIndexOf(task.partitionKey)
         // trySend는 큐가 가득 찼을 때 호출 스레드를 블로킹하지 않고 즉시 실패를 반환한다.
         // (trySendBlocking을 쓰면 슬롯이 빌 때까지 호출 스레드가 그대로 멈춰버려,

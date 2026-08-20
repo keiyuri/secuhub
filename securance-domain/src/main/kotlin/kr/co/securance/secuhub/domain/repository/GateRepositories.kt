@@ -65,10 +65,6 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
     @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.dtlIp = :dtlIp and d.useYn = true order by d.dtlLaneNo")
     fun findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(@Param("dtlIp") dtlIp: String, pageable: Pageable): List<GateDetail>
 
-    /** CLIENT 모드에서 IP 단위로 그룹핑해 아웃바운드 연결 대상을 조회할 때 사용(계획서 3.1절). */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true and d.analysisYn = true order by d.dtlIp")
-    fun findByUseYnTrueAndAnalysisYnTrueOrderByDtlIp(): List<GateDetail>
-
     /** #4 SetupGateGroup 화면 — 그룹에 속한 레인(게이트 상세) 목록 조회. */
     @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.group.grpId = :grpId order by d.dtlLaneNo")
     fun findByGroup_GrpIdOrderByDtlLaneNo(@Param("grpId") grpId: Long): List<GateDetail>
@@ -92,6 +88,12 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
     /**
      * #7/#15(Phase 5) 타임존 저장/동기화 — 레거시 `SelectGateDtlIPList`/`InsertSendDataAll`과 동일하게
      * `analysis_yn`은 확인하지 않고 `use_yn='Y'`인 전체 게이트를 대상으로 한다.
+     *
+     * CLIENT 모드 아웃바운드 연결 대상 조회(`GateTcpClient.connectToAllDevices`)에도 동일하게
+     * 쓰인다 — SERVER 모드(`findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo`)와 마찬가지로
+     * analysis_yn 무관 전체 레인을 대상으로 해야, 모든 레인이 analysis_yn='N'인 디바이스도
+     * 연결 대상에서 누락되지 않는다(2026-08-20 코드 리뷰 지적 수정 — 과거
+     * `findByUseYnTrueAndAnalysisYnTrueOrderByDtlIp`는 이 메서드로 대체되며 제거됨).
      */
     @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true order by d.dtlIp")
     fun findByUseYnTrueOrderByDtlIp(): List<GateDetail>

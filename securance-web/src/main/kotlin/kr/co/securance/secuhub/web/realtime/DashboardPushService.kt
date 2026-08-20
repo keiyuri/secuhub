@@ -18,6 +18,14 @@ import java.util.concurrent.atomic.AtomicLong
  * 레거시는 게이트가 UDP로 직접 쏘는 상태 변화를 즉시 받았지만(계획서 3.1절), 여기서는 그 대신
  * "N초마다 DB를 다시 읽어 이전과 달라진 부분만 보낸다"는 더 단순한 모델을 쓴다 — `securance-web`이
  * `securance-server`(커넥션 액터)에 의존하지 않는 모듈 경계를 지키기 위한 의도적 절충이다.
+ *
+ * ## 구독자 없을 때의 폴링 (코드 리뷰 지적 A-2, 2026-08-20)
+ * [pushSummary]는 대시보드 요약 조회(내부적으로 쿼리 5개)를 5초마다 무조건 실행했다 — 연결된
+ * WebSocket 클라이언트가 0명이어도 마찬가지였다. 2026-08-14 소켓 타임아웃 장애를 만든 것과 같은
+ * 부하 패턴이라, [DashboardWebSocketHandler.hasSessions]가 false면 그 무거운 조회 자체를
+ * 건너뛴다. [pushNewAlerts]는 그대로 둔다 — `lastSeenAnalId` 기준선을 계속 전진시켜야, 구독자가
+ * 나중에 접속했을 때 그동안 밀린 알림이 한꺼번에 몰리지 않는다(조회는 [NEW_ALERTS_BATCH_LIMIT]로
+ * 이미 상한이 있어 상대적으로 가볍다).
  */
 @Service
 class DashboardPushService(
@@ -38,6 +46,7 @@ class DashboardPushService(
 
     @Scheduled(fixedDelay = SUMMARY_INTERVAL_MS)
     fun pushSummary() {
+        if (!webSocketHandler.hasSessions()) return
         runCatching {
             val view = dashboardService.loadDashboard()
             val payload = mapOf(

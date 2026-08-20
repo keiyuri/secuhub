@@ -68,4 +68,24 @@ class DashboardWebSocketHandlerTest {
 
         verify(session, never()).sendMessage(org.mockito.ArgumentMatchers.any())
     }
+
+    // ── hasSessions (코드 리뷰 지적 A-2) ────────────────────────────
+
+    @Test
+    fun `연결된 세션이 없으면 hasSessions는 false다`() {
+        val handler = DashboardWebSocketHandler()
+        kotlin.test.assertFalse(handler.hasSessions())
+    }
+
+    @Test
+    fun `세션이 연결되면 hasSessions는 true, 모두 끊기면 다시 false다`() {
+        val handler = DashboardWebSocketHandler()
+        val session = session("s-1")
+
+        handler.afterConnectionEstablished(session)
+        kotlin.test.assertTrue(handler.hasSessions())
+
+        handler.afterConnectionClosed(session, CloseStatus.NORMAL)
+        kotlin.test.assertFalse(handler.hasSessions())
+    }
 }

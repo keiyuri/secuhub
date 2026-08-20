@@ -132,10 +132,14 @@ class DefaultGatePacketHandler(
             val changes = PacketDiffer.diff(state.lastStatusPacket, packet.raw)
             if (changes.anyChanged) {
                 state.lastStatusPacket = packet.raw
-                persister.persistReceivedPacket(state, packet, laneNo)
+                // persistReceivedPacket이 돌려주는 Deferred를 persistStatusAnalysis에 그대로
+                // 넘긴다(코드 리뷰 지적 D-1) — 그래야 분석 행의 rcv_id가 "가장 최근 행"이 아니라
+                // 정확히 이번 패킷의 원시 INSERT 결과를 가리킨다(GatePacketPersister.resolveRcvId
+                // KDoc 참고).
+                val rcvIdDeferred = persister.persistReceivedPacket(state, packet, laneNo)
                 // 원시 저장과 분석 적재를 한 지점에서 함께 호출한다 — 레거시는 원시 INSERT의 DB
                 // 트리거가 분석을 수행해 "저장은 됐는데 분석은 안 된" 상태를 추적할 수 없었다.
-                persister.persistStatusAnalysis(state, packet.raw)
+                persister.persistStatusAnalysis(state, packet.raw, rcvIdDeferred)
                 // 통행량 집계(tb_opr_status, 2026-08-12 B6) — 레거시 usp_process_status 이식.
                 // errType과 무관하게 항상 반영한다(장애 여부와 통행량 집계는 별개).
                 oprStatusPersister.persistOprStatus(state, packet.raw)

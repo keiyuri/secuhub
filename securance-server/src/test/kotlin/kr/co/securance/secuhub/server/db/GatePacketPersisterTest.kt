@@ -155,6 +155,54 @@ class GatePacketPersisterTest {
         assertEquals(4242L, captor.value.rcvId)
     }
 
+    /**
+     * 코드 리뷰 지적 D-1(2026-08-20) 회귀 테스트 — [GatePacketPersister.resolveRcvId]("가장 최신
+     * 행"으로 추정)가 아니라 [GatePacketPersister.persistReceivedPacket]이 돌려주는 `Deferred`가
+     * 실제로 사용되는지 확인한다.
+     *
+     * 시나리오: `findTopByDtlIpOrderByRcvIdDesc`(폴백 경로)는 **이전 패킷**의 행(rcv_id=1111,
+     * 다른 dtl_lane_no)을 돌려주도록 일부러 잘못 스텁하고, 이번 패킷의 실제 원시 INSERT는
+     * rcv_id=7777로 저장되게 한다. `persistReceivedPacket`의 반환값을 `persistStatusAnalysis`에
+     * 넘기면 폴백을 거치지 않고 7777이 곧바로 쓰여야 한다 — 큐 드롭/재시도 경합으로 폴백이 엉뚱한
+     * 과거 행을 가리키던 문제가 실제 API 조합에서 재현되지 않음을 증명한다.
+     */
+    @Test
+    fun `persistReceivedPacket의 Deferred를 넘기면 폴백(최신 행 추정) 대신 이번 패킷의 실제 rcv_id를 쓴다`() {
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+
+        val dataReceiveRepository = mock(DataReceiveRepository::class.java)
+        // 폴백 경로가 쓰였다면 이 값(1111, 이전 패킷)이 뒤섞였을 것이다 — 실제로는 안 쓰여야 한다.
+        `when`(dataReceiveRepository.findTopByDtlIpOrderByRcvIdDesc("192.168.0.205")).thenReturn(
+            DataReceive(rcvId = 1111L, rcvDate = "202608141159", dtlIp = "192.168.0.205", dtlLaneNo = 1),
+        )
+        // 이번 패킷의 실제 INSERT는 IDENTITY 생성 PK 7777로 저장된다(Hibernate의 save() 동작 흉내).
+        `when`(dataReceiveRepository.save(org.mockito.ArgumentMatchers.any(DataReceive::class.java))).thenAnswer { invocation ->
+            val arg = invocation.arguments[0] as DataReceive
+            DataReceive(rcvId = 7777L, rcvDate = arg.rcvDate, dtlIp = arg.dtlIp, dtlLaneNo = arg.dtlLaneNo)
+        }
+
+        val persister = newPersister(analysisRepository, dataReceiveRepository = dataReceiveRepository)
+        val state = newState("192.168.0.205")
+        val packet = statusPacket(laneBlock(laneNo = 1, totalCount = 100))
+
+        val gatePacket = kr.co.securance.secuhub.protocol.GatePacket(
+            command1 = SpeedGateProtocolConstants.Command1.SEND_DATA,
+            command2 = SpeedGateProtocolConstants.Command2.READ,
+            objectCode = SpeedGateProtocolConstants.ObjectCode.GATE_STATUS,
+            dataInfoLength = SpeedGateProtocolConstants.DATA_INFO_LENGTH,
+            dataCount = 1,
+            dataLength = SpeedGateProtocolConstants.STATUS_DATA_LENGTH,
+            raw = packet,
+        )
+        val rcvIdDeferred = persister.persistReceivedPacket(state, gatePacket, laneNo = 1)
+        persister.persistStatusAnalysis(state, packet, rcvIdDeferred)
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        assertEquals(7777L, captor.value.rcvId)
+    }
+
     @Test
     fun `다중 레인 패킷의 모든 레인 분석 행이 같은 원시 행 rcv_id를 공유한다`() {
         // 회귀 방지(2026-08-14 재검토) — 원래 레인 번호로 필터링해 조회했을 때, tb_data_rcv에는

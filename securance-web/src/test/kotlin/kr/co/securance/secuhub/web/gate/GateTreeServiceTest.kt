@@ -26,7 +26,10 @@ import kotlin.test.assertTrue
  * 주기로 폴링되며 매 호출마다 4개 테이블을 전량 조회하던 문제)와 (2) 목록 조회 필터(코드 리뷰 지적,
  * 2026-08-20 — 대시보드 트리뷰가 '사용'(useYn)만 가진 GateLocation/GateGroup은 useYn 필터만,
  * '사용'+'분석'(analysisYn) 둘 다 가진 GateDetail은 두 필터를 모두 건 조회 메서드로 위임하는지)에
- * 대한 회귀 테스트.
+ * 대한 회귀 테스트. "사용여부가 N인 위치/그룹은 트리에서 제외된다"(2026-08-19 사용자 요청)는
+ * findByUseYnTrueOrderByLocName()/findAllByUseYnTrue() 자체가 이미 그 필터를 걸어 반환하므로,
+ * 서비스가 필터 없는 findAll이 아니라 이 필터링된 조회 메서드로 위임하는지를 검증하는 것으로
+ * 충분하다(두 번째 테스트 참고).
  */
 class GateTreeServiceTest {
 

@@ -1,8 +1,11 @@
 // Phase 10 — #18 대시보드 게이트 트리뷰(계획서 3절/2026-08-12 사용자 확인: 레거시 없이 신규 설계).
 // LOC/GRP/DTL 3계층 트리(정렬: 위치ID→그룹ID→게이트ID, 2026-08-19) + 연결상태 아이콘 + 우클릭 제어
-// 메뉴. GateTreeApiController(/api/gate-tree)를 폴링해 그리고, 제어는 기존 엔드포인트
-// (/api/gate-control/command, /api/gate-control/reset, /gates/details/{id}/mode|motor)를 그대로
-// 재사용한다. 우클릭 메뉴 상단 5개 항목(개방/폐쇄/정상 복구/FREE 모드/역방향 개방)은
+// 메뉴. GateTreeApiController(/api/gate-tree, 사용여부·분석여부 Y인 노드만 반환 —
+// GateTreeService.buildTree 참고)를 폴링해 그리고, 제어는 기존 엔드포인트(/api/gate-control/command,
+// /api/gate-control/reset, /gates/details/{id}/mode|motor)를 그대로 재사용한다.
+// 우클릭 메뉴는 DTL(레인)뿐 아니라 GRP(그룹)/LOC(위치) 노드에서도 표시한다 — SR_Speed_Client
+// 트리뷰(tvNet_NodeMouseClick, "LOC/GRP/DTL 모든 노드에서 게이트 제어 메뉴 표시")와 동일하게
+// 맞췄다(2026-08-19 사용자 요청). 상단 5개 항목(개방/폐쇄/정상 복구/FREE 모드/역방향 개방)은
 // SR_Speed_Client 트리뷰(SR_F_DashBoard.GateControl.cs ContextMenu_Init)와 동일하게 맞췄다
 // (2026-08-19 사용자 요청). 같은 5개 항목을 LOC/GRP 노드에서도 동일하게 띄우고 하위 DTL 전체에
 // 일괄 전송하도록 확장했다(2026-08-19 두 번째 요청 — 레거시가 노드 계층과 무관하게 항상 같은
@@ -54,7 +57,10 @@
     var detailsHtml = grp.details.length
       ? '<ul class="gt-dtl-list">' + grp.details.map(function (d) { return renderDetail(loc, grp, d); }).join('') + '</ul>'
       : '<div class="text-muted small ms-4">등록된 레인이 없습니다.</div>';
-    return '<details class="gt-grp" data-key="' + key + '" data-grp-id="' + grp.grpId +
+    // data-loc-id/data-grp-id/data-*-name: 우클릭 메뉴(setupContextMenu)가 그룹 노드 클릭 시
+    // target.grpId/grpName과 표시 문구를 이 속성에서 그대로 읽는다.
+    return '<details class="gt-grp" data-key="' + key + '" data-loc-id="' + loc.locId +
+      '" data-grp-id="' + grp.grpId + '" data-loc-name="' + escapeHtml(loc.locName) +
       '" data-grp-name="' + escapeHtml(grp.grpName) + '"' + (open ? ' open' : '') + '>' +
       '<summary><i class="bi bi-diagram-3"></i> ' + escapeHtml(grp.grpName) +
       ' <span class="badge text-bg-secondary">' + typeName + '</span>' +
@@ -68,6 +74,8 @@
     var groupsHtml = loc.groups.length
       ? loc.groups.map(function (g) { return renderGroup(loc, g); }).join('')
       : '<div class="text-muted small ms-4">등록된 그룹이 없습니다.</div>';
+    // data-loc-id/data-loc-name: 우클릭 메뉴(setupContextMenu)가 위치 노드 클릭 시
+    // target.locId/locName과 표시 문구를 이 속성에서 그대로 읽는다.
     return '<details class="gt-loc" data-key="' + key + '" data-loc-id="' + loc.locId +
       '" data-loc-name="' + escapeHtml(loc.locName) + '"' + (open ? ' open' : '') + '>' +
       '<summary><i class="bi bi-geo-alt"></i> ' + escapeHtml(loc.locName) + '</summary>' +
@@ -122,29 +130,6 @@
     var params = new URLSearchParams(payload);
     return fetch(path, { method: 'POST', headers: csrfHeaders(), body: params.toString() })
       .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; }); });
-  }
-
-  // securance.security.gate-control-reauth-required=true일 때 GateControlReauthInterceptor가
-  // {reauthRequired:true}를 반환한다 — window.prompt()로 비밀번호를 받아 한 번만 자동 재시도한다.
-  // 취소하면 재시도하지 않고 최초(재인증 요구) 응답을 그대로 반환한다.
-  function postGateControlWithReauth(path, dtlIp, dtlLaneNo, command) {
-    return postGateControl(path, dtlIp, dtlLaneNo, command).then(function (r) {
-      if (!r.body || !r.body.reauthRequired) return r;
-      var password = window.prompt('게이트 제어 재인증 — 비밀번호를 입력하세요.');
-      if (!password) return r;
-      return postGateControl(path, dtlIp, dtlLaneNo, command, password);
-    });
-  }
-
-  function sendResetWithReauth(dtlIp, dtlLaneNo, command) {
-    return postGateControlWithReauth('/api/gate-control/reset', dtlIp, dtlLaneNo, command);
-  }
-
-  // 게이트 상시 개방/폐쇄/정상 복구/FREE 모드/역방향 개방 — SR_Speed_Client 트리뷰 컨텍스트 메뉴
-  // (ContextMenu_Init)와 동일한 명령 세트. SpeedGateControlCommand enum 이름(OPEN/CLOSE/NORMAL/
-  // FREE_FREE/REVERSE_OPEN)을 그대로 command 파라미터로 보낸다.
-  function sendCommandWithReauth(dtlIp, dtlLaneNo, command) {
-    return postGateControlWithReauth('/api/gate-control/command', dtlIp, dtlLaneNo, command);
   }
 
   // [Codex 적대적 리뷰 수정: high] 이전에는 postGateControl(WithReauth)의 응답을 catch에서만
@@ -290,7 +275,7 @@
   function setupContextMenu(container) {
     var menu = document.getElementById('gate-tree-context-menu');
     if (!menu) return;
-    var target = null; // 우클릭한 DTL 노드의 data-* 값
+    var target = null; // 우클릭한 노드(DTL/GRP/LOC)로부터 계산한 대상 정보
 
     function hideMenu() { menu.style.display = 'none'; target = null; }
 
@@ -390,16 +375,20 @@
       e.preventDefault();
       var action = item.getAttribute('data-action');
       // [Codex 리뷰 수정: P1] hideMenu()가 target을 null로 초기화하므로, 그 뒤에 target.*를 읽는
-      // 모든 분기(모드 변경/모터 설정/리셋/운영 명령)가 TypeError로 깨졌다 — 메뉴를 숨기기 전에
-      // 선택된 노드 정보를 별도 변수(selected)로 옮겨두고 이후로는 이 변수만 사용한다.
+      // 모든 분기가 TypeError로 깨졌다 — 메뉴를 숨기기 전에 선택된 노드 정보를 별도 변수
+      // (selected)로 옮겨두고 이후로는 이 변수만 사용한다.
       var selected = target;
       hideMenu();
 
+      // 모드 변경/모터 설정은 페이지 이동(단일 dtlId 필요)이라 GRP/LOC 범위에서는 메뉴 자체가
+      // 숨겨지지만, 방어적으로 한 번 더 확인한다.
       if (action === 'mode-change') {
+        if (selected.scope !== 'dtl') return;
         window.location.href = '/gates/details/' + selected.dtlId + '/mode';
         return;
       }
       if (action === 'motor-setup') {
+        if (selected.scope !== 'dtl') return;
         window.location.href = '/gates/details/' + selected.dtlId + '/motor';
         return;
       }
@@ -498,9 +487,9 @@
     var style = document.createElement('style');
     style.textContent =
       '.gate-tree{max-height:420px;overflow:auto}' +
-      '.gate-tree .gt-loc>summary{cursor:pointer;font-weight:600;padding:.25rem 0}' +
+      '.gate-tree .gt-loc>summary{cursor:context-menu;font-weight:600;padding:.25rem 0}' +
       '.gate-tree .gt-grp{margin-left:1.25rem}' +
-      '.gate-tree .gt-grp>summary{cursor:pointer;padding:.15rem 0}' +
+      '.gate-tree .gt-grp>summary{cursor:context-menu;padding:.15rem 0}' +
       '.gate-tree .gt-dtl-list{list-style:none;margin:0;padding-left:1.5rem}' +
       '.gate-tree .gt-dtl{padding:.1rem 0;cursor:context-menu}' +
       '.gate-tree .gt-status{font-size:.6rem;margin-right:.25rem}' +

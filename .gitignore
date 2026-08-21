@@ -26,6 +26,13 @@ node_modules/
 application-local.yml
 application-local.yaml
 
+# Claude Code 개인 설정(Opus 전체 리뷰 지적, 2026-08-21) — settings.local.json은 사용자별 권한
+# 허용목록, launch.json은 개발자 로컬 경로(Windows .bat 등)를 담아 워크트리마다 값이 다르다.
+# 이 저장소 안에 워크트리를 두는 구조(.claude/worktrees/)도 함께 제외한다.
+.claude/settings.local.json
+.claude/launch.json
+.claude/worktrees/
+
 # User Add ignore files and directories
 /*20??????/
 /*Tests/

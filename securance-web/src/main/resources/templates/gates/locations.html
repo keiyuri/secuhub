@@ -8,17 +8,45 @@
 <div layout:fragment="content">
 
   <div class="alert alert-success py-2" th:if="${message}" th:text="${message}"></div>
+  <div class="alert alert-danger py-2" th:if="${error}" th:text="${error}"></div>
 
+  <!-- 버그 수정(2026-08-21): 레거시 SR_F_SetupLocation은 등록/수정 폼이 팝업(모달)로 뜨는데,
+       이 화면은 목록 옆에 폼을 상시 노출하는 2단 레이아웃으로 새로 설계돼 있었다(사용자 지적).
+       폼을 Bootstrap 모달로 옮기고, "신규 등록" 버튼과 목록의 "수정" 링크가 모달을 띄우도록 바꿨다.
+       수정/검증 실패 시에는 서버가 여전히 editingId 또는 필드 오류를 담아 이 뷰를 그대로 렌더링하므로
+       (컨트롤러 로직 변경 없음), 페이지 로드 시 그 상태를 감지해 모달을 자동으로 다시 열어준다. -->
   <div class="row">
-    <div class="col-lg-7">
+    <div class="col-lg-12">
       <div class="card card-outline card-primary">
         <div class="card-header d-flex justify-content-between align-items-center">
           <h3 class="card-title mb-0">위치 목록</h3>
-          <form method="get" th:action="@{/gates/locations}" class="form-check mb-0">
-            <input type="checkbox" class="form-check-input" id="showInactive" name="showInactive"
-                   value="true" th:checked="${showInactive}" onchange="this.form.submit()"/>
-            <label class="form-check-label" for="showInactive">비활성 위치 표시</label>
-          </form>
+          <div class="d-flex align-items-center gap-3">
+            <!-- 2026-08-20 지시: 관리 화면 기본은 사용=Y만, 비활성 항목은 이 토글로 별도 확인
+                 (비활성 위치를 재활성화하려면 먼저 이 토글로 찾아야 한다). -->
+            <form method="get" th:action="@{/gates/locations}" class="form-check mb-0">
+              <input type="checkbox" class="form-check-input" id="showInactive" name="showInactive"
+                     value="true" th:checked="${showInactive}" onchange="this.form.submit()"/>
+              <label class="form-check-label" for="showInactive">비활성 위치 표시</label>
+            </form>
+            <!-- 버그 수정(2026-08-21, 재검토): editingId가 이미 채워진 채 렌더링된 페이지(=/edit GET으로
+                 진입한 상태)에서는 이 모달이 "수정" 모드로 서버 렌더링돼 있다 — 여기서 모달을 닫고
+                 "신규 등록"을 다시 누르면 페이지를 다시 그리지 않는 한 같은 모달(수정 폼, 이전 값,
+                 update URL)이 그대로 열려 신규 등록인 줄 알고 기존 항목을 덮어쓸 위험이 있었다(재현
+                 확인). editingId가 있을 때는 신규 등록을 실제 링크로 만들어 폼이 없는 상태로 페이지를
+                 다시 불러오게 한다. -->
+            <!-- 버그 수정(Opus 전체 리뷰, 2026-08-21): ${editingId}는 null 체크가 아니라 Thymeleaf
+                 진리값 평가(evaluateAsBoolean)를 탄다 — Number는 doubleValue() != 0.0으로 평가되므로
+                 PK가 0인 레거시 이관 행에서는 false가 되어 이 분기가 반대로 뒤집힌다. 명시적으로
+                 null 비교한다. -->
+            <button th:if="${editingId == null}" type="button" class="btn btn-sm btn-primary"
+                    data-bs-toggle="modal" data-bs-target="#locationFormModal">
+              <i class="bi bi-plus-lg"></i> 신규 등록
+            </button>
+            <a th:if="${editingId != null}" class="btn btn-sm btn-primary"
+               th:href="@{/gates/locations(showInactive=${showInactive})}">
+              <i class="bi bi-plus-lg"></i> 신규 등록
+            </a>
+          </div>
         </div>
         <div class="table-responsive">
           <table class="table table-sm table-striped mb-0">
@@ -46,16 +74,20 @@
         </div>
       </div>
     </div>
+  </div>
 
-    <div class="col-lg-5">
-      <div class="card card-outline card-primary">
-        <div class="card-header">
-          <h3 class="card-title" th:text="${editingId} ? '위치 수정' : '위치 등록'">위치 등록</h3>
-        </div>
-        <div class="card-body">
-          <form th:action="${editingId} ? @{/gates/locations/{id}(id=${editingId})} : @{/gates/locations}"
-                th:object="${form}" method="post">
-            <input type="hidden" name="showInactive" th:value="${showInactive}"/>
+  <!-- 등록/수정 팝업(모달) — 레거시 SR_F_SetupLocation과 동일하게 목록 화면 위에 오버레이로 뜬다. -->
+  <div class="modal fade" id="locationFormModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form th:action="${editingId != null} ? @{/gates/locations/{id}(id=${editingId})} : @{/gates/locations}"
+              th:object="${form}" method="post">
+          <input type="hidden" name="showInactive" th:value="${showInactive}"/>
+          <div class="modal-header">
+            <h5 class="modal-title" th:text="${editingId != null} ? '위치 수정' : '위치 등록'">위치 등록</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
             <div class="mb-3">
               <label class="form-label">위치명</label>
               <input type="text" class="form-control" th:field="*{locName}"
@@ -66,13 +98,19 @@
               <input type="checkbox" class="form-check-input" th:field="*{useYn}"/>
               <label class="form-check-label">사용</label>
             </div>
-            <button type="submit" class="btn btn-primary" th:text="${editingId} ? '수정' : '등록'">등록</button>
-            <a th:if="${editingId}" class="btn btn-secondary" th:href="@{/gates/locations(showInactive=${showInactive})}">취소</a>
-          </form>
-        </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+            <button type="submit" class="btn btn-primary" th:text="${editingId != null} ? '수정' : '등록'">등록</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
+
+  <!-- 모달 자동 오픈 스크립트 — locations.html/groups.html/details.html 3중 복붙을 공유 프래그먼트로
+       추출했다(Opus 리뷰 지적, 2026-08-21). 조건은 [fragments/modal-auto-open.html] 참고. -->
+  <th:block th:replace="~{fragments/modal-auto-open :: autoOpen('locationFormModal', ${editingId != null or #fields.hasErrors('form.*')})}"></th:block>
 
 </div>
 </body>

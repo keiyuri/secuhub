@@ -9,7 +9,15 @@
   <div class="sidebar-wrapper">
     <nav class="mt-2">
       <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" data-accordion="false" id="navigation">
-        <li th:each="node : ${menu}" th:insert="~{this :: menuNode(${node}, ${currentPath})}"></li>
+        <!-- 버그 수정(Codex 리뷰, P1): th:insert는 프래그먼트가 만든 <li>를 이 호스트 <li> "안쪽"에
+             끼워 넣어 <li><li>...</li></li> 형태의 잘못된 중첩 마크업을 만든다. th:replace로 바꿔야
+             하지만, th:each와 th:replace(둘 다 프래그먼트/반복 gathering 대상)를 같은 태그에 함께
+             걸면 아래 재귀 케이스와 동일한 이유로 프래그먼트 파라미터 node가 null로 평가되어 메뉴가
+             통째로 비어 버린다(재현 확인). th:each는 바깥 th:block으로, th:replace는 안쪽 <li>로
+             분리해야 한다. -->
+        <th:block th:each="node : ${menu}">
+          <li th:replace="~{this :: menuNode(${node}, ${currentPath})}"></li>
+        </th:block>
       </ul>
     </nav>
   </div>

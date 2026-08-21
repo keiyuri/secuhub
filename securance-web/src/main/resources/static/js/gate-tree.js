@@ -499,8 +499,62 @@
       'padding:.6rem 1rem;border-radius:.375rem;color:#fff;font-size:.9rem;z-index:1090;' +
       'box-shadow:0 .25rem .75rem rgba(0,0,0,.3)}' +
       '#gate-tree-toast.gate-tree-toast-ok{background:#198754}' +
-      '#gate-tree-toast.gate-tree-toast-error{background:#dc3545}';
+      '#gate-tree-toast.gate-tree-toast-error{background:#dc3545}' +
+      // 2026-08-21: 대시보드 1행에서 게이트 트리뷰 카드(.col-lg-8)가 오른쪽 SmallBox 2x2 컬럼
+      // (.col-lg-4, 온라인/오프라인/미해결 오류/오늘 통행량)과 같은 행에 있다. 컬럼→카드→카드바디→
+      // 트리를 flex 세로 축으로 연결해두고, 실제 높이 값은 syncTreeColumnHeight()가 JS로 오른쪽
+      // 컬럼 실측 높이를 왼쪽 컬럼에 그대로 넣어준다(아래 참고) — 여기서는 그 높이를 card/card-body/
+      // #gate-tree까지 세로로 전달할 flex 배선만 담당한다.
+      '.gate-tree-col{display:flex;flex-direction:column}' +
+      '.gate-tree-col>.card{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}' +
+      '.gate-tree-col>.card>.card-body{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}' +
+      '.gate-tree-col .gate-tree{flex:1 1 auto;min-height:0;max-height:none;overflow:auto}';
     document.head.appendChild(style);
+  }
+
+  // 2026-08-21(2차 수정): align-items-stretch를 쓰면 트리 내용이 길 때(위치/그룹이 많을 때)
+  // 트리의 "내용 기준 자연 높이"가 행 전체 높이를 끌어올려, 트리 카드가 오른쪽 SmallBox 2x2
+  // 합계보다 훨씬 길어지고 SmallBox 쪽엔 빈 여백만 늘어나는 문제가 있었다(사용자 지적). 대신
+  // dashboard.html의 행은 align-items-start로 각 컬럼이 자기 내용 기준 자연 높이를 갖게 하고,
+  // 여기서 오른쪽 컬럼(SmallBox 합계, .col-lg-4)의 실측 높이를 읽어 왼쪽 컬럼(.gate-tree-col)에
+  // 그대로 지정한다 — 트리 내용이 넘치면 #gate-tree 내부 스크롤로 처리되므로 트리 카드 하단은
+  // 항상 오늘 통행량 박스 하단과 같아진다.
+  // 2026-08-21(3차 수정, Codex 리뷰 P2 지적): Bootstrap lg 기준(992px) 미만에서는 .col-lg-8/
+  // .col-lg-4가 세로로 쌓여 두 컬럼 하단을 맞출 이유가 없다 — 그 상태에서도 오른쪽 컬럼 높이를
+  // 강제로 넣으면 트리 카드가 그 높이로 잘려 불필요한 내부 스크롤이 생긴다. lg 미만에서는 인라인
+  // 높이를 아예 제거해 컬럼이 각자 자연 높이를 갖도록 한다.
+  var LG_BREAKPOINT_PX = 992; // Bootstrap 5 $grid-breakpoints.lg
+  function syncTreeColumnHeight() {
+    var col8 = document.querySelector('.gate-tree-col');
+    if (!col8) return;
+    if (window.innerWidth < LG_BREAKPOINT_PX) {
+      col8.style.height = '';
+      return;
+    }
+    // 버그 수정(Opus 전체 리뷰, 2026-08-21): 트리 카드는 collapsible/removable이라(card.html
+    // 프래그먼트) 사용자가 접기(-)를 누르면 card-body가 사라지고, 삭제(×)를 누르면 카드 자체가
+    // DOM에서 제거된다. 두 경우 모두 이전에 강제로 넣어둔 인라인 height가 그대로 남아, 접힌
+    // 헤더 아래나 빈 컬럼에 목표 높이만큼 빈 여백이 생긴다(자가치유되지 않음 — 아래에서 다시
+    // 인라인 height를 넣는 것뿐이라). 카드가 없거나(삭제됨) 접혀 있으면 강제 높이를 지운다.
+    var card = col8.querySelector('.card');
+    if (!card || card.classList.contains('collapsed-card')) {
+      col8.style.height = '';
+      return;
+    }
+    var row = col8.closest('.row');
+    var col4 = row && row.querySelector('.col-lg-4');
+    if (!col4) return;
+    col8.style.height = ''; // 재측정 전에 이전 강제 높이를 지워 col4 실측치가 영향받지 않게 한다.
+    var targetHeight = col4.getBoundingClientRect().height;
+    if (targetHeight > 0) col8.style.height = targetHeight + 'px';
+  }
+
+  function debounce(fn, wait) {
+    var timer = null;
+    return function () {
+      clearTimeout(timer);
+      timer = setTimeout(fn, wait);
+    };
   }
 
   // 테스트 전용 훅(2026-08-20 Opus 전체 리뷰 지적 — "가장 자주 깨지는 코드가 가장 검증이 없다").
@@ -531,4 +585,11 @@
   setupContextMenu(container);
   loadTree(container);
   setInterval(function () { loadTree(container); }, POLL_INTERVAL_MS);
+
+  syncTreeColumnHeight();
+  window.addEventListener('resize', debounce(syncTreeColumnHeight, 150));
+  // 대시보드 실시간 갱신(SmallBox 카운트)이 자릿수 변화 등으로 오른쪽 컬럼 높이를 미세하게
+  // 바꿀 수 있어 폴링 주기에 맞춰 재동기화한다(dashboard-realtime.js의 SUMMARY 주기와 별개로
+  // 이 값 하나만 가볍게 재계산).
+  setInterval(syncTreeColumnHeight, POLL_INTERVAL_MS);
 })();

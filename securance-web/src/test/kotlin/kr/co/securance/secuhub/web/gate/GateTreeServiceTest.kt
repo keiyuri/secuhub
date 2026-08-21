@@ -101,7 +101,7 @@ class GateTreeServiceTest {
         assertEquals(1, tree.single().groups.single().details.size)
         // 필터 없는 전체 조회(findAll)는 호출되지 않아야 한다 — 비활성/미분석 항목이 섞여 들어오면 안 된다.
         verify(groupRepository, never()).findAll()
-        verify(detailRepository, never()).findByGroup_GrpIdOrderByDtlLaneNo(1L)
+        verify(detailRepository, never()).findByGroup_GrpIdOrderByDtlId(1L)
     }
 
     @Test

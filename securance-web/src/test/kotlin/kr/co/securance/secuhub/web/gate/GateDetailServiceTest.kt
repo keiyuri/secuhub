@@ -26,27 +26,27 @@ class GateDetailServiceTest {
     fun `findAllForManagement은 showInactive가 false면 사용·분석 대상만 조회한다`() {
         val detailRepository = mock(GateDetailRepository::class.java)
         val filtered = listOf(mock(GateDetail::class.java))
-        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(1L))
+        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlId(1L))
             .thenReturn(filtered)
 
         val service = GateDetailService(detailRepository, mock(GateGroupRepository::class.java))
         val result = service.findAllForManagement(1L, showInactive = false)
 
         assertEquals(filtered, result)
-        verify(detailRepository, never()).findByGroup_GrpIdOrderByDtlLaneNo(1L)
+        verify(detailRepository, never()).findByGroup_GrpIdOrderByDtlId(1L)
     }
 
     @Test
     fun `findAllForManagement은 showInactive가 true면 비활성·미분석 레인까지 전부 조회한다`() {
         val detailRepository = mock(GateDetailRepository::class.java)
         val all = listOf(mock(GateDetail::class.java), mock(GateDetail::class.java))
-        `when`(detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(1L)).thenReturn(all)
+        `when`(detailRepository.findByGroup_GrpIdOrderByDtlId(1L)).thenReturn(all)
 
         val service = GateDetailService(detailRepository, mock(GateGroupRepository::class.java))
         val result = service.findAllForManagement(1L, showInactive = true)
 
         assertEquals(all, result)
-        verify(detailRepository, never()).findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(1L)
+        verify(detailRepository, never()).findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlId(1L)
     }
 
     @Test
@@ -71,7 +71,7 @@ class GateDetailServiceTest {
         val result = service.findByGroupForSchedule(1L)
 
         assertEquals(all, result)
-        verify(detailRepository, never()).findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(1L)
+        verify(detailRepository, never()).findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlId(1L)
     }
 
     @Test

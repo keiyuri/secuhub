@@ -89,16 +89,27 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
     @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.dtlIp = :dtlIp and d.useYn = true order by d.dtlLaneNo")
     fun findFirstByDtlIpAndUseYnTrueOrderByDtlLaneNo(@Param("dtlIp") dtlIp: String, pageable: Pageable): List<GateDetail>
 
-    /** #4 SetupGateGroup 화면 — 그룹에 속한 레인(게이트 상세) 목록 조회. */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.group.grpId = :grpId order by d.dtlLaneNo")
-    fun findByGroup_GrpIdOrderByDtlLaneNo(@Param("grpId") grpId: Long): List<GateDetail>
+    /**
+     * #4 SetupGateGroup 화면 — 그룹에 속한 레인(게이트 상세) 목록 조회.
+     *
+     * 정렬은 위치ID→그룹ID→게이트(레인) ID 순(2026-08-21 사용자 요청 — "게이트 목록의 표시 순서는
+     * 화면 어디서든 설치 위치 ID, 그룹 ID, 게이트 ID 순이어야 한다", [GateTreeController]의
+     * 트리뷰 정렬 기준과 동일하게 맞춘다). 이 메서드는 grpId로 이미 필터링되어 위치·그룹이
+     * 고정되므로 남는 정렬 기준은 게이트 ID(`dtlId`)뿐이다 — 과거에는 `dtlLaneNo`(레인 번호)로
+     * 정렬해 등록 순서에 따라 게이트 ID 순서와 어긋날 수 있었다.
+     */
+    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.group.grpId = :grpId order by d.dtlId")
+    fun findByGroup_GrpIdOrderByDtlId(@Param("grpId") grpId: Long): List<GateDetail>
 
-    /** #4 SetupGateGroup 화면 — 사용/분석 대상(둘 다 'Y')인 레인만 목록에 노출할 때 사용. */
+    /**
+     * #4 SetupGateGroup 화면 — 사용/분석 대상(둘 다 'Y')인 레인만 목록에 노출할 때 사용.
+     * 정렬 기준은 위 [findByGroup_GrpIdOrderByDtlId]와 동일(게이트 ID 순).
+     */
     @Query(
         "select d from GateDetail d join fetch d.location join fetch d.group " +
-            "where d.group.grpId = :grpId and d.useYn = true and d.analysisYn = true order by d.dtlLaneNo",
+            "where d.group.grpId = :grpId and d.useYn = true and d.analysisYn = true order by d.dtlId",
     )
-    fun findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(@Param("grpId") grpId: Long): List<GateDetail>
+    fun findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlId(@Param("grpId") grpId: Long): List<GateDetail>
 
     /**
      * #3 SR_F_GateReset — 클라이언트가 보낸 dtlId 목록이 실제로 grpId에 속하는지 서버에서
@@ -138,7 +149,8 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
      */
     @Query(
         "select d from GateDetail d join fetch d.location join fetch d.group " +
-            "where d.location.locId = :locId and d.useYn = true and d.location.useYn = true and d.group.useYn = true",
+            "where d.location.locId = :locId and d.useYn = true and d.location.useYn = true and d.group.useYn = true " +
+            "order by d.group.grpId, d.dtlId",
     )
     fun findByLocation_LocIdAndUseYnTrue(@Param("locId") locId: Long): List<GateDetail>
 
@@ -147,10 +159,16 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
      * 위 [findByLocation_LocIdAndUseYnTrue]와 동일한 이유로 레인 자신의 `analysisYn`은 확인하지
      * 않지만, 그룹·위치의 `useYn`은 함께 강제한다(같은 이유 — 조작된 POST로 비활성 그룹의 grpId를
      * 직접 보내는 우회 경로 차단).
+     *
+     * 화면의 레인 콤보(스케줄 화면)에 그대로 노출되는 목록이므로, 명시적인 `ORDER BY`가 없어 DB의
+     * 임의 순서에 맡겨져 있던 것을 게이트 ID(`dtlId`) 순으로 고정한다(2026-08-21 사용자 요청 —
+     * "게이트 목록의 표시 순서는 화면 어디서든 설치 위치 ID, 그룹 ID, 게이트 ID 순이어야 한다";
+     * 이미 grpId로 필터링돼 위치·그룹이 고정이므로 남는 정렬 기준은 dtlId뿐이다).
      */
     @Query(
         "select d from GateDetail d join fetch d.location join fetch d.group " +
-            "where d.group.grpId = :grpId and d.useYn = true and d.group.useYn = true and d.location.useYn = true",
+            "where d.group.grpId = :grpId and d.useYn = true and d.group.useYn = true and d.location.useYn = true " +
+            "order by d.dtlId",
     )
     fun findByGroup_GrpIdAndUseYnTrue(@Param("grpId") grpId: Long): List<GateDetail>
 

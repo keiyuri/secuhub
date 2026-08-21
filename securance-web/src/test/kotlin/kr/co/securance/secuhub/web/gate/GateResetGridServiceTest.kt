@@ -48,7 +48,7 @@ class GateResetGridServiceTest {
         // 덮어썼다. tb_net_state의 실제 복합키(dtlIp, dtlLaneNo, ...)와 동일하게 (dtlIp, dtlLaneNo)
         // 조합으로 키를 만들면 두 장비 상태가 독립적으로 유지되어야 한다.
         val detailRepository = mock(GateDetailRepository::class.java)
-        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(1L)).thenReturn(
+        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlId(1L)).thenReturn(
             listOf(
                 detail(dtlId = 1L, dtlIp = "192.168.0.1", laneNo = 1),
                 detail(dtlId = 2L, dtlIp = "192.168.0.2", laneNo = 1),
@@ -83,7 +83,7 @@ class GateResetGridServiceTest {
     @Test
     fun `net_state 정보가 없는 레인은 오프라인으로 취급한다`() {
         val detailRepository = mock(GateDetailRepository::class.java)
-        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(1L)).thenReturn(
+        `when`(detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlId(1L)).thenReturn(
             listOf(detail(dtlId = 1L, dtlIp = "192.168.0.1", laneNo = 1)),
         )
         val netStateRepository = mock(NetStateRepository::class.java)

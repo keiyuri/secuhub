@@ -14,6 +14,13 @@ data class ConnectedGateView(
     val gateTypeCode: Int,
     /** `0x4D` 상태 패킷으로 레인 정보를 확인한 커넥션인지 — 아니면 제어 대상 레인이 불확실하다. */
     val laneConfirmed: Boolean,
+    /**
+     * 정렬 전용 식별자 — `tb_gate_dtl`에 등록되지 않은 레인(신규 접속 직후 등)이면 null이고,
+     * 그 경우 [GateControlPageController.controlPage]가 목록 맨 뒤로 보낸다.
+     */
+    val locId: Long? = null,
+    val grpId: Long? = null,
+    val dtlId: Long? = null,
 )
 
 /**
@@ -37,15 +44,34 @@ class GateControlPageController(
             .flatMap { state ->
                 val lanes = state.laneSnapshot().sorted().ifEmpty { listOf(1) }
                 lanes.map { lane ->
+                    val laneInfo = state.laneInfoOf(lane)
                     ConnectedGateView(
                         dtlIp = state.dtlIp,
                         dtlLaneNo = lane,
                         gateTypeCode = state.gateTypeCode,
                         laneConfirmed = state.hasAuthoritativeLaneInfo,
+                        locId = laneInfo?.locId,
+                        grpId = laneInfo?.grpId,
+                        dtlId = laneInfo?.dtlId,
                     )
                 }
             }
-            .sortedWith(compareBy({ it.dtlIp }, { it.dtlLaneNo }))
+            // 정렬은 위치ID→그룹ID→게이트ID 순(2026-08-21 사용자 요청 — 게이트 목록의 표시 순서는
+            // 화면 어디서든 이 기준을 따라야 한다, GateTreeController 트리뷰와 동일한 기준).
+            // `tb_gate_dtl`에 아직 등록되지 않은 레인(locId/grpId/dtlId를 모름)은 식별자가 있는
+            // 레인들 뒤로 밀어내되, 그 안에서는 IP·레인 번호로 결정적인 순서를 유지한다.
+            .sortedWith(
+                compareBy(
+                    { it.locId == null },
+                    { it.locId ?: Long.MAX_VALUE },
+                    { it.grpId == null },
+                    { it.grpId ?: Long.MAX_VALUE },
+                    { it.dtlId == null },
+                    { it.dtlId ?: Long.MAX_VALUE },
+                    { it.dtlIp },
+                    { it.dtlLaneNo },
+                ),
+            )
 
         model.addAttribute("gates", gates)
         model.addAttribute("modeCommands", SpeedGateControlCommand.entries.filter { !it.isReset })

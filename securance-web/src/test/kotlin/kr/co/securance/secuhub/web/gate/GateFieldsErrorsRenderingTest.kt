@@ -55,7 +55,7 @@ class GateFieldsErrorsRenderingTest {
     @WithMockUser
     fun `위치 목록 정상 GET은 500 없이 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
+        `when`(locationService.findAllForManagement(false)).thenReturn(emptyList())
 
         mockMvc.get("/gates/locations") { with(csrf()) }.andExpect {
             status { isOk() }
@@ -66,9 +66,9 @@ class GateFieldsErrorsRenderingTest {
     @WithMockUser
     fun `게이트그룹 목록 정상 GET은 500 없이 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
+        `when`(locationService.findAllActive()).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
-        `when`(groupService.findByLocation(null)).thenReturn(emptyList())
+        `when`(groupService.findAllForManagement(null, false)).thenReturn(emptyList())
 
         mockMvc.get("/gates/groups") { with(csrf()) }.andExpect {
             status { isOk() }
@@ -79,10 +79,10 @@ class GateFieldsErrorsRenderingTest {
     @WithMockUser
     fun `레인 목록은 grpId 없이도 500 없이 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
-        `when`(groupService.findByLocation(null)).thenReturn(emptyList())
+        `when`(locationService.findAllActive()).thenReturn(emptyList())
+        `when`(groupService.findAllActiveByLocation(null)).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
-        `when`(detailService.findByGroup(null)).thenReturn(emptyList())
+        `when`(detailService.findAllForManagement(null, false)).thenReturn(emptyList())
 
         mockMvc.get("/gates/details") { with(csrf()) }.andExpect {
             status { isOk() }
@@ -93,10 +93,10 @@ class GateFieldsErrorsRenderingTest {
     @WithMockUser
     fun `레인 목록은 grpId가 선택된 상태에서도 500 없이 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
-        `when`(groupService.findByLocation(null)).thenReturn(emptyList())
+        `when`(locationService.findAllActive()).thenReturn(emptyList())
+        `when`(groupService.findAllActiveByLocation(null)).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
-        `when`(detailService.findByGroup(1L)).thenReturn(emptyList())
+        `when`(detailService.findAllForManagement(1L, false)).thenReturn(emptyList())
 
         mockMvc.get("/gates/details") {
             param("grpId", "1")
@@ -115,7 +115,7 @@ class GateFieldsErrorsRenderingTest {
     @WithMockUser
     fun `위치 수정 진입 시 locationFormModal을 여는 자동 오픈 스크립트가 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
+        `when`(locationService.findAllForManagement(false)).thenReturn(emptyList())
         `when`(locationService.findByIdOrNull(1L)).thenReturn(GateLocation(locId = 1L, locName = "테스트위치"))
 
         mockMvc.get("/gates/locations/1/edit") { with(csrf()) }.andExpect {
@@ -128,10 +128,10 @@ class GateFieldsErrorsRenderingTest {
     @WithMockUser
     fun `게이트그룹 수정 진입 시 groupFormModal을 여는 자동 오픈 스크립트가 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
         val location = GateLocation(locId = 1L, locName = "테스트위치")
-        `when`(groupService.findByLocation(1L)).thenReturn(emptyList())
+        `when`(locationService.findAllActive()).thenReturn(emptyList())
+        `when`(groupService.findAllForManagement(1L, false)).thenReturn(emptyList())
         `when`(groupService.findByIdOrNull(1L)).thenReturn(
             GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", gateTypeCode = 1),
         )
@@ -146,10 +146,10 @@ class GateFieldsErrorsRenderingTest {
     @WithMockUser
     fun `레인 수정 진입 시 detailFormModal을 여는 자동 오픈 스크립트가 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
-        `when`(locationService.findAll()).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
-        `when`(groupService.findByLocation(null)).thenReturn(emptyList())
-        `when`(detailService.findByGroup(1L)).thenReturn(emptyList())
+        `when`(locationService.findAllActive()).thenReturn(emptyList())
+        `when`(groupService.findAllActiveByLocation(null)).thenReturn(emptyList())
+        `when`(detailService.findAllForManagement(1L, false)).thenReturn(emptyList())
         val location = GateLocation(locId = 1L, locName = "테스트위치")
         val group = GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", gateTypeCode = 1)
         `when`(detailService.findByIdOrNull(1L)).thenReturn(

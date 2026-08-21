@@ -25,10 +25,30 @@
     </div>
   </div>
 
+  <!-- 버그 수정(2026-08-21): [locations.html]/[groups.html]과 동일한 지적 — 레거시 SR_F_SetupGateGroup은
+       등록/수정 폼이 팝업(모달)로 뜨는데, 이 화면은 목록 옆에 폼을 상시 노출하는 2단 레이아웃이었다.
+       폼을 Bootstrap 모달로 옮기고 "신규 등록"/"수정"이 모달을 띄우도록 바꿨다. -->
   <div class="row">
-    <div class="col-lg-7">
+    <div class="col-lg-12">
       <div class="card card-outline card-primary">
-        <div class="card-header"><h3 class="card-title">레인 목록</h3></div>
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h3 class="card-title">레인 목록</h3>
+          <!-- 버그 수정(2026-08-21, 재검토): locations.html/groups.html과 동일한 이유 — editingId가
+               채워진 채 렌더링된 페이지(=/edit GET으로 진입)에서는 "신규 등록"이 서버 렌더된 수정
+               모달을 그대로 다시 열어 기존 레인을 덮어쓸 위험이 있었다. editingId가 있을 때는 실제
+               링크로 만들어 선택된 그룹 필터를 유지한 채 새 폼 상태로 페이지를 다시 불러오게 한다. -->
+          <!-- 버그 수정(Opus 전체 리뷰, 2026-08-21): ${editingId}는 null 체크가 아니라 Thymeleaf
+               진리값 평가를 탄다 — PK가 0인 레거시 이관 행에서는 false가 되어 분기가 뒤집힌다.
+               명시적으로 null 비교한다. -->
+          <button th:if="${editingId == null}" type="button" class="btn btn-sm btn-primary"
+                  data-bs-toggle="modal" data-bs-target="#detailFormModal"
+                  th:disabled="${selectedGrpId == null}">
+            <i class="bi bi-plus-lg"></i> 신규 등록
+          </button>
+          <a th:if="${editingId != null}" class="btn btn-sm btn-primary" th:href="@{/gates/details(grpId=${selectedGrpId})}">
+            <i class="bi bi-plus-lg"></i> 신규 등록
+          </a>
+        </div>
         <div class="table-responsive">
           <table class="table table-sm table-striped mb-0">
             <thead><tr><th>레인</th><th>IP</th><th>타입</th><th>이름</th><th>사용</th><th>분석</th><th></th></tr></thead>
@@ -67,16 +87,22 @@
         </div>
       </div>
     </div>
+  </div>
 
-    <div class="col-lg-5">
-      <div class="card card-outline card-primary" th:if="${selectedGrpId != null}">
-        <div class="card-header">
-          <h3 class="card-title" th:text="${editingId} ? '레인 수정' : '레인 등록'">레인 등록</h3>
-        </div>
-        <div class="card-body">
-          <form th:action="${editingId} ? @{/gates/details/{id}(id=${editingId})} : @{/gates/details}"
-                th:object="${form}" method="post">
-            <input type="hidden" th:field="*{grpId}"/>
+  <!-- 등록/수정 팝업(모달) — 그룹을 선택하지 않은 상태에서는 진입 버튼 자체가 비활성화되므로
+       (selectedGrpId == null이면 above의 "신규 등록" 버튼이 disabled) 항상 grpId가 있는 상태에서만
+       열린다. 레거시 SR_F_SetupGateGroup과 동일하게 목록 화면 위에 오버레이로 뜬다. -->
+  <div class="modal fade" id="detailFormModal" tabindex="-1" aria-hidden="true" th:if="${selectedGrpId != null}">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form th:action="${editingId != null} ? @{/gates/details/{id}(id=${editingId})} : @{/gates/details}"
+              th:object="${form}" method="post">
+          <input type="hidden" th:field="*{grpId}"/>
+          <div class="modal-header">
+            <h5 class="modal-title" th:text="${editingId != null} ? '레인 수정' : '레인 등록'">레인 등록</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
             <div class="mb-3">
               <label class="form-label">레인 번호</label>
               <input type="number" min="0" class="form-control" th:field="*{dtlLaneNo}"
@@ -118,13 +144,20 @@
               <!--/* 꺼두면 NetCheckJob/SendControlJob 등이 이 레인을 건너뛴다(GateDetail.analysisYn 주석 참고). */-->
               <label class="form-check-label">분석/제어 대상</label>
             </div>
-            <button type="submit" class="btn btn-primary" th:text="${editingId} ? '수정' : '등록'">등록</button>
-            <a class="btn btn-secondary" th:href="@{/gates/details(grpId=${selectedGrpId})}">취소</a>
-          </form>
-        </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+            <button type="submit" class="btn btn-primary" th:text="${editingId != null} ? '수정' : '등록'">등록</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
+
+  <!-- 모달 자동 오픈 스크립트 — locations.html/groups.html/details.html 3중 복붙을 공유 프래그먼트로
+       추출했다(Opus 리뷰 지적, 2026-08-21). 이 화면만 selectedGrpId 체크가 추가로 필요해 조건식에
+       포함시켰다. 조건 자체 로직은 [fragments/modal-auto-open.html] 참고. -->
+  <th:block th:replace="~{fragments/modal-auto-open :: autoOpen('detailFormModal', ${selectedGrpId != null and (editingId != null or #fields.hasErrors('form.*'))})}"></th:block>
 
 </div>
 </body>

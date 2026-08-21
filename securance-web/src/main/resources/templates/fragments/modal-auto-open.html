@@ -1,0 +1,13 @@
+<!--/* 여러 게이트 관리 화면(locations.html/groups.html/details.html)이 3중 복붙하고 있던 "모달 자동
+     오픈" 스크립트를 공유 프래그먼트로 뺐다(Opus 리뷰 지적, 2026-08-21). 수정 링크 클릭(GET) 또는
+     검증 실패 후 재렌더링 시, 서버가 넘겨준 상태(editingId/필드 오류 등)를 감지해 지정된 모달을
+     자동으로 다시 띄운다. 화면마다 "다시 열지" 판단 조건식이 달라(details.html은 selectedGrpId 체크가
+     추가) 조건 자체는 호출부에서 boolean으로 계산해 show 파라미터로 넘긴다. */-->
+<script xmlns:th="http://www.thymeleaf.org"
+        th:fragment="autoOpen(modalId, show)"
+        th:if="${show}"
+        th:inline="javascript">
+  document.addEventListener('DOMContentLoaded', function () {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById(/*[[${modalId}]]*/ 'placeholder')).show();
+  });
+</script>

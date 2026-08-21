@@ -190,6 +190,74 @@ describe('sendBulkOperationCommand', () => {
   });
 });
 
+describe('sendCommandWithReauth/sendResetWithReauth', () => {
+  // 회귀 방지(2026-08-21) — 두 함수가 정의되지 않은 채 호출부에서만 참조되고 있어, DTL 단일 대상
+  // 게이트 제어(개방/폐쇄/복구/FREE/역방향 개방/리셋)를 클릭하면 ReferenceError가 동기적으로
+  // 던져져 fetch 자체가 나가지 않았다(이력 저장·실행 상태 확인 불가의 원인).
+  beforeEach(() => {
+    global.window = global.window || {};
+  });
+
+  test('sendCommandWithReauth는 /api/gate-control/command로 요청을 보낸다', async () => {
+    const gateTree = loadGateTree();
+    const calls = [];
+    gateTree.__setPostGateControl((path, dtlIp, dtlLaneNo, command, reauthPassword) => {
+      calls.push({ path, dtlIp, dtlLaneNo, command, reauthPassword });
+      return Promise.resolve({ ok: true, status: 200, body: { message: 'ok' } });
+    });
+
+    const result = await gateTree.sendCommandWithReauth('10.0.0.1', 1, 'OPEN');
+
+    expect(calls).toEqual([{ path: '/api/gate-control/command', dtlIp: '10.0.0.1', dtlLaneNo: 1, command: 'OPEN', reauthPassword: undefined }]);
+    expect(result).toEqual({ ok: true, status: 200, body: { message: 'ok' } });
+  });
+
+  test('sendResetWithReauth는 /api/gate-control/reset으로 요청을 보낸다', async () => {
+    const gateTree = loadGateTree();
+    const calls = [];
+    gateTree.__setPostGateControl((path, dtlIp, dtlLaneNo, command, reauthPassword) => {
+      calls.push({ path, dtlIp, dtlLaneNo, command, reauthPassword });
+      return Promise.resolve({ ok: true, status: 200, body: { message: 'ok' } });
+    });
+
+    const result = await gateTree.sendResetWithReauth('10.0.0.1', 1, 'RESET_MOTOR');
+
+    expect(calls).toEqual([{ path: '/api/gate-control/reset', dtlIp: '10.0.0.1', dtlLaneNo: 1, command: 'RESET_MOTOR', reauthPassword: undefined }]);
+    expect(result).toEqual({ ok: true, status: 200, body: { message: 'ok' } });
+  });
+
+  test('재인증이 필요하면 비밀번호를 프롬프트로 받아 한 번만 자동 재시도한다', async () => {
+    const gateTree = loadGateTree();
+    const calls = [];
+    gateTree.__setPostGateControl((path, dtlIp, dtlLaneNo, command, reauthPassword) => {
+      calls.push(reauthPassword);
+      if (!reauthPassword) return Promise.resolve({ ok: false, status: 401, body: { reauthRequired: true } });
+      return Promise.resolve({ ok: true, status: 200, body: { message: 'ok' } });
+    });
+    global.window.prompt = vi.fn(() => 'secret');
+
+    const result = await gateTree.sendCommandWithReauth('10.0.0.1', 1, 'CLOSE');
+
+    expect(calls).toEqual([undefined, 'secret']);
+    expect(result).toEqual({ ok: true, status: 200, body: { message: 'ok' } });
+  });
+
+  test('재인증 프롬프트를 취소하면 재시도하지 않고 실패로 처리한다', async () => {
+    const gateTree = loadGateTree();
+    const calls = [];
+    gateTree.__setPostGateControl((path, dtlIp, dtlLaneNo, command, reauthPassword) => {
+      calls.push(reauthPassword);
+      return Promise.resolve({ ok: false, status: 401, body: { reauthRequired: true } });
+    });
+    global.window.prompt = vi.fn(() => null);
+
+    const result = await gateTree.sendCommandWithReauth('10.0.0.1', 1, 'CLOSE');
+
+    expect(calls).toEqual([undefined]); // 재시도 없음.
+    expect(result.ok).toBe(false);
+  });
+});
+
 describe('reportBulkCommandResult', () => {
   test('전부 성공하면 N/N대 성공만 표시한다', async () => {
     const { reportBulkCommandResult } = loadGateTree();

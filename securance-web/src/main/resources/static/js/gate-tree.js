@@ -272,6 +272,37 @@
     });
   }
 
+  // [버그 수정: 2026-08-21] DTL 단일 대상 제어(개방/폐쇄/복구/FREE/역방향 개방/리셋)가 클릭 시
+  // sendCommandWithReauth/sendResetWithReauth를 호출하는데, 두 함수가 이 파일 어디에도 정의돼
+  // 있지 않았다 — reportCommandResult(fn(...), ...) 형태로 인자 자리에서 즉시 호출되므로
+  // ReferenceError가 클릭 핸들러 안에서 동기적으로 던져져, catch도 안 되고 fetch 자체가 나가지
+  // 않았다(콘솔 에러만 남고 화면엔 아무 반응도 없었다). 그 결과 트리뷰에서 DTL 노드를 우클릭해
+  // 게이트 제어를 눌러도 tb_data_snd 이력 저장은커녕 서버 요청조차 발생하지 않아 실행 상태를
+  // 확인할 방법이 없었다(LOC/GRP 일괄 전송은 sendBulkOperationCommand가 postGateControl을 직접
+  // 호출해 정상 동작했다 — 이 버그는 DTL 단일 대상에만 있었다). dashboard-realtime.js의
+  // sendResetCommand와 동일한 패턴(재인증 필요 시 비밀번호 프롬프트로 단 한 번만 자동 재시도)으로
+  // 구현한다. 두 엔드포인트(command/reset)는 경로만 다르고 재시도 로직이 완전히 같으므로,
+  // postGateControl과 같은 이유로 공유 헬퍼(sendWithReauth)로 뽑아 중복을 없앤다.
+  function sendWithReauth(path, dtlIp, dtlLaneNo, command, reauthPassword) {
+    return postGateControl(path, dtlIp, dtlLaneNo, command, reauthPassword)
+      .then(function (r) {
+        if (r.body && r.body.reauthRequired && !reauthPassword) {
+          var password = window.prompt('게이트 제어 재인증 — 비밀번호를 입력하세요.');
+          if (!password) return { ok: false, status: r.status, body: { message: '재인증이 취소되어 전송하지 않았습니다.' } };
+          return sendWithReauth(path, dtlIp, dtlLaneNo, command, password);
+        }
+        return r;
+      });
+  }
+
+  function sendCommandWithReauth(dtlIp, dtlLaneNo, command, reauthPassword) {
+    return sendWithReauth('/api/gate-control/command', dtlIp, dtlLaneNo, command, reauthPassword);
+  }
+
+  function sendResetWithReauth(dtlIp, dtlLaneNo, command, reauthPassword) {
+    return sendWithReauth('/api/gate-control/reset', dtlIp, dtlLaneNo, command, reauthPassword);
+  }
+
   function setupContextMenu(container) {
     var menu = document.getElementById('gate-tree-context-menu');
     if (!menu) return;
@@ -574,6 +605,8 @@
       sendBulkSequentialByIp: sendBulkSequentialByIp,
       reportBulkCommandResult: reportBulkCommandResult,
       sendBulkOperationCommand: sendBulkOperationCommand,
+      sendCommandWithReauth: sendCommandWithReauth,
+      sendResetWithReauth: sendResetWithReauth,
       __setPostGateControl: function (fn) { postGateControl = fn; },
     };
     return;

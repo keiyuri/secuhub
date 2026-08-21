@@ -12,87 +12,112 @@
 <body>
 <div layout:fragment="content">
 
-  <!-- 1행: 요약 지표(SmallBox) — adminlte-react widgets/small-box 패턴, col-lg-3 col-6 그리드 -->
-  <!--/* 2026-08-12(B8): id는 fragment가 <h3>에 직접 부착한다 — 이전의 DOM-순서 기반 사후 부착
-        스크립트는 카드 재배치 시 엉뚱한 박스가 갱신될 수 있어 제거했다. */-->
-  <div class="row">
-    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
-           'rt-online-count', ${summary.onlineGateCount}, '온라인 게이트', 'bi-hdd-network', 'success', '/gates/reset', '자세히')}"></div>
-    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
-           'rt-offline-count', ${summary.offlineGateCount}, '오프라인 게이트', 'bi-hdd-network-fill', 'danger', '/gates/reset', '자세히')}"></div>
-    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
-           'rt-unresolved-count', ${summary.unresolvedErrorCount}, '미해결 오류', 'bi-exclamation-triangle', 'warning', '/reports/events?resolveYn=N', '자세히')}"></div>
-    <div class="col-lg-3 col-6" th:replace="~{fragments/widgets/small-box :: smallBox(
-           'rt-traffic-count', ${summary.todayTrafficCount}, '오늘 통행량', 'bi-people', 'info', '/control/history', '자세히')}"></div>
-  </div>
-
-  <!-- Phase 10: #18 대시보드 게이트 트리뷰 — LOC/GRP/DTL 3계층 + 연결상태 아이콘 + 우클릭 제어 메뉴.
+  <!-- 1행: 게이트 트리뷰(왼쪽) + 요약 지표(SmallBox, 오른쪽 가로 배치) — 2026-08-21 레이아웃 개편.
+       Phase 10: #18 대시보드 게이트 트리뷰 — LOC/GRP/DTL 3계층 + 연결상태 아이콘 + 우클릭 제어 메뉴.
        레거시 UI 원본이 이 워크스페이스에 없어 계획서 요구사항만으로 신규 설계했다(2026-08-12
-       사용자 확인 — GateTreeApiController 참고). -->
-  <div class="row">
-    <div class="col-12">
-      <div th:replace="~{fragments/widgets/card :: card(
+       사용자 확인 — GateTreeApiController 참고).
+       2026-08-12(B8): SmallBox id는 fragment가 <h3>에 직접 부착한다 — 이전의 DOM-순서 기반 사후 부착
+       스크립트는 카드 재배치 시 엉뚱한 박스가 갱신될 수 있어 제거했다.
+       2026-08-21: bodyContent 프래그먼트(~{::#id})를 th:replace 대상 div의 "형제"로 따로 두면
+       Thymeleaf가 카드 안에 삽입할 때와, 원래 위치를 그대로 처리할 때 두 번 렌더링한다(재현/검증
+       완료 — 이 div 자체는 th:replace로 완전히 대체되어 사라지지만, 형제로 남겨둔 원본 소스는
+       평범한 DOM 노드로서 별도로 남아 그대로 출력된다). 그 결과 카드 밖에 "불러오는 중..." 같은
+       갱신되지 않는 원본 placeholder가 그대로 노출되는 버그가 있었다. bodyContent를 th:replace
+       대상 div "자신의 자식"으로 옮기고 자기 자신의 id를 셀렉터로 참조하면, 추출 후 바깥쪽 div
+       전체가 th:replace로 통째로 사라지므로 중복이 생기지 않는다(사용자 요청으로 최소 재현 후 수정).
+  -->
+  <!-- 2026-08-21(2차): align-items-stretch로 두면 게이트 트리뷰(col-lg-8)의 "내용에 맞춘 자연스러운
+       높이"가 행 높이를 결정해버려, 위치/그룹이 많을 때 트리 카드가 오른쪽 SmallBox 2x2 합계보다
+       훨씬 길어지고 반대로 SmallBox 쪽에 빈 공간만 늘어나는 문제가 있었다(사용자 지적). 대신
+       align-items-start로 각 컬럼이 자기 내용 기준 자연 높이를 갖게 한 뒤, gate-tree.js가 오른쪽
+       컬럼(SmallBox 합계)의 실측 높이를 읽어 왼쪽 컬럼에 그대로 지정한다 — 트리 쪽이 넘치면 내부
+       스크롤로 처리해 항상 오늘 통행량 박스 하단에 맞춰진다. -->
+  <div class="row align-items-start">
+    <div class="col-lg-8 d-flex flex-column gate-tree-col">
+      <div id="widget-gate-tree-src" th:replace="~{fragments/widgets/card :: card(
              'widget-gate-tree', '게이트 트리뷰', 'primary', 'outline',
-             true, true, false, ~{::#gateTreeBody})}"></div>
+             true, true, false, ~{::#gateTreeBody})}">
+        <th:block id="gateTreeBody" th:remove="tag">
+          <div id="gate-tree" class="gate-tree" data-loading="true">
+            <div class="text-muted small">불러오는 중...</div>
+          </div>
+          <!-- 우클릭 제어 메뉴 — DTL(레인) 노드 대상. GateControlApiController(리셋)/
+               GateControlController(모드 변경·모터 설정)를 그대로 재사용한다. -->
+          <ul id="gate-tree-context-menu" class="dropdown-menu gate-tree-context-menu" style="display:none; position:fixed;">
+            <li><h6 class="dropdown-header gate-tree-context-target">게이트</h6></li>
+            <li><a class="dropdown-item" href="#" data-action="reset-system"><i class="bi bi-arrow-clockwise"></i> 시스템 리셋</a></li>
+            <li><a class="dropdown-item" href="#" data-action="reset-motor"><i class="bi bi-arrow-clockwise"></i> 모터 리셋</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="#" data-action="mode-change"><i class="bi bi-sliders"></i> 모드 변경</a></li>
+            <li><a class="dropdown-item" href="#" data-action="motor-setup"><i class="bi bi-gear"></i> 모터 설정</a></li>
+          </ul>
+        </th:block>
+      </div>
+    </div>
 
-      <div th:block id="gateTreeBody" th:remove="tag">
-        <div id="gate-tree" class="gate-tree" data-loading="true">
-          <div class="text-muted small">불러오는 중...</div>
-        </div>
-        <!-- 우클릭 제어 메뉴 — DTL(레인) 노드 대상. GateControlApiController(리셋)/
-             GateControlController(모드 변경·모터 설정)를 그대로 재사용한다. -->
-        <ul id="gate-tree-context-menu" class="dropdown-menu gate-tree-context-menu" style="display:none; position:fixed;">
-          <li><h6 class="dropdown-header gate-tree-context-target">게이트</h6></li>
-          <li><a class="dropdown-item" href="#" data-action="reset-system"><i class="bi bi-arrow-clockwise"></i> 시스템 리셋</a></li>
-          <li><a class="dropdown-item" href="#" data-action="reset-motor"><i class="bi bi-arrow-clockwise"></i> 모터 리셋</a></li>
-          <li><hr class="dropdown-divider"></li>
-          <li><a class="dropdown-item" href="#" data-action="mode-change"><i class="bi bi-sliders"></i> 모드 변경</a></li>
-          <li><a class="dropdown-item" href="#" data-action="motor-setup"><i class="bi bi-gear"></i> 모터 설정</a></li>
-        </ul>
+    <div class="col-lg-4">
+      <!-- 2026-08-21(3차 수정): small-box.html의 th:fragment 루트 div는 자기 자신의
+           class="small-box text-bg-*"를 갖고 있다 — 바로 이 div에 th:replace를 걸면 호스트 div의
+           class="col-6"는 통째로 버려지고 프래그먼트 자신의 class로 완전히 대체된다(Thymeleaf
+           th:replace는 host 태그 자체를 프래그먼트 결과로 치환하므로 host의 속성이 살아남지 않는다
+           — gateTreeBody 등에서 겪은 것과 같은 계열의 함정, 사용자 지적으로 재현/확인). 그 결과
+           4개 SmallBox가 2x2로 배치되지 않고 매번 한 줄씩 통째로 쌓여 오른쪽 컬럼이 실제보다
+           훨씬 길어져 있었다 — 게이트 트리뷰 높이를 그 길이에 맞추다 보니 트리 카드도 덩달아
+           길어 보인 것. col-6는 th:replace 대상이 아닌 별도 래퍼 div에 둬서 그리드가 실제로
+           적용되게 한다. -->
+      <div class="row">
+        <div class="col-6"><div th:replace="~{fragments/widgets/small-box :: smallBox(
+               'rt-online-count', ${summary.onlineGateCount}, '온라인 게이트', 'bi-hdd-network', 'success', '/gates/reset', '자세히')}"></div></div>
+        <div class="col-6"><div th:replace="~{fragments/widgets/small-box :: smallBox(
+               'rt-offline-count', ${summary.offlineGateCount}, '오프라인 게이트', 'bi-hdd-network-fill', 'danger', '/gates/reset', '자세히')}"></div></div>
+        <div class="col-6"><div th:replace="~{fragments/widgets/small-box :: smallBox(
+               'rt-unresolved-count', ${summary.unresolvedErrorCount}, '미해결 오류', 'bi-exclamation-triangle', 'warning', '/reports/events?resolveYn=N', '자세히')}"></div></div>
+        <div class="col-6"><div th:replace="~{fragments/widgets/small-box :: smallBox(
+               'rt-traffic-count', ${summary.todayTrafficCount}, '오늘 통행량', 'bi-people', 'info', '/control/history', '자세히')}"></div></div>
       </div>
     </div>
   </div>
 
-  <!-- 2행: 위젯 카드 컬럼 — SortableJS 드래그 재배치(계획서 5.2절), 위젯 추가/삭제는 후속 작업 -->
+  <!-- 2행: 나머지 위젯 카드 컬럼 — SortableJS 드래그 재배치(계획서 5.2절), 위젯 추가/삭제는 후속 작업 -->
   <div class="row">
     <div class="col-lg-7 connectedSortable">
 
-      <div th:replace="~{fragments/widgets/card :: card(
+      <div id="widget-gate-errors-src" th:replace="~{fragments/widgets/card :: card(
              'widget-gate-errors', '게이트 상태 요약 (uvw_anlz_error 대응)', 'danger', 'outline',
-             true, true, true, ~{::#gateErrorsBody})}"></div>
-
-      <div th:block id="gateErrorsBody" th:remove="tag">
-        <div class="table-responsive">
-          <table class="table table-sm table-striped">
-            <thead>
-              <tr><th>게이트</th><th>오류</th><th>발생일시</th><th>해결여부</th></tr>
-            </thead>
-            <tbody>
-              <tr th:if="${#lists.isEmpty(recentErrors)}">
-                <td colspan="4" class="text-center text-muted">최근 미해결 오류가 없습니다.</td>
-              </tr>
-              <tr th:each="err : ${recentErrors}">
-                <td th:text="${err.dtlIp}">IP</td>
-                <td th:text="${err.description}">오류 설명</td>
-                <td th:text="${err.analDate}">일시</td>
-                <td th:text="${err.resolveYn}">N</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+             true, true, true, ~{::#gateErrorsBody})}">
+        <th:block id="gateErrorsBody" th:remove="tag">
+          <div class="table-responsive">
+            <table class="table table-sm table-striped">
+              <thead>
+                <tr><th>게이트</th><th>오류</th><th>발생일시</th><th>해결여부</th></tr>
+              </thead>
+              <tbody>
+                <tr th:if="${#lists.isEmpty(recentErrors)}">
+                  <td colspan="4" class="text-center text-muted">최근 미해결 오류가 없습니다.</td>
+                </tr>
+                <tr th:each="err : ${recentErrors}">
+                  <td th:text="${err.dtlIp}">IP</td>
+                  <td th:text="${err.description}">오류 설명</td>
+                  <td th:text="${err.analDate}">일시</td>
+                  <td th:text="${err.resolveYn}">N</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </th:block>
       </div>
 
     </div>
 
     <div class="col-lg-5 connectedSortable">
 
-      <div th:replace="~{fragments/widgets/card :: card(
+      <div id="widget-traffic-src" th:replace="~{fragments/widgets/card :: card(
              'widget-traffic', '통행량 (uvw_user_cnt 대응)', 'info', 'outline',
-             true, true, false, ~{::#trafficBody})}"></div>
-
-      <div th:block id="trafficBody" th:remove="tag">
-        <div th:replace="~{fragments/widgets/info-box :: infoBox(
-               '오늘 총 통행량', ${summary.todayTrafficCount}, 'bi-graph-up', 'info', null, null)}"></div>
+             true, true, false, ~{::#trafficBody})}">
+        <th:block id="trafficBody" th:remove="tag">
+          <div th:replace="~{fragments/widgets/info-box :: infoBox(
+                 '오늘 총 통행량', ${summary.todayTrafficCount}, 'bi-graph-up', 'info', null, null)}"></div>
+        </th:block>
       </div>
 
     </div>

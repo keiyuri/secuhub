@@ -27,7 +27,10 @@ data class GateLaneInfo(
     val dtlName: String? = null,
 )
 
-interface GateLocationRepository : JpaRepository<GateLocation, Long>
+interface GateLocationRepository : JpaRepository<GateLocation, Long> {
+    /** 대시보드 게이트 트리뷰 전용 — 비활성(사용안함) 위치는 트리에서 아예 숨긴다(2026-08-21). */
+    fun findByUseYnTrueOrderByLocName(): List<GateLocation>
+}
 
 interface GateGroupRepository : JpaRepository<GateGroup, Long> {
     // Opus 전체 리뷰 지적: GateGroup.location은 LAZY고 open-in-view: false라, 단순 파생 쿼리로
@@ -38,6 +41,17 @@ interface GateGroupRepository : JpaRepository<GateGroup, Long> {
 
     @Query("select g from GateGroup g join fetch g.location")
     override fun findAll(): List<GateGroup>
+
+    /**
+     * 대시보드 게이트 트리뷰 전용 — 비활성(사용안함) 그룹은 트리에서 아예 숨긴다(2026-08-21).
+     *
+     * Opus 전체 리뷰 지적(2026-08-21): mains 브랜치에 이미 동일 기능이 `findAllByUseYnTrue`라는
+     * 이름으로 존재해, `findByUseYnTrue`로 남겨두면 병합 시 두 메서드가 동시에 남거나
+     * mains의 `GateTreeServiceTest`(이 메서드명을 스텁함)가 컴파일 실패한다. 이름을 mains와
+     * 통일한다.
+     */
+    @Query("select g from GateGroup g join fetch g.location where g.useYn = true")
+    fun findAllByUseYnTrue(): List<GateGroup>
 }
 
 interface GateDetailRepository : JpaRepository<GateDetail, Long> {
@@ -119,7 +133,11 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
      * Phase 10 대시보드 게이트 트리뷰 — LOC/GRP/DTL 전체를 한 번에 조회한다. `location`/`group`은
      * LAZY + open-in-view:false라 [GateGroupRepository.findAll]과 동일한 이유로 JOIN FETCH가
      * 필요하다(컨트롤러 트랜잭션 밖에서 접근 시 LazyInitializationException).
+     *
+     * 2026-08-21: 사용여부(`use_yn`)뿐 아니라 분석여부(`analysis_yn`)도 'Y'인 레인만 노출하도록
+     * 조건을 추가했다 — analysis_yn=false는 SendControlJob/NetCheckJob이 건너뛰는 대상이라
+     * 트리에 보여도 실제로는 갱신되지 않는 죽은 항목이었다(사용자 요청).
      */
-    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true order by d.dtlLaneNo")
+    @Query("select d from GateDetail d join fetch d.location join fetch d.group where d.useYn = true and d.analysisYn = true order by d.dtlLaneNo")
     fun findAllForTree(): List<GateDetail>
 }

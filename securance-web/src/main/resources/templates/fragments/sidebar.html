@@ -9,7 +9,15 @@
   <div class="sidebar-wrapper">
     <nav class="mt-2">
       <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" data-accordion="false" id="navigation">
-        <li th:each="node : ${menu}" th:insert="~{this :: menuNode(${node}, ${currentPath})}"></li>
+        <!-- 버그 수정(Codex 리뷰, P1): th:insert는 프래그먼트가 만든 <li>를 이 호스트 <li> "안쪽"에
+             끼워 넣어 <li><li>...</li></li> 형태의 잘못된 중첩 마크업을 만든다. th:replace로 바꿔야
+             하지만, th:each와 th:replace(둘 다 프래그먼트/반복 gathering 대상)를 같은 태그에 함께
+             걸면 아래 재귀 케이스와 동일한 이유로 프래그먼트 파라미터 node가 null로 평가되어 메뉴가
+             통째로 비어 버린다(재현 확인). th:each는 바깥 th:block으로, th:replace는 안쪽 <li>로
+             분리해야 한다. -->
+        <th:block th:each="node : ${menu}">
+          <li th:replace="~{this :: menuNode(${node}, ${currentPath})}"></li>
+        </th:block>
       </ul>
     </nav>
   </div>
@@ -39,11 +47,26 @@
       </p>
     </a>
     <ul class="nav nav-treeview">
-      <!-- 버그 수정(2026-08-18): 재귀 프래그먼트를 th:each로 반복 삽입할 때 Thymeleaf가 하위 트리를
-           gathering(사전 수집)하는 패스에서 부모 th:if(Group 판별)가 아직 확정되기 전에 이 th:each가
-           먼저 평가되어 node가 null인 채로 .children에 접근해 EL1007E가 발생했다. 세이프 내비게이션(?.)
-           으로 방어 — node가 null이면 빈 컬렉션으로 취급되어 예외 없이 넘어간다. -->
-      <li th:each="child : ${node?.children}" th:insert="~{this :: menuNode(${child}, ${currentPath})}"></li>
+      <!-- 버그 수정(2026-08-21, 재조사): 2026-08-18에 세이프 내비게이션(node?.children)으로 EL1007E
+           예외만 막았을 뿐, 진짜 원인은 그대로 남아 있었다 — th:each와 th:insert를 같은 <li> 태그에
+           함께 걸면(재귀 프래그먼트 호출 안에서) Thymeleaf가 그 반복을 처리하는 gathering 패스에서
+           프래그먼트 파라미터 node가 실제로 null이 되어 .children이 항상 빈 컬렉션으로 평가된다
+           (Thymeleaf 표준 엔진으로 최소 재현 완료: node?.children로 예외는 안 나지만 그룹의 자식이
+           한 건도 렌더링되지 않았다). 그래서 "게이트 관리"를 클릭해 펼쳐도 하위 메뉴(위치/게이트그룹/
+           게이트 상세/연결 상태/게이트 제어/일괄 리셋/스케줄·타임존)가 전부 비어 있어 아무 화면으로도
+           이동할 수 없었다. th:each와 th:insert를 서로 다른 태그로 분리하면(바깥 th:block이 반복,
+           안쪽 <li>가 재귀 삽입) node가 정상적으로 유지된다 — 같은 방식으로 재현/검증했다.
+           (Opus 전체 리뷰 지적, 2026-08-21) 근본 원인이 위 분리로 제거되어 node는 이제 절대
+           null이 될 수 없으므로, 아래 ${node.children}에서 세이프 내비게이션(?.)을 되돌렸다 —
+           남겨두면 "여기 null이 올 수 있다"는 잘못된 신호를 주고 향후 실제 null 버그를 조용히
+           삼킬 위험이 있다. -->
+      <th:block th:each="child : ${node.children}">
+        <!-- 버그 수정(Codex 리뷰, P1): th:insert는 프래그먼트 결과 <li>를 이 호스트 <li> 안에 그대로
+             삽입해 <li><li>...</li></li> 중첩을 만들고, 브라우저가 이를 보정하면서 .nav-treeview
+             계층/토글 동작이 깨진다. 호스트 태그를 프래그먼트 결과로 통째로 바꾸는 th:replace로
+             수정한다(th:each를 바깥 th:block에 둔 기존 분리 구조는 그대로 유지 — node null 버그 재발 방지). -->
+        <li th:replace="~{this :: menuNode(${child}, ${currentPath})}"></li>
+      </th:block>
     </ul>
   </li>
 </th:block>

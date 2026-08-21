@@ -4,7 +4,6 @@ import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.GateGroupRepository
 import kr.co.securance.secuhub.domain.repository.GateLocationRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
-import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RestController
@@ -48,10 +47,19 @@ class GateTreeService(
     private val netStateRepository: NetStateRepository,
 ) {
     fun buildTree(): List<GateTreeLocationNode> {
-        val locations = locationRepository.findAll(Sort.by("locName"))
-        // GateGroupRepository.findAll()/GateDetailRepository.findAllForTree()는 JOIN FETCH로
+        // 2026-08-21: 사용여부(use_yn)가 'N'인 위치/그룹/레인, 그리고 레인 중 분석여부(analysis_yn)가
+        // 'N'인 항목은 트리에서 제외한다(사용자 요청) — findByUseYnTrueOrderByLocName/
+        // findAllByUseYnTrue/findAllForTree가 조건을 담당.
+        //
+        // Opus 전체 리뷰 지적(2026-08-21): 정렬이 전혀 없으면(그룹/레인 쪽) DB가 반환 순서를
+        // 바꿀 때마다(플랜 변경 등) 5초 폴링 트리뷰의 노드 순서가 비결정적으로 흔들려, 사용자가
+        // 우클릭 컨텍스트 메뉴를 열려는 순간 항목이 이동해 엉뚱한 레인에 명령을 보낼 위험이 있다.
+        // 위치 ID → 그룹 ID → 게이트(레인) ID 순으로 정렬한다(2026-08-19 사용자 요청,
+        // SR_Speed_Client 트리뷰의 InsertNodeSorted와 동일하게 이름이 아닌 ID 기준).
+        val locations = locationRepository.findByUseYnTrueOrderByLocName().sortedBy { it.locId }
+        // GateGroupRepository.findAllByUseYnTrue()/GateDetailRepository.findAllForTree()는 JOIN FETCH로
         // location/group을 함께 읽어온다(둘 다 LAZY + open-in-view:false, 계획서 4.2절 대응).
-        val groupsByLoc = groupRepository.findAll().groupBy { it.location.locId }
+        val groupsByLoc = groupRepository.findAllByUseYnTrue().groupBy { it.location.locId }
         val detailsByGrp = detailRepository.findAllForTree().groupBy { it.group.grpId }
         // (dtlIp, dtlLaneNo) 복합키로 온라인 여부를 조회한다 — GateResetGridService와 동일한 이유로
         // dtlLaneNo만으로는 IP가 다른 두 장비의 상태가 서로 덮어써질 수 있다.
@@ -59,10 +67,10 @@ class GateTreeService(
 
         return locations.map { loc ->
             val groups = groupsByLoc[loc.locId].orEmpty()
-                .sortedBy { it.grpName }
+                .sortedBy { it.grpId }
                 .map { grp ->
                     val details = detailsByGrp[grp.grpId].orEmpty()
-                        .sortedBy { it.dtlLaneNo }
+                        .sortedBy { it.dtlId }
                         .map { d ->
                             GateTreeDetailNode(
                                 dtlId = requireNotNull(d.dtlId),

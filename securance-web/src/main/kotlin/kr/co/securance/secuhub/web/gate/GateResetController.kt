@@ -30,7 +30,7 @@ class GateResetGridService(
         val netStateByKey = netStateRepository.findByIdGrpId(grpId).associateBy { it.id.dtlIp to it.id.dtlLaneNo }
         // 관리(CRUD) 목록 화면이 아니므로 '사용=Y'·'분석=Y' 대상만 노출한다
         // (2026-08-20 "예외 없이 전체 목록 조회에 적용" 지시).
-        return detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(grpId).map { detail ->
+        return detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlId(grpId).map { detail ->
             GateResetRow(
                 dtlId = requireNotNull(detail.dtlId),
                 dtlLaneNo = detail.dtlLaneNo,

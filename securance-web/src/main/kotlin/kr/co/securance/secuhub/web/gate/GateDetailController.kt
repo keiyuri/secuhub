@@ -45,9 +45,9 @@ class GateDetailService(
         if (grpId == null) {
             emptyList()
         } else if (showInactive) {
-            detailRepository.findByGroup_GrpIdOrderByDtlLaneNo(grpId)
+            detailRepository.findByGroup_GrpIdOrderByDtlId(grpId)
         } else {
-            detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlLaneNo(grpId)
+            detailRepository.findByGroup_GrpIdAndUseYnTrueAndAnalysisYnTrueOrderByDtlId(grpId)
         }
 
     /**

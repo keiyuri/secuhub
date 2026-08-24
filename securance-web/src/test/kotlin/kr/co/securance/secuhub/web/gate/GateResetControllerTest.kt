@@ -1,5 +1,6 @@
 package kr.co.securance.secuhub.web.gate
 
+import kr.co.securance.secuhub.web.menu.MenuProvider
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyList
 import org.mockito.ArgumentMatchers.anyLong
@@ -46,7 +47,7 @@ class GateResetControllerTest {
     private lateinit var gateControlService: GateControlService
 
     @MockitoBean
-    private lateinit var menuProvider: kr.co.securance.secuhub.web.menu.MenuProvider
+    private lateinit var menuProvider: MenuProvider
 
     @Test
     @WithMockUser

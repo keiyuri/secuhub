@@ -19,9 +19,12 @@ import java.time.LocalDate
  * 조립 로직인데도 이전까지 테스트가 전혀 없었다(2026-08-25 소스 전수 검토 지적). `EventSearchFilterTest`와
  * 동일하게 `@DataJpaTest`로 실제 Specification을 실행해, 컬럼명 오타나 조건 누락이 있으면 즉시 실패하도록 한다.
  *
- * 같은 `report` 패키지의 `AccessReportControllerTest`가 두는 private `TestReportWebApp`
- * (`@SpringBootConfiguration`)과 충돌하지 않도록, `EventSearchFilterTest`와 동일하게
- * [TestJpaApplication]을 명시한다.
+ * 이 파일은 `web.control` 패키지에 있어 `web.report`의 `AccessReportControllerTest`/
+ * `TestReportWebApp`과는 애초에 패키지 상속 관계가 아니다(`@DataJpaTest`의 설정 탐색은 패키지
+ * 계층을 위로만 올라가고 형제 패키지는 보지 않는다) — `@ContextConfiguration` 없이도 충돌 없이
+ * `kr.co.securance.secuhub`(루트) 패키지의 [TestJpaApplication]을 그대로 찾을 것이다. 다만
+ * `EventSearchFilterTest`/`GateLogSearchFilterTest`와 동일한 패턴을 유지해 어느 패키지로 옮기더라도
+ * 안전하도록 명시적으로 선언해 둔다.
  */
 @DataJpaTest
 @ContextConfiguration(classes = [TestJpaApplication::class])

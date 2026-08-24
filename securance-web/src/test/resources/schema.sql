@@ -1,6 +1,7 @@
--- EventSearchFilterTest/LogSearchFilterTest(@DataJpaTest) 전용 최소 스키마.
+-- EventSearchFilterTest/LogSearchFilterTest/ControlHistoryFilterTest/GateLogSearchFilterTest
+-- (@DataJpaTest) 전용 최소 스키마.
 --
--- securance-domain/src/test/resources/schema.sql의 tb_data_rcv_anal 정의와 동일한 이유로
+-- securance-domain/src/test/resources/schema.sql의 동명 테이블 정의와 동일한 이유로
 -- (MariaDB VIRTUAL 생성 컬럼 등 H2로 그대로 이식하기 어려운 문법을 피해 엔티티가 매핑하는 컬럼만
 -- 최소 재현) 이 모듈에도 같은 테이블을 둔다 — 두 모듈이 별도로 컴파일되는 test source set이라
 -- 공유할 수 없다(운영 스키마 회귀 검증 목적이 아님에 주의).
@@ -8,6 +9,9 @@
 -- securance-domain 쪽 schema.sql만 갱신하고 이 파일은 빠뜨려 EventSearchFilterTest/
 -- LogSearchFilterTest가 SQLGrammarException(Column not found)으로 깨졌다 — 엔티티 컬럼을
 -- 추가/변경할 때는 이 파일도 함께 갱신해야 한다.
+-- ※ 2026-08-25: tb_data_snd/tb_gate_log를 추가하며 같은 사고가 실제로 재현됐다(정의를 빠뜨린 채
+-- 테스트부터 작성해 SQLGrammarException로 실패하는 것을 확인한 뒤 이 파일에 반영) — 위 경고가
+-- 여전히 유효함을 스스로 증명한 셈이다.
 CREATE TABLE tb_data_rcv_anal (
     anal_id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
     anal_date               VARCHAR(20) NOT NULL,
@@ -105,4 +109,51 @@ CREATE TABLE tb_data_rcv_anal (
     has_status_event        BOOLEAN NOT NULL DEFAULT FALSE,
     has_error_event         BOOLEAN NOT NULL DEFAULT FALSE,
     reg_date                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ControlHistoryFilterTest(@DataJpaTest) 전용 최소 스키마 — securance-domain/src/test/resources/
+-- schema.sql의 tb_data_snd 정의와 동일(위 안내와 같은 이유로 모듈 간 공유 불가).
+CREATE TABLE tb_data_snd (
+    snd_id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    snd_date        VARCHAR(20) NOT NULL,
+    snd_yn          VARCHAR(1)  NOT NULL DEFAULT 'N',
+    chk_yn          VARCHAR(1)  NOT NULL DEFAULT 'N',
+    next_attempt_at TIMESTAMP NULL,
+    dtl_ip          VARCHAR(20) NOT NULL,
+    dtl_lane_no     TINYINT     NOT NULL,
+    dtl_type        TINYINT     NOT NULL DEFAULT 1,
+    dtl_id          BIGINT      NOT NULL DEFAULT 0,
+    loc_id          BIGINT      NOT NULL DEFAULT 0,
+    grp_id          BIGINT      NOT NULL DEFAULT 0,
+    snd_user        VARCHAR(20) NOT NULL DEFAULT '',
+    snd_server      VARCHAR(20) NOT NULL DEFAULT '',
+    snd_type_cd     VARCHAR(20) NOT NULL DEFAULT '',
+    snd_data_tp     VARCHAR(20) NOT NULL DEFAULT '',
+    snd_raw         CLOB        NOT NULL,
+    snd_header      VARCHAR(100) NOT NULL DEFAULT '',
+    snd_data        CLOB        NOT NULL,
+    snd_tail        VARCHAR(20) NOT NULL DEFAULT '',
+    version         BIGINT      NOT NULL DEFAULT 0
+);
+
+-- GateLogSearchFilterTest(@DataJpaTest) 전용 최소 스키마 — securance-domain/src/test/resources/
+-- schema.sql의 tb_gate_log 정의와 동일(위 안내와 같은 이유로 모듈 간 공유 불가).
+CREATE TABLE tb_gate_log (
+    log_id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    dtl_ip          VARCHAR(20) NOT NULL,
+    dtl_lane_no     TINYINT     NOT NULL,
+    event_type      TINYINT     NOT NULL,
+    object_code     TINYINT     NOT NULL,
+    code            TINYINT     NOT NULL,
+    err_code        TINYINT     NOT NULL,
+    operation_mode  TINYINT     NOT NULL,
+    reader_type     TINYINT     NOT NULL,
+    reader_number   TINYINT     NOT NULL,
+    door_status     TINYINT     NOT NULL,
+    function_code   SMALLINT    NOT NULL,
+    event_time      TIMESTAMP   NOT NULL,
+    user_data1      VARCHAR(24) NULL,
+    user_data2      VARCHAR(16) NULL,
+    reg_date        TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_gate_log_natural UNIQUE (dtl_ip, dtl_lane_no, event_time, event_type, code, err_code, function_code)
 );

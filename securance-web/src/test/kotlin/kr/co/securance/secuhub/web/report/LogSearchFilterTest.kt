@@ -15,10 +15,11 @@ import org.springframework.test.context.TestPropertySource
 import java.time.LocalDate
 
 /**
- * [LogSearchFilter.toSpecification] 회귀 테스트 — [EventSearchFilterTest]와 동일한 버그
- * (`anal_type` 대신 `anal_tp`를 봐야 하는 "유형" 필터, 2026-08-14, `docs/작업일지.md` 0030 참고)를
- * #10 SR_F_ViewLog(통신/운영 로그 조회) 화면에서 재발 방지한다. `@ContextConfiguration` 사유는
- * [EventSearchFilterTest] KDoc 참고(같은 `report` 패키지의 `TestReportWebApp` 충돌 회피).
+ * [LogSearchFilter.toSpecification] 회귀 테스트(2026-08-25 소스 전수 검토 지적 — `/reports/logs`
+ * 화면은 이 클래스 KDoc이 직접 언급하는 두 건의 실제 조회 실패 버그(`docs/작업일지.md` 0030 참고:
+ * ①`descFireAlarm` 등 존재하지 않는 속성명으로 `Could not resolve attribute` 예외, ②`desc_*`가
+ * `NOT NULL DEFAULT ''`라 `isNotNull`이 죽은 코드였던 것)를 겪었는데도 이 필터 자체를 검증하는
+ * 테스트가 하나도 없었다 — 두 버그 모두 재발하면 이 테스트가 즉시 잡는다.
  */
 @DataJpaTest
 @ContextConfiguration(classes = [TestJpaApplication::class])
@@ -36,57 +37,80 @@ class LogSearchFilterTest {
     @Autowired
     private lateinit var repository: DataReceiveAnalysisRepository
 
-    /** [LogSearchFilter]는 desc_* 컬럼 중 하나라도 채워진 행만 조회한다(레거시 SelectGateLog와 동일).
-     * `descFireAlarm`은 `descGateStatus07`의 읽기 전용 별칭(getter)이라 생성자에는 원본 컬럼을 채운다. */
-    private fun sample(analTp: String) = DataReceiveAnalysis(
+    private fun sample(
+        analTp: String = "NOR",
+        dtlIp: String = "192.168.0.10",
+        descGateStatus07: String = "",
+    ) = DataReceiveAnalysis(
         analDate = "202608140000",
         analTp = analTp,
-        dtlIp = "192.168.0.10",
+        dtlIp = dtlIp,
         dtlLaneNo = 1,
         rcvDate = "202608140000",
-        descGateStatus07 = "화재 감지",
+        descGateStatus07 = descGateStatus07,
+    )
+
+    private fun search(filter: LogSearchFilter) =
+        repository.findAll(filter.toSpecification(), PageRequest.of(0, 10, Sort.by("analId")))
+
+    private fun defaultFilter(
+        locId: Long? = null,
+        grpId: Long? = null,
+        dtlIp: String? = null,
+        analType: String? = null,
+    ) = LogSearchFilter(
+        locId = locId,
+        grpId = grpId,
+        dtlIp = dtlIp,
+        analType = analType,
+        fromDate = LocalDate.of(2026, 8, 14),
+        toDate = LocalDate.of(2026, 8, 14),
     )
 
     @Test
-    fun `analType 필터는 anal_tp 컬럼으로 걸러낸다`() {
-        val nor = entityManager.persistAndFlush(sample(analTp = "NOR"))
-        entityManager.persistAndFlush(sample(analTp = "PLM")) // 필터 대상 밖 — 제외돼야 함
+    fun `desc 컬럼이 하나라도 채워진 행만 조회되고 전부 빈 행은 제외된다`() {
+        val described = entityManager.persistAndFlush(sample(descGateStatus07 = "화재감지"))
+        entityManager.persistAndFlush(sample(descGateStatus07 = "")) // 전체 desc_* 공란 — 제외돼야 함
         entityManager.clear()
 
-        val filter = LogSearchFilter(
-            analType = "NOR",
-            fromDate = LocalDate.of(2026, 8, 14),
-            toDate = LocalDate.of(2026, 8, 14),
-        )
-        val result = repository.findAll(filter.toSpecification(), PageRequest.of(0, 10, Sort.by("analId")))
+        val result = search(defaultFilter())
 
         assertEquals(1, result.totalElements)
-        assertEquals(nor.analId, result.content.single().analId)
+        assertEquals(described.analId, result.content.single().analId)
     }
 
     @Test
-    fun `desc_ 컬럼이 전부 빈 문자열인 행은 조회에서 제외한다`() {
-        // 회귀 방지: descFireAlarm 등 getter 별칭을 조건에 걸면 예외가 났고(엔티티 메타모델에
-        // 없는 속성), 실제 컬럼(descGateStatus07 등)을 걸어도 isNotNull이면 NOT NULL DEFAULT ''라
-        // 항상 참이라 이 필터가 사실상 죽어있었다 — 둘 다 실제로 걸러지는지 확인한다.
+    fun `analType 필터는 anal_type이 아니라 anal_tp 컬럼으로 걸러낸다`() {
+        val plm = entityManager.persistAndFlush(sample(analTp = "PLM", descGateStatus07 = "장애"))
+        entityManager.persistAndFlush(sample(analTp = "NOR", descGateStatus07 = "정상")) // 필터 대상 밖 — 제외돼야 함
+        entityManager.clear()
+
+        val result = search(defaultFilter(analType = "PLM"))
+
+        assertEquals(1, result.totalElements)
+        assertEquals(plm.analId, result.content.single().analId)
+    }
+
+    @Test
+    fun `dtlIp를 지정하면 해당 IP만 조회된다`() {
+        val target = entityManager.persistAndFlush(sample(dtlIp = "192.168.0.10", descGateStatus07 = "화재감지"))
+        entityManager.persistAndFlush(sample(dtlIp = "192.168.0.11", descGateStatus07 = "화재감지"))
+        entityManager.clear()
+
+        val result = search(defaultFilter(dtlIp = "192.168.0.10"))
+
+        assertEquals(1, result.totalElements)
+        assertEquals(target.analId, result.content.single().analId)
+    }
+
+    @Test
+    fun `기간 밖의 행은 desc가 채워져 있어도 제외된다`() {
         entityManager.persistAndFlush(
-            DataReceiveAnalysis(
-                analDate = "202608140000",
-                analTp = "NOR",
-                dtlIp = "192.168.0.10",
-                dtlLaneNo = 1,
-                rcvDate = "202608140000",
-                // desc_* 전부 기본값('')으로 남겨 "설명 없는 행"을 재현한다.
-            ),
+            sample(descGateStatus07 = "화재감지").apply { analDate = "202608130000" },
         )
         entityManager.clear()
 
-        val filter = LogSearchFilter(
-            analType = null,
-            fromDate = LocalDate.of(2026, 8, 14),
-            toDate = LocalDate.of(2026, 8, 14),
-        )
-        val result = repository.findAll(filter.toSpecification(), PageRequest.of(0, 10, Sort.by("analId")))
+        val result = search(defaultFilter())
 
         assertEquals(0, result.totalElements)
     }

@@ -65,7 +65,7 @@
             <div th:each="grp, iter : ${groups}"
                  class="group-marker"
                  th:attr="data-grp-id=${grp.grpId},data-grp-name=${grp.grpName}"
-                 th:styleappend="${grp.grpX != null ? ('left:' + (grp.grpX * 100.0 / location.locMapWidth) + '%;top:' + (grp.grpY * 100.0 / location.locMapHeight) + '%;') : ('left:' + (5 + iter.index * 8) + '%;top:8%;')}"
+                 th:styleappend="${grp.grpX != null and location.locMapWidth != null and location.locMapHeight != null ? ('left:' + (grp.grpX * 100.0 / location.locMapWidth) + '%;top:' + (grp.grpY * 100.0 / location.locMapHeight) + '%;') : ('left:' + (5 + iter.index * 8) + '%;top:8%;')}"
                  style="position:absolute; width:32px; height:32px; margin-left:-16px; margin-top:-16px;
                         border-radius:50%; background:#0d6efd; color:#fff; display:flex; align-items:center;
                         justify-content:center; font-size:.7rem; cursor:grab; box-shadow:0 1px 3px rgba(0,0,0,.4);"

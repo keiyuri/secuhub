@@ -221,10 +221,19 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
      *
      * GateDetail은 '사용'(useYn)과 '분석'(analysisYn) 컬럼을 모두 가지므로 둘 다 true인
      * 레인만 조회한다(GateLocation/GateGroup은 '분석' 컬럼이 없어 useYn만으로 필터한다).
+     *
+     * 정렬은 위치ID→그룹ID→게이트(레인) ID 순(2026-08-21 사용자 요청 — "게이트 목록의 표시
+     * 순서는 화면 어디서든 설치 위치 ID, 그룹 ID, 게이트 ID 순이어야 한다"; [findByLocation_LocIdAndUseYnTrue]
+     * 등 다른 게이트 목록 쿼리들과 동일 기준). `GateTreeController.buildTreeUncached()`가 결과를
+     * `.sortedBy { locId }`/`.sortedBy { grpId }`/`.sortedBy { dtlId }`로 다시 정렬하므로 이 쿼리의
+     * `ORDER BY`가 최종 화면 순서를 좌우하지는 않지만, 리포지토리 메서드 자체가 실제와 다른 정렬
+     * 기준(과거 `dtlLaneNo` — 등록 순서에 따라 게이트 ID 순서와 어긋날 수 있었다)을 이름에 걸고
+     * 있으면 다른 화면에서 이 메서드를 재사용할 때 오해를 부른다.
      */
     @Query(
         "select d from GateDetail d join fetch d.location join fetch d.group " +
-            "where d.useYn = true and d.analysisYn = true order by d.dtlLaneNo",
+            "where d.useYn = true and d.analysisYn = true " +
+            "order by d.location.locId, d.group.grpId, d.dtlId",
     )
     fun findAllForTree(): List<GateDetail>
 }

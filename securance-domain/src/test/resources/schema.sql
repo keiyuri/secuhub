@@ -174,3 +174,45 @@ CREATE TABLE tb_gate_log (
     reg_date        TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_gate_log_natural UNIQUE (dtl_ip, dtl_lane_no, event_time, event_type, code, err_code, function_code)
 );
+
+-- `GateDetailRepositoryFindAllForTreeTest`(@DataJpaTest) 전용 최소 스키마. [GateLocation]/[GateGroup]/
+-- [GateDetail] 엔티티가 매핑하는 컬럼만 재현한다(2026-08-25, findAllForTree()의 위치ID→그룹ID→
+-- 게이트ID 정렬 + 사용_분석 필터를 실제 JPA 프로바이더 위에서 검증하기 위함).
+CREATE TABLE tb_gate_loc (
+    loc_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    loc_nm      VARCHAR(200) NOT NULL,
+    use_yn      VARCHAR(1)  NOT NULL DEFAULT 'Y',
+    loc_x       INT NULL,
+    loc_y       INT NULL,
+    loc_map     VARCHAR(200) NULL,
+    loc_map_w   INT NULL,
+    loc_map_h   INT NULL,
+    reg_date    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    mod_date    TIMESTAMP NULL
+);
+
+CREATE TABLE tb_gate_grp (
+    grp_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    loc_id      BIGINT NOT NULL,
+    grp_nm      VARCHAR(200) NOT NULL,
+    lane_cnt    INT NOT NULL DEFAULT 1,
+    dtl_type    INT NOT NULL,
+    link_type   INT NOT NULL DEFAULT 1,
+    use_yn      VARCHAR(1) NOT NULL DEFAULT 'Y',
+    grp_x       INT NULL,
+    grp_y       INT NULL
+);
+
+CREATE TABLE tb_gate_dtl (
+    dtl_id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    loc_id          BIGINT NOT NULL,
+    grp_id          BIGINT NOT NULL,
+    dtl_ip          VARCHAR(20) NOT NULL,
+    dtl_lane_no     INT NOT NULL,
+    dtl_type        INT NOT NULL,
+    connect_type    INT NOT NULL DEFAULT 1,
+    dtl_nm          VARCHAR(200) NULL,
+    use_yn          VARCHAR(1) NOT NULL DEFAULT 'Y',
+    analysis_yn     VARCHAR(1) NOT NULL DEFAULT 'Y',
+    CONSTRAINT uq_gate_dtl_ip_lane UNIQUE (dtl_ip, dtl_lane_no)
+);

@@ -175,13 +175,15 @@ CREATE TABLE tb_gate_log (
     CONSTRAINT uk_gate_log_natural UNIQUE (dtl_ip, dtl_lane_no, event_time, event_type, code, err_code, function_code)
 );
 
--- `GateDetailRepositoryFindAllForTreeTest`(@DataJpaTest) 전용 최소 스키마. [GateLocation]/[GateGroup]/
--- [GateDetail] 엔티티가 매핑하는 컬럼만 재현한다(2026-08-25, findAllForTree()의 위치ID→그룹ID→
--- 게이트ID 정렬 + 사용_분석 필터를 실제 JPA 프로바이더 위에서 검증하기 위함).
+-- `GateDetailRepositoryFindAllForTreeTest`/`GateGroupRepositoryTest`(@DataJpaTest) 공용 최소 스키마.
+-- [GateLocation]/[GateGroup]/[GateDetail] 엔티티가 매핑하는 컬럼만 재현한다(2026-08-25, 두 테스트가
+-- 같은 테이블을 각자 필요한 범위만큼 나눠 검증한다 — findAllForTree()의 위치ID→그룹ID→게이트ID
+-- 정렬+사용_분석 필터, GateGroupRepository 각 메서드의 위치ID→그룹ID 정렬+사용여부 필터).
+-- use_yn류 컬럼은 [YnConverter] KDoc대로 CHAR(1)이 정확한 타입이다.
 CREATE TABLE tb_gate_loc (
     loc_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
     loc_nm      VARCHAR(200) NOT NULL,
-    use_yn      VARCHAR(1)  NOT NULL DEFAULT 'Y',
+    use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
     loc_x       INT NULL,
     loc_y       INT NULL,
     loc_map     VARCHAR(200) NULL,
@@ -198,9 +200,10 @@ CREATE TABLE tb_gate_grp (
     lane_cnt    INT NOT NULL DEFAULT 1,
     dtl_type    INT NOT NULL,
     link_type   INT NOT NULL DEFAULT 1,
-    use_yn      VARCHAR(1) NOT NULL DEFAULT 'Y',
+    use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
     grp_x       INT NULL,
-    grp_y       INT NULL
+    grp_y       INT NULL,
+    CONSTRAINT fk_gate_grp_loc FOREIGN KEY (loc_id) REFERENCES tb_gate_loc (loc_id)
 );
 
 CREATE TABLE tb_gate_dtl (

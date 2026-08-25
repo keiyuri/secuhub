@@ -139,6 +139,17 @@ data class GateDbWriteTask(
  * 재시작(및 그 지연)은 진짜 `VirtualMachineError`에만 쓰는 무거운 대응이다.
  * `CancellationException`은 어느 계층에서도 그대로 다시 던져 shutdown()에 의한 정상 종료를
  * 방해하지 않는다.
+ *
+ * **`ThreadDeath`도 실제로는 재전파돼야 했다(Codex 리뷰 지적, 2026-08-25 삼후속)**: 위 문단이
+ * "`ThreadDeath`는 [superviseShardWorker]에서도 잡지 않고 통과시킨다"고 적어놓고도, 정작
+ * [runShardWorker]의 `catch (ex: Throwable)`(`VirtualMachineError`가 아닌 그 외 Error 처리용)이
+ * `ThreadDeath`까지 함께 걸러 "이 작업만 최종 실패"로 삼키고 있었다 — `ThreadDeath`는
+ * `VirtualMachineError`의 하위 타입이 아니라 [runShardWorker]의 `VirtualMachineError` catch를
+ * 거치지 않고 그대로 아래 넓은 `catch (ex: Throwable)`로 떨어졌기 때문이다. 그 결과
+ * `Thread.stop()`(또는 명시적으로 던져진 `ThreadDeath`)으로 워커 스레드 종료를 요청해도 워커가
+ * 계속 살아남아 다음 작업을 처리하는, JVM 명세("`ThreadDeath`를 잡았다면 반드시 다시 던져야
+ * 한다")를 정면으로 어기는 회귀였다. [runShardWorker]에 `VirtualMachineError`와 나란히
+ * `catch (ex: ThreadDeath) { throw ex }`를 추가해 바로잡았다.
  */
 open class GateDbWriteQueue(
     private val shardCount: Int,
@@ -240,6 +251,15 @@ open class GateDbWriteQueue(
             } catch (ex: VirtualMachineError) {
                 // OutOfMemoryError/StackOverflowError 등 — 여기서 삼켜 다음 작업을 계속 처리하면
                 // 안 된다(클래스 KDoc 참고). superviseShardWorker가 워커 자체를 재시작한다.
+                throw ex
+            } catch (@Suppress("DEPRECATION") ex: ThreadDeath) {
+                // JVM 명세상 항상 다시 던져야 하는 유일한 예외(2026-08-25 Codex 리뷰 지적) — 아래
+                // `catch (ex: Throwable)`은 VirtualMachineError가 아닌 Error를 "이 작업만 최종
+                // 실패"로 삼켜 워커를 계속 돌리는데, ThreadDeath까지 여기 걸리면 Thread.stop() 등
+                // 스레드 종료 요청이 무시된 채 워커가 계속 살아남는다. VirtualMachineError와 동일하게
+                // 재전파해 superviseShardWorker(또는 그 상위)가 이 종료 신호를 그대로 받게 한다.
+                // `ThreadDeath` 자체가 Java 20부터 @Deprecated지만(향후 제거 예정), 남아있는 동안은
+                // JVM 명세("잡았다면 반드시 다시 던져야 한다")를 지켜야 하므로 타입 참조를 그대로 쓴다.
                 throw ex
             } catch (ex: Throwable) {
                 // VirtualMachineError가 아닌 Error(예: AssertionError, task.execute()가 직접 던진

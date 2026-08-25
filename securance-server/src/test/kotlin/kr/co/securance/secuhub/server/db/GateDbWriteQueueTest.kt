@@ -425,4 +425,45 @@ class GateDbWriteQueueTest {
             queue.shutdown()
         }
     }
+
+    /**
+     * `ThreadDeath`는 JVM 명세상 "잡았다면 반드시 다시 던져야 하는" 유일한 예외라, 다른 Error처럼
+     * "이 작업만 최종 실패로 처리하고 워커는 계속 동작"하는 것도, `VirtualMachineError`처럼 "잠시 뒤
+     * 재시작"하는 것도 허용되지 않는다 — 어느 쪽이든 종료 요청을 삼키는 셈이기 때문이다(Codex 리뷰
+     * 지적, 2026-08-25). 이 테스트는 `ThreadDeath` 이후 같은 샤드(파티션키)의 후속 작업이 재시작
+     * 지연(≈1초)을 넉넉히 넘는 시간 동안에도 처리되지 않는다는 것으로 "워커가 재시작 없이 그대로
+     * 종료된 채 남는다"를 고정한다 — 만약 `runShardWorker`의 `catch (ex: Throwable)`이 다시
+     * `ThreadDeath`까지 삼키는 회귀가 생기면, 다른 Error와 마찬가지로 후속 작업이 즉시(수백ms 내)
+     * 처리되어 이 테스트가 실패한다.
+     */
+    @Test
+    fun `ThreadDeath는 삼키지 않고 재전파해 워커가 재시작 없이 종료된 채로 남는다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val afterDeathDone = CountDownLatch(1)
+
+        @Suppress("DEPRECATION")
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "thread-death", operationName = "SPURIOUS_THREAD_DEATH") {
+                throw ThreadDeath()
+            },
+        )
+        Thread.sleep(200) // 위 작업이 처리되어 워커가 ThreadDeath를 마주칠 시간을 준다.
+
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "thread-death", operationName = "SHOULD_NOT_RUN") {
+                afterDeathDone.countDown()
+            },
+        )
+
+        try {
+            assertTrue(
+                !afterDeathDone.await(2, TimeUnit.SECONDS),
+                "ThreadDeath 발생 이후에도 같은 샤드의 후속 작업이 처리됐습니다 — ThreadDeath를 삼키고 " +
+                    "워커를 계속 사용하거나(다른 Error와 동일 취급) 재시작(VirtualMachineError와 동일 취급)하고 " +
+                    "있을 가능성이 있습니다 — 둘 다 ThreadDeath를 재전파해야 한다는 JVM 명세 위반입니다",
+            )
+        } finally {
+            queue.shutdown()
+        }
+    }
 }

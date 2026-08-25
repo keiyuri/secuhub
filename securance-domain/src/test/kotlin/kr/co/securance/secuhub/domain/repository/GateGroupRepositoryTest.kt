@@ -68,4 +68,36 @@ class GateGroupRepositoryTest {
 
         assertEquals(listOf(g2.grpId, g1Later.grpId), result.map { it.grpId })
     }
+
+    /** [GateGroupRepository.findAllByUseYnTrue]도 동일한 정렬 + '사용=Y' 필터를 지키는지 확인한다. */
+    @Test
+    fun `사용중인 그룹 전체 조회도 위치ID-그룹ID 순 정렬과 사용여부 필터를 함께 지킨다`() {
+        val locB = entityManager.persistAndFlush(GateLocation(locName = "위치B"))
+        val locA = entityManager.persistAndFlush(GateLocation(locName = "위치A"))
+
+        val activeInA = entityManager.persistAndFlush(group(locA, "A-사용중"))
+        val inactiveInB = entityManager.persistAndFlush(group(locB, "B-비활성").apply { useYn = false })
+        val activeInB = entityManager.persistAndFlush(group(locB, "B-사용중"))
+        entityManager.clear()
+
+        val result = repository.findAllByUseYnTrue()
+
+        assertEquals(listOf(activeInB.grpId, activeInA.grpId), result.map { it.grpId })
+        assertEquals(setOf(true), result.map { it.useYn }.toSet())
+        assert(result.none { it.grpId == inactiveInB.grpId })
+    }
+
+    /** [GateGroupRepository.findByLocation_LocIdAndUseYnTrue]도 정렬 + 사용여부 필터를 함께 지킨다. */
+    @Test
+    fun `위치별 사용중인 그룹 조회도 그룹ID 순 정렬과 사용여부 필터를 함께 지킨다`() {
+        val loc = entityManager.persistAndFlush(GateLocation(locName = "위치"))
+        val g2 = entityManager.persistAndFlush(group(loc, "그룹2"))
+        entityManager.persistAndFlush(group(loc, "비활성그룹").apply { useYn = false })
+        val g1Later = entityManager.persistAndFlush(group(loc, "그룹1"))
+        entityManager.clear()
+
+        val result = repository.findByLocation_LocIdAndUseYnTrue(requireNotNull(loc.locId))
+
+        assertEquals(listOf(g2.grpId, g1Later.grpId), result.map { it.grpId })
+    }
 }

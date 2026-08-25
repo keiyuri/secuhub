@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReferenceArray
 import kotlin.math.min
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -150,6 +151,21 @@ data class GateDbWriteTask(
  * 계속 살아남아 다음 작업을 처리하는, JVM 명세("`ThreadDeath`를 잡았다면 반드시 다시 던져야
  * 한다")를 정면으로 어기는 회귀였다. [runShardWorker]에 `VirtualMachineError`와 나란히
  * `catch (ex: ThreadDeath) { throw ex }`를 추가해 바로잡았다.
+ *
+ * **`ThreadDeath`도 채널 소비자를 잃지 않아야 한다(Codex 적대적 리뷰 지적, 2026-08-25 사후속)**:
+ * 위 수정은 [runShardWorker] 레벨의 삼킴은 고쳤지만, [superviseShardWorker]가 `VirtualMachineError`와
+ * 달리 `ThreadDeath`는 여전히 잡지 않고 그대로 통과시켰다 — "명세를 지킨다"는 점에서는 맞았지만,
+ * 그 결과 이 코루틴이 그대로 종료되며 [Channel] 소비자가 영구히 사라진다는 점은
+ * "샤드 워커 간 격리"/"같은 샤드 내 워커 생존" 문단이 `VirtualMachineError`에 대해 이미 고쳤던
+ * 것과 동일한 문제였다 — 이후 같은 샤드로 해시되는 모든 작업이 프로세스 재기동 전까지 조용히
+ * 드롭된다. `VirtualMachineError`처럼 **같은 코루틴 안에서 재시도**할 수는 없다(JVM 명세: 잡았다면
+ * 반드시 다시 던져야 하므로 "잡고 계속 진행"이 애초에 금지된다). 그래서 [superviseShardWorker]는
+ * `ThreadDeath`를 잡으면 ① 새 코루틴으로 **후임 [superviseShardWorker]를 먼저 띄워 채널 소비를
+ * 이어받게 하고**([activeWorkerJobs]에 등록해 [shutdown]이 추적할 수 있게 한다) ② 그런 뒤에야
+ * 원래의 `ThreadDeath`를 그대로 다시 던져 **이 코루틴 자신은 진짜로 종료**시킨다 — "명세를 지키며
+ * 죽는 것"과 "채널에 소비자가 비지 않는 것"을 동시에 만족한다. 후임 코루틴이 이어받는 시점에
+ * 이미 채널에서 소비된(=`ThreadDeath`의 원인이 된) 작업은 재시도되지 않고 유실된다(`VirtualMachineError`
+ * 재시작과 동일 — [runFallback]도 호출하지 않는다).
  */
 open class GateDbWriteQueue(
     private val shardCount: Int,
@@ -180,9 +196,17 @@ open class GateDbWriteQueue(
     }
     private val blockingDispatcher = blockingExecutor.asCoroutineDispatcher()
 
-    /** 샤드별 워커 코루틴 — 각각 [scope](SupervisorJob 보유)의 직접 자식으로 걸어 서로 격리한다(클래스 KDoc "샤드 워커 간 격리" 참고). */
-    private val workerJobs: List<Job> = shards.mapIndexed { index, shard ->
-        scope.launch { superviseShardWorker(index, shard) }
+    /**
+     * 샤드별 "현재" 감독 코루틴 — 각각 [scope](SupervisorJob 보유)의 직접 자식으로 걸어 서로
+     * 격리한다(클래스 KDoc "샤드 워커 간 격리" 참고). `ThreadDeath`를 만나면 [superviseShardWorker]가
+     * 후임 코루틴을 새로 띄우고 이 배열의 해당 슬롯을 그 후임으로 교체한다(클래스 KDoc "`ThreadDeath`도
+     * 채널 소비자를 잃지 않아야 한다" 참고) — 그래서 고정된 `List<Job>`이 아니라 교체 가능한
+     * [AtomicReferenceArray]로 추적해야 [shutdown]이 항상 "현재" 활성 코루틴을 취소할 수 있다.
+     */
+    private val activeWorkerJobs: AtomicReferenceArray<Job> = AtomicReferenceArray<Job>(shardCount).apply {
+        shards.forEachIndexed { index, shard ->
+            set(index, scope.launch { superviseShardWorker(index, shard) })
+        }
     }
 
     /** 작업을 파티션 큐에 넣는다. 큐가 가득 차면 드롭하고 카운터만 올린다(계획서 3.5절 방어적 설계). */
@@ -206,7 +230,12 @@ open class GateDbWriteQueue(
 
     fun shutdown() {
         shards.forEach { it.close() }
-        workerJobs.forEach { it.cancel() }
+        // activeWorkerJobs는 ThreadDeath 재시작으로 교체될 수 있어(클래스 KDoc 참고) 생성 시점의
+        // 고정 목록이 아니라 "지금 이 순간" 각 슬롯이 가리키는 코루틴을 취소한다 — 고정 목록을
+        // 취소했다면 ThreadDeath 이후 새로 띄운 후임 코루틴은 취소되지 않고 남아있게 된다.
+        for (i in 0 until shardCount) {
+            activeWorkerJobs.get(i).cancel()
+        }
         // graceful shutdown: 이미 blockingExecutor에서 돌고 있는 블로킹 호출을 강제 인터럽트하지 않는다
         // (표준 Socket.read()는 인터럽트에 반응하지 않으므로 효과도 없다) — JDBC 소켓 타임아웃이
         // 각 스레드를 알아서 정리해줄 때까지 기다리게 둔다.
@@ -216,7 +245,11 @@ open class GateDbWriteQueue(
     /**
      * [runShardWorker]를 감독한다 — `VirtualMachineError`로 죽으면 새 코루틴으로 재시작해 채널
      * 소비자를 복구한다(클래스 KDoc "`VirtualMachineError`는 '작업 실패'로 삼키지 않는다" 참고).
-     * `ThreadDeath`는 JVM 명세상 항상 다시 던져야 하므로 여기서도 잡지 않고 그대로 통과시킨다.
+     *
+     * `ThreadDeath`는 JVM 명세상 이 함수 자신은 반드시 다시 던져 종료돼야 하므로 `VirtualMachineError`
+     * 처럼 "같은 코루틴에서 재시도"할 수는 없다 — 대신 다시 던지기 **전에** 후임 코루틴을 새로 띄워
+     * 채널 소비가 끊기지 않게 한 뒤에야 종료한다(클래스 KDoc "`ThreadDeath`도 채널 소비자를 잃지
+     * 않아야 한다" 참고).
      */
     private suspend fun superviseShardWorker(shardIndex: Int, shard: Channel<GateDbWriteTask>) {
         while (true) {
@@ -236,6 +269,21 @@ open class GateDbWriteQueue(
                 // 무한정 소모되는 것을 막는다. 재시작 자체를 포기하지는 않는다 — 채널에 소비자가
                 // 아예 없는 것보다는(=그 샤드로 라우팅되는 모든 이후 작업이 드롭됨) 낫다는 판단이다.
                 delay(SHARD_WORKER_RESTART_DELAY)
+            } catch (@Suppress("DEPRECATION") ex: ThreadDeath) {
+                logger.error(
+                    "샤드 워커가 ThreadDeath로 종료됩니다(shard={}) — 이 코루틴 자신은 JVM 명세대로 " +
+                        "다시 던져 그대로 종료시키되, 채널 소비자가 비지 않도록 후임 코루틴을 먼저 띄워 " +
+                        "이어받게 합니다. 직전 작업 결과는 신뢰할 수 없어 유실 처리합니다(Codex 적대적 " +
+                        "리뷰 지적, 2026-08-25).",
+                    shardIndex, ex,
+                )
+                // 후임을 먼저 띄우고 activeWorkerJobs에 등록해 shutdown()이 추적할 수 있게 한 뒤에야
+                // ThreadDeath를 다시 던진다 — "잡았다면 다시 던져야 한다"는 명세와 "채널에 소비자가
+                // 비는 순간이 없어야 한다"를 함께 만족한다. VirtualMachineError처럼 지연을 두지 않는
+                // 이유: ThreadDeath는 보통 일회성 종료 요청(Thread.stop() 등)이지 반복되는 JVM
+                // 불안정 신호가 아니라, 크래시 루프 억제보다 소비자 복구를 즉시 하는 쪽이 낫다.
+                activeWorkerJobs.set(shardIndex, scope.launch { superviseShardWorker(shardIndex, shard) })
+                throw ex
             }
         }
     }

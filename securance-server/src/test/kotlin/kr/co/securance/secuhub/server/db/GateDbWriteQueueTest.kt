@@ -338,15 +338,27 @@ class GateDbWriteQueueTest {
      * `Error`를 그대로 밖으로 흘리면 형제 샤드는 [scope](SupervisorJob)로 격리돼 살아남지만,
      * 정작 그 `Error`를 던진 **자기 자신의 샤드 워커 코루틴**은 영구 종료된다 — 이후 같은 샤드로
      * 라우팅되는 모든 작업(같은 디바이스뿐 아니라 해시가 같은 다른 디바이스도 포함)이 소비자
-     * 없는 채널에 쌓이다 드롭된다. [processTask]를 [runShardWorker]의 `catch (ex: Throwable)`로
-     * 감싸 이 작업 하나만 최종 실패 처리하고 `for` 루프는 계속 돌게 고쳤다.
+     * 없는 채널에 쌓이다 드롭된다.
+     *
+     * 이 테스트는 `OutOfMemoryError`([VirtualMachineError])로 재현하는데, 첫 수정
+     * (`processTask`를 `catch (ex: Throwable)`로 감싸 워커를 살리는 방식)은 Codex 적대적 리뷰가
+     * 지적했듯 진짜 JVM 치명적 오류까지 "이 작업만 실패했을 뿐"인 것처럼 삼키고 곧장 다음 작업을
+     * 처리해 손상된 JVM 상태로 DB 쓰기를 계속 시도하는 위험이 있었다. 지금은
+     * [GateDbWriteQueue.superviseShardWorker]가 `VirtualMachineError`를 잡아 **워커 코루틴 자체를
+     * 재시작**하는 방식으로 바뀌었다 — 죽은 척하지 않고 실제로 죽은 뒤, `SHARD_WORKER_RESTART_DELAY`
+     * (≈1초) 지연을 두고 새로 태어난 워커가 다음 작업부터 이어받는다. "같은 샤드가 살아남는다"는
+     * 결과뿐 아니라 이 지연이 실제로 있었는지(=재시작 경로를 탔는지, 이전처럼 같은 코루틴이
+     * catch 후 즉시 이어받은 게 아닌지)까지 최소 소요 시간으로 함께 고정한다 — 재시작 지연 없이
+     * 즉시 처리되는 경우와의 구분은 아래 "VirtualMachineError가 아닌 Error는 워커를 재시작하지
+     * 않고 즉시 처리한다" 테스트가 대조군 역할을 한다.
      */
     @Test
-    fun `한 샤드에서 Error가 발생해도 같은 샤드가 이후 작업을 계속 처리한다`() {
+    fun `한 샤드에서 Error가 발생해도 같은 샤드가 재시작 지연 후 이후 작업을 계속 처리한다`() {
         val queue = GateDbWriteQueue(shardCount = 1)
         val afterErrorDone = CountDownLatch(1)
 
-        // 이 샤드(유일한 샤드)의 워커를 Error로 죽이려 시도한다.
+        // 이 샤드(유일한 샤드)의 워커를 VirtualMachineError로 죽이려 시도한다.
+        val beforeError = System.nanoTime()
         queue.enqueue(
             GateDbWriteTask(partitionKey = "same-shard-error", operationName = "SPURIOUS_ERROR") {
                 throw OutOfMemoryError("같은 샤드 생존 재현용 — 실제 OOM이 아니라 의도적으로 던진 것")
@@ -354,8 +366,8 @@ class GateDbWriteQueueTest {
         )
         Thread.sleep(200) // 위 작업이 처리되어 워커가 Error를 마주칠 시간을 준다.
 
-        // 같은 샤드(같은 파티션키)로 뒤이어 들어온 정상 작업도 여전히 처리돼야 한다 — 워커가
-        // 죽어버렸다면 이 작업은 채널에 그대로 쌓인 채 영원히 실행되지 않는다.
+        // 같은 샤드(같은 파티션키)로 뒤이어 들어온 정상 작업도 (재시작된 워커에 의해) 결국
+        // 처리돼야 한다 — 워커가 영구 종료됐다면 이 작업은 채널에 그대로 쌓인 채 실행되지 않는다.
         queue.enqueue(
             GateDbWriteTask(partitionKey = "same-shard-error", operationName = "SHOULD_STILL_RUN_AFTER_ERROR") {
                 afterErrorDone.countDown()
@@ -366,6 +378,48 @@ class GateDbWriteQueueTest {
             assertTrue(
                 afterErrorDone.await(3, TimeUnit.SECONDS),
                 "Error 발생 이후 같은 샤드의 후속 작업이 처리되지 않았습니다 — 워커가 영구 종료됐을 가능성이 있습니다",
+            )
+            val elapsedMs = (System.nanoTime() - beforeError) / 1_000_000
+            assertTrue(
+                elapsedMs >= 900,
+                "후속 작업이 재시작 지연(≈1초) 없이 ${elapsedMs}ms 만에 처리됐습니다 — VirtualMachineError를 " +
+                    "재시작 없이 같은 코루틴에서 곧장 삼키고 있을 가능성이 있습니다(대안 강등)",
+            )
+        } finally {
+            queue.shutdown()
+        }
+    }
+
+    /**
+     * `VirtualMachineError`가 아닌 그 외 `Throwable`(예: `AssertionError`)은 JVM 자체의 건전성과
+     * 무관하므로, 워커를 재시작(`SHARD_WORKER_RESTART_DELAY`≈1초 지연)하지 않고 같은 코루틴이
+     * 즉시 다음 작업을 처리해야 한다(클래스 KDoc "`VirtualMachineError`는 '작업 실패'로 삼키지
+     * 않는다" 참고 — 재시작은 진짜 `VirtualMachineError`에만 쓰는 무거운 대응이다). 재시작 지연이
+     * 있었다면 이 테스트는 500ms 안에 완료되지 못했을 것이다 — 두 Error 처리 경로가 실제로
+     * 분기됨을 고정한다.
+     */
+    @Test
+    fun `VirtualMachineError가 아닌 Error는 워커를 재시작하지 않고 즉시 처리한다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val afterErrorDone = CountDownLatch(1)
+
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "non-fatal-error", operationName = "SPURIOUS_ASSERTION_ERROR") {
+                throw AssertionError("VM 치명적이지 않은 Error 재현용")
+            },
+        )
+
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "non-fatal-error", operationName = "SHOULD_RUN_IMMEDIATELY") {
+                afterErrorDone.countDown()
+            },
+        )
+
+        try {
+            assertTrue(
+                afterErrorDone.await(500, TimeUnit.MILLISECONDS),
+                "VirtualMachineError가 아닌 Error 이후 후속 작업이 500ms 안에 처리되지 않았습니다 — " +
+                    "불필요하게 워커가 재시작(지연)되고 있을 가능성이 있습니다",
             )
         } finally {
             queue.shutdown()

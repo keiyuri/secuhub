@@ -83,20 +83,6 @@ class QueuedGateControlService(
         return GateControlResult.QUEUED
     }
 
-    /**
-     * 레거시 `snd_data_tp` 문자열을 채운다(`RESET_MOTOR` 등).
-     * 신규 코드는 이 값을 파싱하지 않지만, 레거시 리포트/화면이 이 컬럼을 읽으므로 값을 남긴다.
-     */
-    private fun legacyDataTypeOf(request: GateControlRequest): String {
-        val category = GateFaultCategory.of(request.command) ?: return "CONTROL"
-        return when (category) {
-            GateFaultCategory.ALL -> "RESET_GATE"
-            GateFaultCategory.SENSOR -> "RESET_OPER"
-            GateFaultCategory.MOTOR -> "RESET_MOTOR"
-            GateFaultCategory.FIRE -> "RESET_FIRE"
-        }
-    }
-
     companion object {
         /** `tb_data_snd.snd_date` — 스키마 주석 규정 포맷(초 단위). */
         private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")

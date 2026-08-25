@@ -54,6 +54,30 @@ enum class GateControlResult {
 }
 
 /**
+ * 레거시 `tb_data_snd.snd_data_tp` 문자열을 채운다(`RESET_MOTOR` 등).
+ * 신규 코드는 이 값을 파싱하지 않지만, 레거시 리포트/화면이 이 컬럼을 읽으므로 값을 남긴다.
+ * DIRECT/QUEUED 두 [GateControlService] 구현이 동일하게 채워야 하는 값이라 여기 공유해 둔다.
+ */
+fun legacyDataTypeOf(request: GateControlRequest): String {
+    val category = GateFaultCategory.of(request.command) ?: return "CONTROL"
+    return when (category) {
+        GateFaultCategory.ALL -> "RESET_GATE"
+        GateFaultCategory.SENSOR -> "RESET_OPER"
+        GateFaultCategory.MOTOR -> "RESET_MOTOR"
+        GateFaultCategory.FIRE -> "RESET_FIRE"
+    }
+}
+
+/**
+ * `tb_data_snd.snd_server` 기본값 — 다중 인스턴스 배포 시 어느 서버가 보냈는지 구분하는 용도.
+ * [DirectGateControlService](즉시 전송)와 [GateControlDispatcher](QUEUED 선점 시)가 동일한 값을
+ * 써야 인스턴스 추적이 일관되므로 여기 하나로 공유한다.
+ */
+val localServerId: String by lazy {
+    runCatching { java.net.InetAddress.getLocalHost().hostAddress }.getOrDefault("unknown")
+}
+
+/**
  * 게이트 제어 명령 발행 진입점(계획서 5.5절).
  *
  * 전송 방식(`securance.control.dispatch-mode`)에 따라 구현이 갈린다.

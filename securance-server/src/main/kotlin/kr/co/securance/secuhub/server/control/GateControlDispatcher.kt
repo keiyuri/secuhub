@@ -379,7 +379,7 @@ class GateControlDispatcher(
             // 내려가 실제 소켓 write를 수행한다. 이전에는 먼저 보내고 나중에 낙관적 잠금으로
             // 저장했는데, 그때는 이미 두 인스턴스 모두 전송을 마친 뒤라 경합이 드러나도 중복
             // 물리 전송 자체를 막을 수 없었다.
-            val claimed = dataSendRepository.claimForSend(sndId, command.version, LOCAL_SERVER)
+            val claimed = dataSendRepository.claimForSend(sndId, command.version, localServerId)
             if (claimed == 0) {
                 logger.info(
                     "게이트[{}] 레인 {} 제어 명령 선점 실패(다른 인스턴스가 먼저 처리했거나 같은 레인에 " +
@@ -444,10 +444,6 @@ class GateControlDispatcher(
         }
 
     companion object {
-        /** `snd_server` 기본값 — 다중 인스턴스 배포 시 어느 서버가 보냈는지 구분하는 용도. */
-        private val LOCAL_SERVER: String =
-            runCatching { java.net.InetAddress.getLocalHost().hostAddress }.getOrDefault("unknown")
-
         /** `tb_data_snd.snd_date` 포맷 — [QueuedGateControlService]/[DirectGateControlService]와 동일. */
         private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
     }

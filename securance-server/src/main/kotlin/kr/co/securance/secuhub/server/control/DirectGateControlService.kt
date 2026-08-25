@@ -3,6 +3,7 @@ package kr.co.securance.secuhub.server.control
 import kr.co.securance.secuhub.common.util.HexCodec
 import kr.co.securance.secuhub.domain.entity.DataSend
 import kr.co.securance.secuhub.domain.repository.DataSendRepository
+import kr.co.securance.secuhub.protocol.SpeedGateProtocolConstants
 import kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl
 import kr.co.securance.secuhub.server.db.GateDbWriteQueue
 import kr.co.securance.secuhub.server.db.GateDbWriteTask
@@ -69,11 +70,22 @@ class DirectGateControlService(
         }
     }
 
-    /** 전송 성공/거부 여부와 무관하게 이력을 남긴다 — 거부된 명령도 감사 대상이다. */
+    /**
+     * 전송 성공/거부 여부와 무관하게 이력을 남긴다 — 거부된 명령도 감사 대상이다.
+     *
+     * (2026-08-25 확인) `sndHeader`/`sndData`/`sndTail`/`sndDataTp`는 [QueuedGateControlService]는
+     * 채우지만 이 클래스는 매핑이 빠져 있어 DIRECT 모드로 보낸 명령은 `tb_data_snd`의 해당
+     * 컬럼이 항상 빈 문자열로 저장되고 있었다 — 두 구현이 동일한 패킷 분할 로직을 갖도록 맞췄다.
+     * `sndServer`도 마찬가지로 [GateControlDispatcher]는 [DataSendRepository.claimForSend] 시점에
+     * 채우지만 DIRECT는 그 경로를 타지 않아 항상 빈 문자열이었다 — 같은 인스턴스가 즉시 전송을
+     * 수행하므로 [localServerId]를 그대로 채운다.
+     */
     private fun recordHistory(request: GateControlRequest, packet: ByteArray, accepted: Boolean) {
         val sndDate = LocalDateTime.now().format(SEND_DATE_FORMAT)
         val hex = HexCodec.toHex(packet)
         val laneInfo = registry.findConnection(request.dtlIp)?.laneInfoOf(request.dtlLaneNo)
+        val headerEnd = SpeedGateProtocolConstants.HEADER_LENGTH
+        val tailStart = packet.size - SpeedGateProtocolConstants.TAIL_LENGTH
 
         dbWriteQueue.enqueue(
             GateDbWriteTask(
@@ -93,8 +105,13 @@ class DirectGateControlService(
                         locId = laneInfo?.locId ?: 0,
                         grpId = laneInfo?.grpId ?: 0,
                         sndUser = request.requestedBy ?: "SYSTEM",
+                        sndServer = localServerId,
                         sndTypeCd = request.command.legacyCode,
+                        sndDataTp = legacyDataTypeOf(request),
                         sndRaw = hex,
+                        sndHeader = HexCodec.toHex(packet.copyOfRange(0, headerEnd)),
+                        sndData = HexCodec.toHex(packet.copyOfRange(headerEnd, tailStart)),
+                        sndTail = HexCodec.toHex(packet.copyOfRange(tailStart, packet.size)),
                     ),
                 )
                 Unit

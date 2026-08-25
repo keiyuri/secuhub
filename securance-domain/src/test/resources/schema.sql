@@ -174,3 +174,31 @@ CREATE TABLE tb_gate_log (
     reg_date        TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_gate_log_natural UNIQUE (dtl_ip, dtl_lane_no, event_time, event_type, code, err_code, function_code)
 );
+
+-- `GateGroupRepositoryTest`(@DataJpaTest) 전용 최소 스키마 — [GateGroup]/[GateLocation]이
+-- 매핑하는 컬럼만 재현한다(운영 DDL은 V1__init_schema.sql 참고, 100% 동일하지 않음에 주의).
+CREATE TABLE tb_gate_loc (
+    loc_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    loc_nm      VARCHAR(200) NOT NULL,
+    use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
+    loc_x       INT NULL,
+    loc_y       INT NULL,
+    loc_map     VARCHAR(200) NULL,
+    loc_map_w   INT NULL,
+    loc_map_h   INT NULL,
+    reg_date    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    mod_date    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tb_gate_grp (
+    grp_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    loc_id      BIGINT NOT NULL,
+    grp_nm      VARCHAR(200) NOT NULL,
+    lane_cnt    TINYINT NOT NULL DEFAULT 1,
+    dtl_type    TINYINT NOT NULL,
+    link_type   TINYINT NOT NULL DEFAULT 1,
+    use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
+    grp_x       INT NULL,
+    grp_y       INT NULL,
+    CONSTRAINT fk_gate_grp_loc FOREIGN KEY (loc_id) REFERENCES tb_gate_loc (loc_id)
+);

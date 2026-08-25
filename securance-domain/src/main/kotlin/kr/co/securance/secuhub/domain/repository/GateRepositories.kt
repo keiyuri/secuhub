@@ -36,14 +36,15 @@ interface GateGroupRepository : JpaRepository<GateGroup, Long> {
     // Opus 전체 리뷰 지적: GateGroup.location은 LAZY고 open-in-view: false라, 단순 파생 쿼리로
     // 가져온 뒤 컨트롤러 메서드(트랜잭션 범위) 밖인 뷰 렌더링 단계에서 grp.location.locName을
     // 읽으면 LazyInitializationException이 난다. JOIN FETCH로 쿼리 시점에 함께 로딩한다.
-    @Query("select g from GateGroup g join fetch g.location where g.location.locId = :locId")
+    // 정렬은 위치ID(loc_id) → 그룹ID(grp_id) 순(2026-08-25 "설치위치ID→그룹ID 순 정렬" 요청).
+    @Query("select g from GateGroup g join fetch g.location where g.location.locId = :locId order by g.location.locId, g.grpId")
     fun findByLocation_LocId(locId: Long): List<GateGroup>
 
-    @Query("select g from GateGroup g join fetch g.location")
+    @Query("select g from GateGroup g join fetch g.location order by g.location.locId, g.grpId")
     override fun findAll(): List<GateGroup>
 
     /** 대시보드 트리뷰 전체 조회 — GateGroup도 '분석' 컬럼이 없으므로 '사용'(useYn)만으로 필터한다. */
-    @Query("select g from GateGroup g join fetch g.location where g.useYn = true")
+    @Query("select g from GateGroup g join fetch g.location where g.useYn = true order by g.location.locId, g.grpId")
     fun findAllByUseYnTrue(): List<GateGroup>
 
     /**
@@ -51,7 +52,7 @@ interface GateGroupRepository : JpaRepository<GateGroup, Long> {
      * '분석' 컬럼이 없으므로 '사용'(useYn)만으로 필터한다(2026-08-20 "예외 없이 전체 목록 조회에
      * 적용" 지시, 단 위치/그룹/사용자 관리 화면 자체는 사용자 확인에 따라 제외).
      */
-    @Query("select g from GateGroup g join fetch g.location where g.location.locId = :locId and g.useYn = true")
+    @Query("select g from GateGroup g join fetch g.location where g.location.locId = :locId and g.useYn = true order by g.location.locId, g.grpId")
     fun findByLocation_LocIdAndUseYnTrue(@Param("locId") locId: Long): List<GateGroup>
 
     /**

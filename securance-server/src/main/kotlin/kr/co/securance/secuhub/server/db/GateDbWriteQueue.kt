@@ -92,6 +92,20 @@ data class GateDbWriteTask(
  * `GateConnectionRegistryImpl`, `DirectGateControlService`)는 대부분 자체적으로 재수신/재조회 시
  * 자연 복구되거나(멱등 UPSERT, net_state는 다음 상태 패킷이 갱신) 손실 허용 범위로 판단해 그대로
  * 두었고, `OprStatusPersister`(통행량 집계, codex 적대적 리뷰 지적)만 이 콜백을 채워 넣는다.
+ *
+ * **샤드 워커 간 격리(2026-08-25 소스 전수 검토 지적)**: [runShardWorker]는 `task.execute()`가
+ * 흘린 일반 `Exception`은 전부 삼켜 재시도한다(아래 `catch (ex: Exception)`). 다만 그 catch가
+ * 잡지 못하는 `Throwable`(`Exception`이 아닌 `Error` — 예: `OutOfMemoryError`,
+ * `StackOverflowError`, 또는 `task.execute()`가 직접 `throw`한 임의의 `Error`)이 새어 나오면
+ * 이야기가 다르다. [workerJobs]의 각 샤드 워커는 [scope](`SupervisorJob` 보유)의 **직접** 자식으로
+ * `launch`해야 한다 — `scope.launch { shards.forEach { launch { ... } } }`처럼 한 단계 감싸면
+ * 실제 샤드 워커들은 그 감싸는 평범한(non-supervisor) Job의 자식이 되고, 이런 `Error`가 그
+ * 감싸는 Job을 실패시켜 형제 샤드 워커 전부가 함께 취소된다 — **DB 쓰기 파이프라인 전체가
+ * 재기동 없이 조용히 멈춘다**. [scope]에 직접 걸어야 `SupervisorJob`의 격리가 실제로 적용되어
+ * 한 샤드의 실패가 다른 샤드를 끌고 내려가지 않는다. (참고: `CancellationException`은 이
+ * 문제와 무관하다 — 자식 코루틴이 `CancellationException`으로 완료되는 것은 Kotlin
+ * 구조적 동시성에서 "그 자식이 정상적으로 취소됨"으로 취급되어 부모/형제에게 실패로
+ * 전파되지 않는다. `GateDbWriteQueueTest`의 격리 회귀 테스트가 `Error`로 이를 재현·고정한다.)
  */
 open class GateDbWriteQueue(
     private val shardCount: Int,
@@ -122,10 +136,9 @@ open class GateDbWriteQueue(
     }
     private val blockingDispatcher = blockingExecutor.asCoroutineDispatcher()
 
-    private val workerJob: Job = scope.launch {
-        shards.forEachIndexed { index, shard ->
-            launch { runShardWorker(index, shard) }
-        }
+    /** 샤드별 워커 코루틴 — 각각 [scope](SupervisorJob 보유)의 직접 자식으로 걸어 서로 격리한다(클래스 KDoc "샤드 워커 간 격리" 참고). */
+    private val workerJobs: List<Job> = shards.mapIndexed { index, shard ->
+        scope.launch { runShardWorker(index, shard) }
     }
 
     /** 작업을 파티션 큐에 넣는다. 큐가 가득 차면 드롭하고 카운터만 올린다(계획서 3.5절 방어적 설계). */
@@ -149,7 +162,7 @@ open class GateDbWriteQueue(
 
     fun shutdown() {
         shards.forEach { it.close() }
-        workerJob.cancel()
+        workerJobs.forEach { it.cancel() }
         // graceful shutdown: 이미 blockingExecutor에서 돌고 있는 블로킹 호출을 강제 인터럽트하지 않는다
         // (표준 Socket.read()는 인터럽트에 반응하지 않으므로 효과도 없다) — JDBC 소켓 타임아웃이
         // 각 스레드를 알아서 정리해줄 때까지 기다리게 둔다.
@@ -179,7 +192,7 @@ open class GateDbWriteQueue(
                     )
                     logLateCompletion(execution, shardIndex, task)
                 } catch (ex: CancellationException) {
-                    // shutdown()/workerJob.cancel()로 인한 진짜 취소 — 작업 실패로 삼켜 재시도하면
+                    // shutdown()/workerJobs 개별 cancel()로 인한 진짜 취소 — 작업 실패로 삼켜 재시도하면
                     // 코루틴이 취소된 상태로 계속 루프를 도는 구조적 동시성 위반이 된다. 그대로 전파한다.
                     throw ex
                 } catch (ex: Exception) {

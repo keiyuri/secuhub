@@ -511,4 +511,149 @@ class GateDbWriteQueueTest {
             queue.shutdown()
         }
     }
+
+    /**
+     * VirtualMachineError/ThreadDeath fallback 회귀 테스트(Opus 재검토 지적, 2026-08-25 칠후속) —
+     * [GateDbWriteQueue.runShardWorker]가 `VirtualMachineError`/`ThreadDeath`를 재전파하기 전
+     * `runFallback`을 호출하지 않던 예전 구현에서는, 이 작업의 `onDropOrFinalFailure`(예:
+     * `GatePacketPersister.enqueueReceiveInsert`의 `CompletableDeferred.complete(null)`)가 전혀
+     * 실행되지 않아 그 완료를 기다리는 다운스트림이 자체 타임아웃(수 초~수십 초)만큼 스톨했다.
+     * 이 테스트는 `onDropOrFinalFailure`가 (다음 작업을 기다릴 필요 없이) 즉시 호출되는지로 그
+     * 회귀를 고정한다.
+     */
+    @Test
+    fun `VirtualMachineError로 워커가 재시작될 때도 onDropOrFinalFailure가 즉시 호출된다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val fallbackCalled = CountDownLatch(1)
+
+        queue.enqueue(
+            GateDbWriteTask(
+                partitionKey = "vme-fallback",
+                operationName = "SPURIOUS_OOM_WITH_FALLBACK",
+                onDropOrFinalFailure = { fallbackCalled.countDown() },
+            ) {
+                throw OutOfMemoryError("VME fallback 재현용 — 실제 OOM이 아니라 의도적으로 던진 것")
+            },
+        )
+
+        try {
+            assertTrue(
+                fallbackCalled.await(2, TimeUnit.SECONDS),
+                "VirtualMachineError로 작업이 유실됐는데도 onDropOrFinalFailure가 호출되지 않았습니다 — " +
+                    "다운스트림(rcv_id Deferred 등)이 타임아웃까지 스톨할 수 있습니다",
+            )
+        } finally {
+            queue.shutdown()
+        }
+    }
+
+    /** 위와 동일한 회귀를 `ThreadDeath` 경로에 대해서도 고정한다. */
+    @Test
+    fun `ThreadDeath로 워커가 종료될 때도 onDropOrFinalFailure가 즉시 호출된다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val fallbackCalled = CountDownLatch(1)
+
+        @Suppress("DEPRECATION")
+        queue.enqueue(
+            GateDbWriteTask(
+                partitionKey = "threaddeath-fallback",
+                operationName = "SPURIOUS_THREAD_DEATH_WITH_FALLBACK",
+                onDropOrFinalFailure = { fallbackCalled.countDown() },
+            ) {
+                throw ThreadDeath()
+            },
+        )
+
+        try {
+            assertTrue(
+                fallbackCalled.await(2, TimeUnit.SECONDS),
+                "ThreadDeath로 작업이 유실됐는데도 onDropOrFinalFailure가 호출되지 않았습니다 — " +
+                    "다운스트림(rcv_id Deferred 등)이 타임아웃까지 스톨할 수 있습니다",
+            )
+        } finally {
+            queue.shutdown()
+        }
+    }
+
+    /**
+     * `task.execute()`가 직접 던진 `CancellationException` 회귀 테스트(Opus 재검토 지적,
+     * 2026-08-25 칠후속) — `task.execute()`는 호출부가 채우는 임의의 코드라, 진짜 취소 신호 없이도
+     * `CancellationException`을 스스로 던질 수 있다(예: 내부에서 이미 취소된 다른 `Deferred`를
+     * `await()`하는 경우). 이런 `CancellationException`은 `scope.async`의 자식 코루틴이 "정상
+     * 취소"로 완료된 것으로 구조적 동시성상 부모에게 실패로 전파되지 않으므로, 워커 코루틴
+     * 자신은 여전히 active다 — 그런데도 타입만 보고 무조건 재전파하면 이 샤드의 워커가 후임 없이
+     * 영구 종료된다. `currentCoroutineContext().ensureActive()`로 재확인해, 진짜 취소가 아니면
+     * 이번 시도만 실패로 간주하고 재시도해야 한다.
+     */
+    @Test
+    fun `task가 직접 던진 CancellationException은 진짜 취소로 오인하지 않고 재시도한다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val attemptCount = AtomicInteger(0)
+        val done = CountDownLatch(1)
+
+        queue.enqueue(
+            GateDbWriteTask(
+                partitionKey = "fake-cancellation",
+                operationName = "SPURIOUS_CANCELLATION",
+                maxAttempts = 3,
+                timeout = 1.seconds,
+            ) {
+                val attempt = attemptCount.incrementAndGet()
+                if (attempt < 2) {
+                    throw kotlinx.coroutines.CancellationException("진짜 취소가 아니라 task.execute()가 직접 던진 것")
+                }
+                done.countDown()
+            },
+        )
+
+        try {
+            assertTrue(
+                done.await(5, TimeUnit.SECONDS),
+                "task.execute()가 직접 던진 CancellationException을 진짜 취소로 오인해 재시도하지 않았습니다",
+            )
+            assertEquals(2, attemptCount.get())
+        } finally {
+            queue.shutdown()
+        }
+    }
+
+    /**
+     * 위 테스트가 "재시도"만 확인했다면, 이 테스트는 그 결과로 샤드 워커 자신이 후임 없이 영구
+     * 종료되지 않는지(=채널 소비자가 살아있는지)까지 확인한다 — `ensureActive()` 재확인이 없다면
+     * `maxAttempts`를 다 태우기도 전에 워커 코루틴 자체가 죽어, 같은 샤드로 들어온 이후 작업이
+     * 전혀 처리되지 않는다.
+     */
+    @Test
+    fun `task가 직접 던진 CancellationException 이후에도 같은 샤드가 후속 작업을 계속 처리한다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val afterDone = CountDownLatch(1)
+
+        queue.enqueue(
+            GateDbWriteTask(
+                partitionKey = "fake-cancellation-survival",
+                operationName = "SPURIOUS_CANCELLATION_ALWAYS",
+                maxAttempts = 1,
+                timeout = 1.seconds,
+            ) {
+                throw kotlinx.coroutines.CancellationException("진짜 취소가 아니라 task.execute()가 직접 던진 것")
+            },
+        )
+        Thread.sleep(200)
+
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "fake-cancellation-survival", operationName = "SHOULD_STILL_RUN") {
+                afterDone.countDown()
+            },
+        )
+
+        try {
+            assertTrue(
+                afterDone.await(2, TimeUnit.SECONDS),
+                "task.execute()가 던진 CancellationException 이후 같은 샤드의 후속 작업이 처리되지 " +
+                    "않았습니다 — 진짜 취소로 오인해 워커가 후임 없이 영구 종료됐을 가능성이 있습니다",
+            )
+        } finally {
+            queue.shutdown()
+        }
+    }
 }

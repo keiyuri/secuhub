@@ -6,6 +6,8 @@ import org.mockito.ArgumentMatchers.anyList
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.ArgumentMatchers.eq
+import org.mockito.Mockito.never
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
@@ -102,6 +104,13 @@ class GateResetControllerTest {
 
         val message = result.flashMap["error"] as String
         assert(message.contains("거부")) { "거부된 dtlId 안내가 메시지에 없다: $message" }
+
+        // 메시지 문자열만으로는 컨트롤러가 실제로 dtlId=2를 걸러냈는지 증명하지 못한다 — 예를 들어
+        // sendReset에 filterByGroupMembership 결과(targets) 대신 원본 요청(requested)을 그대로
+        // 넘기는 회귀가 들어와도 rejected 계산 자체는 별개로 이뤄지므로 메시지에는 여전히 "거부"가
+        // 남는다. 2026-08-20 Codex 적대적 리뷰가 지적했던 교차그룹 우회 구멍의 재발을 실제로
+        // 막으려면 거부된 dtlId에 대해 sendReset이 호출되지 않았음을 직접 검증해야 한다.
+        verify(gateControlService, never()).sendReset(eq(2L), anyString())
     }
 
     @Test

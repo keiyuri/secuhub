@@ -279,4 +279,56 @@ class GateDbWriteQueueTest {
 
         queue.shutdown()
     }
+
+    /**
+     * 샤드 워커 격리 회귀 테스트(2026-08-25 소스 전수 검토 지적) — [GateDbWriteQueue.runShardWorker]의
+     * `catch (ex: Exception)`은 `task.execute()`가 흘린 일반 예외를 전부 삼켜 재시도하지만,
+     * `Exception`이 아닌 `Throwable`(`Error` — OOM 등)은 그 catch를 통과해 워커 밖으로 새어
+     * 나간다(클래스 KDoc "샤드 워커 간 격리" 참고). 예전에는 이런 `Error`가 샤드 워커들을 감싸던
+     * 평범한(non-supervisor) `workerJob`을 실패시켜, 정상 가동 중인 **다른 샤드**까지 함께
+     * 취소시켰다 — 각 샤드 워커를 [scope](SupervisorJob 보유)의 직접 자식으로 걸어 고쳤다. 한
+     * 샤드가 `Error`로 죽어도 다른 샤드는 계속 새 작업을 처리해야 한다.
+     *
+     * (`CancellationException`이 아니라 `Error`로 재현하는 이유: Kotlin 구조적 동시성에서 자식
+     * 코루틴이 `CancellationException`으로 완료되는 것은 "그 자식이 정상적으로 취소됨"으로
+     * 취급되어 부모/형제에게 실패로 전파되지 않는다 — 실제로 이 테스트를 처음
+     * `CancellationException`으로 작성했을 때는 수정 전 코드에서도 통과해버려, 이 경로가 실제
+     * 위험이 아님을 먼저 확인했다. 진짜 위험은 `catch (ex: Exception)`이 잡지 못하는 `Error`뿐이다.)
+     */
+    @Test
+    fun `한 샤드의 작업이 Error를 흘려도 다른 샤드는 계속 처리한다`() {
+        // GateDbWriteQueue.shardIndexOf와 동일한 해시 규칙으로, shardCount=2에서 서로 다른
+        // 샤드(0과 1)로 떨어지는 파티션키 두 개를 찾는다.
+        fun shardOf(key: String) = (key.hashCode() and Int.MAX_VALUE) % 2
+        val killedShardKey = generateSequence(0) { it + 1 }.map { "dead-shard-$it" }.first { shardOf(it) == 0 }
+        val survivingShardKey = generateSequence(0) { it + 1 }.map { "alive-shard-$it" }.first { shardOf(it) == 1 }
+
+        val queue = GateDbWriteQueue(shardCount = 2)
+        val survivorDone = CountDownLatch(1)
+
+        // 먼저 한 샤드의 워커를 Error로 죽인다 — catch (ex: Exception)이 잡지 못하는 Throwable이
+        // task.execute() 밖으로 새어 나가는 상황을 재현한다.
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = killedShardKey, operationName = "SPURIOUS_ERROR") {
+                throw OutOfMemoryError("샤드 격리 재현용 — 실제 OOM이 아니라 의도적으로 던진 것")
+            },
+        )
+        Thread.sleep(200) // 위 작업이 처리되어 해당 샤드 워커가 죽을 시간을 준다.
+
+        // 죽은 샤드와 무관한 다른 샤드의 작업은 여전히 정상 처리돼야 한다.
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = survivingShardKey, operationName = "SHOULD_STILL_RUN") {
+                survivorDone.countDown()
+            },
+        )
+
+        try {
+            assertTrue(
+                survivorDone.await(3, TimeUnit.SECONDS),
+                "다른 샤드의 작업이 처리되지 않았습니다 — 한 샤드의 Error가 전체 워커를 죽였을 가능성이 있습니다",
+            )
+        } finally {
+            queue.shutdown()
+        }
+    }
 }

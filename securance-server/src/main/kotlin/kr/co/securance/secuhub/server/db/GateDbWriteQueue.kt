@@ -10,7 +10,9 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
@@ -126,20 +128,33 @@ data class GateDbWriteTask(
  * 콜스택(잠재적으로 손상된 상태)을 즉시 벗어난다.
  *
  * 대신 [runShardWorker]를 감싸는 [superviseShardWorker]가 `VirtualMachineError`를 받으면 그
- * 사실을 ERROR 레벨로 남기고(직전 작업 결과는 신뢰할 수 없다는 뜻) 짧은 지연 후 **새 코루틴으로
- * [runShardWorker]를 재시작**한다 — "죽은 척만 하고 계속 처리"가 아니라 "실제로 죽고, 새로
- * 태어난 워커가 다음 작업부터 이어받는" 구조다. 채널에서 이미 소비된(=죽음의 원인이 된) 작업은
- * 재시도되지 않고 유실되며([runFallback]도 호출되지 않는다 — fallback 자체도 블로킹 IO라 같은
- * 손상된 JVM 상태에서 또 실패할 수 있다), 그 뒤에 들어온 작업들은 재시작된 워커가 정상적으로
- * 이어받는다. `ThreadDeath`는 [superviseShardWorker]에서도 잡지 않고 그대로 통과시킨다(JVM
- * 명세상 항상 다시 던져야 하는 유일한 예외).
+ * 사실을 ERROR 레벨로 남기고(직전 작업 결과는 신뢰할 수 없다는 뜻) 짧은 지연 후 **같은 코루틴
+ * 안에서 [runShardWorker]를 재호출**한다("새 코루틴"이 아니라 while 루프 재시도다 — 아래
+ * "재시작 KDoc 정정" 문단 참고). "죽은 척만 하고 계속 처리"가 아니라 "실제로 죽고, 다음 작업부터
+ * 이어받는" 구조다. 채널에서 이미 소비된(=죽음의 원인이 된) 작업 자체는 재시도되지 않고 유실되지만,
+ * durable 대체 저장([runFallback]/[GateDbWriteTask.onDropOrFinalFailure])만은 시도한다(아래
+ * "`VirtualMachineError`/`ThreadDeath`도 fallback을 걸러선 안 된다" 참고) — 그 뒤에 들어온
+ * 작업들은 재시작된 워커가 정상적으로 이어받는다. `ThreadDeath`는 [superviseShardWorker]에서도
+ * 잡지 않고 그대로 통과시킨다(JVM 명세상 항상 다시 던져야 하는 유일한 예외).
  *
  * `VirtualMachineError`가 아닌 그 외 `Throwable`(예: `AssertionError`, `task.execute()`가 직접
  * `throw`한 커스텀 `Error`)은 JVM 자체의 건전성과 무관하므로 여전히 [runShardWorker]가 이 작업
  * 하나만 최종 실패로 처리(카운터 증가 + [runFallback])하고 워커를 재시작 없이 계속 사용한다 —
  * 재시작(및 그 지연)은 진짜 `VirtualMachineError`에만 쓰는 무거운 대응이다.
- * `CancellationException`은 어느 계층에서도 그대로 다시 던져 shutdown()에 의한 정상 종료를
- * 방해하지 않는다.
+ * `CancellationException`은 이 코루틴이 실제로 취소된 경우에만 그대로 다시 던져 shutdown()에
+ * 의한 정상 종료를 방해하지 않는다.
+ *
+ * **`task.execute()`가 직접 던진 `CancellationException`은 진짜 취소가 아니다(Codex 리뷰 지적,
+ * 2026-08-25 오후속)**: [GateDbWriteTask.execute]는 호출부가 채우는 임의의 코드이므로,
+ * 취소 신호와 무관하게 `CancellationException`을 스스로 던질 수 있다(예: 내부에서 다른 취소된
+ * `Deferred`를 `await()`하는 경우). [processTask]는 `task.execute()`를 `scope.async`의 자식
+ * 코루틴으로 실행하는데, 자식이 `CancellationException`으로 완료되는 것은 구조적 동시성상 "정상
+ * 취소"로 취급되어 부모(샤드 워커 자신)로 전파되지 않는다 — 즉 이 `CancellationException`을
+ * 타입만 보고 "진짜 취소"로 단정해 무조건 재전파하면, 워커 코루틴 자신은 여전히 active인데도
+ * (`superviseShardWorker`가 이를 후임 없이 취급하는) 정상 종료 경로로 빠져 그 샤드의 채널 소비자가
+ * 영구히 사라진다. 그래서 [processTask]는 이 예외를 잡으면 `currentCoroutineContext().ensureActive()`로
+ * 자신이 실제로 취소된 상태인지 재확인한 뒤에야 재전파 여부를 결정한다 — 취소되지 않았다면 이번
+ * 시도만 실패로 간주하고 재시도한다.
  *
  * **`ThreadDeath`도 실제로는 재전파돼야 했다(Codex 리뷰 지적, 2026-08-25 삼후속)**: 위 문단이
  * "`ThreadDeath`는 [superviseShardWorker]에서도 잡지 않고 통과시킨다"고 적어놓고도, 정작
@@ -164,8 +179,20 @@ data class GateDbWriteTask(
  * 이어받게 하고**([activeWorkerJobs]에 등록해 [shutdown]이 추적할 수 있게 한다) ② 그런 뒤에야
  * 원래의 `ThreadDeath`를 그대로 다시 던져 **이 코루틴 자신은 진짜로 종료**시킨다 — "명세를 지키며
  * 죽는 것"과 "채널에 소비자가 비지 않는 것"을 동시에 만족한다. 후임 코루틴이 이어받는 시점에
- * 이미 채널에서 소비된(=`ThreadDeath`의 원인이 된) 작업은 재시도되지 않고 유실된다(`VirtualMachineError`
- * 재시작과 동일 — [runFallback]도 호출하지 않는다).
+ * 이미 채널에서 소비된(=`ThreadDeath`의 원인이 된) 작업 자체는 재시도되지 않고 유실되지만,
+ * durable 대체 저장은 `VirtualMachineError`와 동일하게 시도한다(아래 문단 참고).
+ *
+ * **`VirtualMachineError`/`ThreadDeath`도 fallback을 걸러선 안 된다(Codex 리뷰 지적, 2026-08-25
+ * 오후속)**: 처음에는 [runFallback]([GateDbWriteTask.onDropOrFinalFailure])까지 호출하지 않고
+ * 넘어갔다 — "fallback 자체도 블로킹 IO라 같은 손상된 JVM 상태에서 또 실패할 수 있다"는 이유였다.
+ * 하지만 이 콜백을 지정한 호출부([GateStatusAnalysisPersister.awaitRcvId]가 기다리는
+ * `enqueueReceiveInsert`의 `CompletableDeferred<Long?>`가 대표적) 입장에서는, fallback이 호출되지
+ * 않으면 그 `Deferred`가 영원히 완료되지 않는다 — 다운스트림이 `withTimeout` × `maxAttempts`만큼
+ * (기본 약 15초) 스톨하고, 버려진 대기 코루틴이 계속 쌓인다. [runFallback]은 이미 자체
+ * `try`/`catch`로 콜백 실패를 삼키므로(다시 실패해도 로그만 남기고 그친다) "손상됐을 수 있는
+ * JVM 상태에서 한 번 더 시도하는 대가"가 "다운스트림을 최대 15초씩 붙잡아두는 것"보다 작다고
+ * 판단해, [runShardWorker]는 `VirtualMachineError`/`ThreadDeath` 재전파 직전에도 [runFallback]을
+ * 호출한다.
  */
 open class GateDbWriteQueue(
     private val shardCount: Int,
@@ -233,8 +260,31 @@ open class GateDbWriteQueue(
         // activeWorkerJobs는 ThreadDeath 재시작으로 교체될 수 있어(클래스 KDoc 참고) 생성 시점의
         // 고정 목록이 아니라 "지금 이 순간" 각 슬롯이 가리키는 코루틴을 취소한다 — 고정 목록을
         // 취소했다면 ThreadDeath 이후 새로 띄운 후임 코루틴은 취소되지 않고 남아있게 된다.
+        //
+        // 한 번만 순회하면 좁은 경합 창이 남는다(Codex 리뷰 지적, 2026-08-25 육후속) — "슬롯 i를
+        // cancel()한 직후(취소가 실제로 반영되기 전) 그 워커가 ThreadDeath를 잡아 슬롯을 후임
+        // 코루틴으로 교체"하면, for 루프는 이미 그 인덱스를 지나갔으므로 후임은 취소망을 피한다.
+        // 이미 shards.close()로 채널을 닫아뒀으므로 재시작할 때마다 워커가 새 ThreadDeath를 만날
+        // 여지는 없다(정상 종료 경로로 return) — 그래도 안전하게, 슬롯이 더 이상 바뀌지 않을 때까지
+        // 반복 취소하되 무한 루프를 피하기 위해 시도 횟수를 제한한다.
         for (i in 0 until shardCount) {
-            activeWorkerJobs.get(i).cancel()
+            var job = activeWorkerJobs.get(i)
+            job.cancel()
+            var guard = 0
+            while (guard < SHUTDOWN_CANCEL_RETRY_LIMIT) {
+                val current = activeWorkerJobs.get(i)
+                if (current === job) break // 슬롯이 더 이상 바뀌지 않았다 — 취소가 확실히 반영됐다.
+                current.cancel()
+                job = current
+                guard++
+            }
+            if (guard == SHUTDOWN_CANCEL_RETRY_LIMIT) {
+                logger.error(
+                    "shutdown() 중 샤드 워커({})가 계속 후임으로 교체되어 취소 재확인을 {}회 만에 " +
+                        "포기했습니다 — ThreadDeath가 비정상적으로 반복되고 있을 수 있습니다.",
+                    i, SHUTDOWN_CANCEL_RETRY_LIMIT,
+                )
+            }
         }
         // graceful shutdown: 이미 blockingExecutor에서 돌고 있는 블로킹 호출을 강제 인터럽트하지 않는다
         // (표준 Socket.read()는 인터럽트에 반응하지 않으므로 효과도 없다) — JDBC 소켓 타임아웃이
@@ -243,8 +293,9 @@ open class GateDbWriteQueue(
     }
 
     /**
-     * [runShardWorker]를 감독한다 — `VirtualMachineError`로 죽으면 새 코루틴으로 재시작해 채널
-     * 소비자를 복구한다(클래스 KDoc "`VirtualMachineError`는 '작업 실패'로 삼키지 않는다" 참고).
+     * [runShardWorker]를 감독한다 — `VirtualMachineError`로 죽으면 **같은 코루틴 안에서**
+     * [runShardWorker]를 재호출(while 루프 재시도, 새 코루틴/새 Job이 아니다)해 채널 소비자를
+     * 복구한다(클래스 KDoc "`VirtualMachineError`는 '작업 실패'로 삼키지 않는다" 참고).
      *
      * `ThreadDeath`는 JVM 명세상 이 함수 자신은 반드시 다시 던져 종료돼야 하므로 `VirtualMachineError`
      * 처럼 "같은 코루틴에서 재시도"할 수는 없다 — 대신 다시 던지기 **전에** 후임 코루틴을 새로 띄워
@@ -299,6 +350,11 @@ open class GateDbWriteQueue(
             } catch (ex: VirtualMachineError) {
                 // OutOfMemoryError/StackOverflowError 등 — 여기서 삼켜 다음 작업을 계속 처리하면
                 // 안 된다(클래스 KDoc 참고). superviseShardWorker가 워커 자체를 재시작한다.
+                // 다만 이 작업 자체는 유실 확정이므로 durable 대체 저장(onDropOrFinalFailure)만은
+                // 시도한다 — 그러지 않으면 이 작업의 완료를 기다리는 다운스트림이 최대 15초씩
+                // 스톨한다(클래스 KDoc "VirtualMachineError/ThreadDeath도 fallback을 걸러선 안
+                // 된다" 참고).
+                runFallback(task, shardIndex)
                 throw ex
             } catch (@Suppress("DEPRECATION") ex: ThreadDeath) {
                 // JVM 명세상 항상 다시 던져야 하는 유일한 예외(2026-08-25 Codex 리뷰 지적) — 아래
@@ -308,6 +364,8 @@ open class GateDbWriteQueue(
                 // 재전파해 superviseShardWorker(또는 그 상위)가 이 종료 신호를 그대로 받게 한다.
                 // `ThreadDeath` 자체가 Java 20부터 @Deprecated지만(향후 제거 예정), 남아있는 동안은
                 // JVM 명세("잡았다면 반드시 다시 던져야 한다")를 지켜야 하므로 타입 참조를 그대로 쓴다.
+                // VirtualMachineError와 동일한 이유로 durable 대체 저장만은 시도한다.
+                runFallback(task, shardIndex)
                 throw ex
             } catch (ex: Throwable) {
                 // VirtualMachineError가 아닌 Error(예: AssertionError, task.execute()가 직접 던진
@@ -346,9 +404,21 @@ open class GateDbWriteQueue(
                 )
                 logLateCompletion(execution, shardIndex, task)
             } catch (ex: CancellationException) {
-                // shutdown()/workerJobs 개별 cancel()로 인한 진짜 취소 — 작업 실패로 삼켜 재시도하면
-                // 코루틴이 취소된 상태로 계속 루프를 도는 구조적 동시성 위반이 된다. 그대로 전파한다.
-                throw ex
+                // `task.execute()`(호출부가 채우는 임의의 코드)가 진짜 취소 없이 CancellationException을
+                // 직접 던졌을 수 있다(Codex 리뷰 지적, 2026-08-25 오후속) — `execution`은 `scope.async`의
+                // 자식이라, 자식이 CancellationException으로 완료되는 것은 구조적 동시성상 "정상적으로
+                // 취소됨"으로 취급되어 부모(이 코루틴)로 전파되지 않는다(클래스 KDoc "샤드 워커 간 격리"의
+                // 괄호 설명 참고) — 즉 이 코루틴 자신은 여전히 active일 수 있다. `ensureActive()`로
+                // 재확인한다: 이 코루틴이 실제로 취소된 상태라면 그대로 다시 던져 위와 동일하게 전파되고,
+                // 취소되지 않은 상태(=task.execute()가 스스로 던진 것)라면 아무 일도 없이 아래로 흘러
+                // 이번 시도만 실패로 간주해 재시도한다 — 그러지 않으면 shutdown()/개별 cancel()로 인한
+                // 진짜 취소가 아닌데도 이 샤드의 워커 코루틴 전체가 후임 없이 영구 종료된다.
+                currentCoroutineContext().ensureActive()
+                logger.warn(
+                    "DB 쓰기 중 CancellationException 발생(진짜 취소 아님, task.execute()가 직접 던짐) - " +
+                        "이번 시도만 실패로 간주하고 재시도합니다: shard={}, op={}, attempt={}/{}",
+                    shardIndex, task.operationName, attempt, task.maxAttempts, ex,
+                )
             } catch (ex: Exception) {
                 logger.warn(
                     "DB 쓰기 실패(shard={}, op={}, attempt={}/{})",
@@ -421,5 +491,13 @@ open class GateDbWriteQueue(
     companion object {
         /** [superviseShardWorker]가 `VirtualMachineError` 이후 워커를 재시작하기 전 대기하는 시간. */
         private val SHARD_WORKER_RESTART_DELAY = 1.seconds
+
+        /**
+         * [shutdown]이 `activeWorkerJobs`의 슬롯 교체(ThreadDeath 후임)를 재확인하며 취소를
+         * 반복하는 최대 횟수(Codex 리뷰 지적, 2026-08-25 육후속). 채널이 이미 닫힌 뒤라 정상
+         * 상황에서는 1~2회 안에 안정된다 — 이 한도를 넘기는 것은 비정상적으로 반복되는 ThreadDeath를
+         * 뜻하므로 무한 대기 대신 로그만 남기고 진행한다.
+         */
+        private const val SHUTDOWN_CANCEL_RETRY_LIMIT = 20
     }
 }

@@ -427,17 +427,19 @@ class GateDbWriteQueueTest {
     }
 
     /**
-     * `ThreadDeath`는 JVM 명세상 "잡았다면 반드시 다시 던져야 하는" 유일한 예외라, 다른 Error처럼
-     * "이 작업만 최종 실패로 처리하고 워커는 계속 동작"하는 것도, `VirtualMachineError`처럼 "잠시 뒤
-     * 재시작"하는 것도 허용되지 않는다 — 어느 쪽이든 종료 요청을 삼키는 셈이기 때문이다(Codex 리뷰
-     * 지적, 2026-08-25). 이 테스트는 `ThreadDeath` 이후 같은 샤드(파티션키)의 후속 작업이 재시작
-     * 지연(≈1초)을 넉넉히 넘는 시간 동안에도 처리되지 않는다는 것으로 "워커가 재시작 없이 그대로
-     * 종료된 채 남는다"를 고정한다 — 만약 `runShardWorker`의 `catch (ex: Throwable)`이 다시
-     * `ThreadDeath`까지 삼키는 회귀가 생기면, 다른 Error와 마찬가지로 후속 작업이 즉시(수백ms 내)
-     * 처리되어 이 테스트가 실패한다.
+     * `ThreadDeath`는 JVM 명세상 "잡았다면 반드시 다시 던져야 하는" 유일한 예외라, 그 예외를 잡은
+     * 코루틴 자신이 "이 작업만 최종 실패로 처리하고 계속 동작"할 수는 없다 — 그건 종료 요청을
+     * 삼키는 셈이기 때문이다. 하지만 그렇다고 그 샤드의 채널 소비자가 영구히 사라져도 되는 것은
+     * 아니다(Codex 적대적 리뷰 지적, 2026-08-25 — "명세는 지켰지만 그 샤드의 DB 쓰기가 프로세스
+     * 재기동 전까지 조용히 멈춘다"는 문제). 그래서 [GateDbWriteQueue.superviseShardWorker]는
+     * `ThreadDeath`를 만나면 자기 자신은 다시 던져 종료하되, 그 전에 후임 코루틴을 먼저 띄워 채널
+     * 소비를 이어받게 한다. 이 테스트는 그 후속 작업이 실제로(그것도 `VirtualMachineError`의
+     * 재시작 지연 없이 신속하게) 처리된다는 것으로 "채널 소비자가 끊기지 않는다"를 고정한다 — 만약
+     * `superviseShardWorker`가 다시 `ThreadDeath`를 그냥 통과시키기만 하고 후임을 띄우지 않는
+     * 회귀가 생기면, 후속 작업은 채널에 소비자 없이 쌓인 채 처리되지 않아 이 테스트가 실패한다.
      */
     @Test
-    fun `ThreadDeath는 삼키지 않고 재전파해 워커가 재시작 없이 종료된 채로 남는다`() {
+    fun `ThreadDeath 발생 후에도 같은 샤드가 후임 코루틴으로 이어받아 이후 작업을 계속 처리한다`() {
         val queue = GateDbWriteQueue(shardCount = 1)
         val afterDeathDone = CountDownLatch(1)
 
@@ -450,17 +452,60 @@ class GateDbWriteQueueTest {
         Thread.sleep(200) // 위 작업이 처리되어 워커가 ThreadDeath를 마주칠 시간을 준다.
 
         queue.enqueue(
-            GateDbWriteTask(partitionKey = "thread-death", operationName = "SHOULD_NOT_RUN") {
+            GateDbWriteTask(partitionKey = "thread-death", operationName = "SHOULD_STILL_RUN_AFTER_THREAD_DEATH") {
                 afterDeathDone.countDown()
             },
         )
 
         try {
             assertTrue(
-                !afterDeathDone.await(2, TimeUnit.SECONDS),
-                "ThreadDeath 발생 이후에도 같은 샤드의 후속 작업이 처리됐습니다 — ThreadDeath를 삼키고 " +
-                    "워커를 계속 사용하거나(다른 Error와 동일 취급) 재시작(VirtualMachineError와 동일 취급)하고 " +
-                    "있을 가능성이 있습니다 — 둘 다 ThreadDeath를 재전파해야 한다는 JVM 명세 위반입니다",
+                afterDeathDone.await(2, TimeUnit.SECONDS),
+                "ThreadDeath 발생 이후 같은 샤드의 후속 작업이 처리되지 않았습니다 — ThreadDeath를 재전파만 " +
+                    "하고 채널 소비자를 이어받을 후임 코루틴을 띄우지 않았을 가능성이 있습니다",
+            )
+        } finally {
+            queue.shutdown()
+        }
+    }
+
+    /**
+     * 위 테스트가 "한 번"의 `ThreadDeath` 이후 복구를 확인했다면, 이 테스트는 그 복구가 일회성이
+     * 아니라 반복돼도 매번 새 후임이 이어받는지를 검증한다 — `superviseShardWorker`가 `ThreadDeath`를
+     * 잡을 때마다 새 코루틴을 띄우고 [GateDbWriteQueue]의 활성 워커 슬롯을 그 후임으로 교체하므로,
+     * 두 번째 `ThreadDeath`도 (그 시점의 후임이었던) 워커에서 동일한 경로로 처리돼야 한다.
+     */
+    @Test
+    fun `ThreadDeath가 반복 발생해도 매번 새 후임이 이어받아 계속 처리한다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val afterSecondDeathDone = CountDownLatch(1)
+
+        @Suppress("DEPRECATION")
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "thread-death-repeat", operationName = "SPURIOUS_THREAD_DEATH_1") {
+                throw ThreadDeath()
+            },
+        )
+        Thread.sleep(200)
+
+        @Suppress("DEPRECATION")
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "thread-death-repeat", operationName = "SPURIOUS_THREAD_DEATH_2") {
+                throw ThreadDeath()
+            },
+        )
+        Thread.sleep(200)
+
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "thread-death-repeat", operationName = "SHOULD_STILL_RUN_AFTER_REPEATED_THREAD_DEATH") {
+                afterSecondDeathDone.countDown()
+            },
+        )
+
+        try {
+            assertTrue(
+                afterSecondDeathDone.await(2, TimeUnit.SECONDS),
+                "ThreadDeath가 두 번 반복된 뒤 같은 샤드의 후속 작업이 처리되지 않았습니다 — 후임 코루틴 " +
+                    "체인이 두 번째 이후로는 끊겼을 가능성이 있습니다",
             )
         } finally {
             queue.shutdown()

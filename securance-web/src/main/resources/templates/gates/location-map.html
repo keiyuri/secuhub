@@ -57,6 +57,11 @@
           <div th:if="${location.locMap == null}" class="text-center text-muted py-5">
             아직 배치도 이미지가 없습니다. 왼쪽에서 이미지를 업로드하세요.
           </div>
+          <div class="alert alert-warning py-2 mb-2"
+               th:if="${location.locMap != null and (location.locMapWidth == null or location.locMapHeight == null)}">
+            이미지 크기 정보가 없는 레거시 배치도입니다. 좌표가 부정확하게 저장되는 것을 막기 위해 그룹 위치 드래그가
+            비활성화되어 있습니다. 이미지를 다시 업로드하면 활성화됩니다.
+          </div>
           <div th:if="${location.locMap != null}" id="mapContainer"
                style="position:relative; width:100%; max-width:900px; user-select:none;">
             <img id="mapImage" th:src="@{/loc-images/{f}(f=${location.locMap})}"
@@ -89,6 +94,12 @@
     const container = document.getElementById('mapContainer');
     const locMapWidth = /*[[${location.locMapWidth}]]*/ 0;
     const locMapHeight = /*[[${location.locMapHeight}]]*/ 0;
+    // Codex adversarial 리뷰 지적(2026-08-25): locMapWidth/Height가 null인 레거시 배치도는 500 방지를
+    // 위해 화면 렌더링은 허용하되(위 폴백 위치 표시), 드래그 저장은 여기서 막아야 한다 — 막지 않으면
+    // null * 100 / null이 아니라 JS의 null 산술 규칙상 0으로 계산되어 기존 좌표를 조용히 (0,0)으로
+    // 덮어쓰게 된다.
+    const mapSizeValid = typeof locMapWidth === 'number' && typeof locMapHeight === 'number'
+      && locMapWidth > 0 && locMapHeight > 0;
     let dragging = null;
 
     function clampPercent(v) { return Math.max(0, Math.min(100, v)); }
@@ -106,6 +117,9 @@
     const csrfHeader = document.querySelector('meta[name="_csrf_header"]')?.content;
 
     function savePosition(marker, leftPercent, topPercent) {
+      // 방어적 재확인 — pointerdown에서 이미 mapSizeValid가 false면 dragging을 세팅하지 않지만,
+      // 향후 호출부가 바뀌어도 null 크기로 좌표가 (0,0) 저장되는 일이 없도록 한 번 더 막는다.
+      if (!mapSizeValid) return;
       const grpId = marker.dataset.grpId;
       const x = Math.round((leftPercent / 100) * locMapWidth);
       const y = Math.round((topPercent / 100) * locMapHeight);
@@ -124,6 +138,10 @@
     }
 
     container.querySelectorAll('.group-marker').forEach(function (marker) {
+      if (!mapSizeValid) {
+        marker.style.cursor = 'not-allowed';
+        return;
+      }
       marker.addEventListener('pointerdown', function (e) {
         dragging = marker;
         marker.setPointerCapture(e.pointerId);

@@ -106,6 +106,17 @@ data class GateDbWriteTask(
  * 문제와 무관하다 — 자식 코루틴이 `CancellationException`으로 완료되는 것은 Kotlin
  * 구조적 동시성에서 "그 자식이 정상적으로 취소됨"으로 취급되어 부모/형제에게 실패로
  * 전파되지 않는다. `GateDbWriteQueueTest`의 격리 회귀 테스트가 `Error`로 이를 재현·고정한다.)
+ *
+ * **같은 샤드 내 워커 생존(Codex 리뷰 지적, 2026-08-25 후속)**: 위 격리만으로는 부족했다 —
+ * [runShardWorker]가 `Error`를 그대로 밖으로 흘리면 형제 샤드는 살아남지만, **그 `Error`를 던진
+ * 샤드 자신의 워커 코루틴**은 영구 종료된다. 이후 같은 샤드로 해시되는 모든 작업은 소비자가
+ * 사라진 [Channel]에 쌓이다가 용량(1000)을 넘기면 계속 드롭되고, 그 파티션키(디바이스)의 DB
+ * 쓰기는 프로세스를 재기동하기 전까지 복구되지 않는다. 그래서 [runShardWorker]는 작업 하나를
+ * 처리하는 [processTask] 전체를 `catch (ex: Throwable)`로 한 번 더 감싼다 — `Exception`이 아닌
+ * `Error`가 [processTask] 밖으로 새어 나와도 이 작업 하나만 최종 실패로 처리(카운터 증가 +
+ * [runFallback])하고, `for (task in shard)` 루프 자체는 계속 돌아 다음 작업을 받는다.
+ * `CancellationException`만은 예외로 그대로 다시 던져 shutdown()에 의한 정상 종료를 방해하지
+ * 않는다.
  */
 open class GateDbWriteQueue(
     private val shardCount: Int,
@@ -171,47 +182,71 @@ open class GateDbWriteQueue(
 
     private suspend fun runShardWorker(shardIndex: Int, shard: Channel<GateDbWriteTask>) {
         for (task in shard) {
-            var attempt = 0
-            var succeeded = false
-            while (!succeeded && attempt < task.maxAttempts) {
-                attempt++
-                // 블로킹 호출을 전용 풀에 위임한다. withTimeout이 실제로 감싸는 건 execution.await()라는
-                // 완전히 협조적인 suspend 지점뿐이므로, 타임아웃이 지나면 이 execution의 스레드는
-                // 백그라운드에 버려둔 채 워커 코루틴은 즉시 다음 시도/작업으로 넘어갈 수 있다.
-                val execution: Deferred<Unit> = scope.async(blockingDispatcher) { task.execute() }
-                try {
-                    withTimeout(task.timeout) { execution.await() }
-                    succeeded = true
-                } catch (ex: TimeoutCancellationException) {
-                    // withTimeout()이 자체적으로 던지는 취소 예외 — 우리가 건 타임아웃이므로 작업
-                    // 실패로 간주하고 재시도한다(아래 일반 CancellationException과는 구분해야 함).
-                    logger.warn(
-                        "DB 쓰기 타임아웃(shard={}, op={}, attempt={}/{}, timeout={}) - 버려둔 블로킹 호출은 " +
-                            "백그라운드에서 계속 진행되며 JDBC 소켓 타임아웃이 최종적으로 정리합니다.",
-                        shardIndex, task.operationName, attempt, task.maxAttempts, task.timeout,
-                    )
-                    logLateCompletion(execution, shardIndex, task)
-                } catch (ex: CancellationException) {
-                    // shutdown()/workerJobs 개별 cancel()로 인한 진짜 취소 — 작업 실패로 삼켜 재시도하면
-                    // 코루틴이 취소된 상태로 계속 루프를 도는 구조적 동시성 위반이 된다. 그대로 전파한다.
-                    throw ex
-                } catch (ex: Exception) {
-                    logger.warn(
-                        "DB 쓰기 실패(shard={}, op={}, attempt={}/{})",
-                        shardIndex, task.operationName, attempt, task.maxAttempts, ex,
-                    )
-                }
-                // 재시도 전에는 지수 백오프로 잠깐 쉰다 — DB 장애 시 즉시 3연타로 부하를 더하지 않기 위함.
-                // (마지막 시도 실패 후에는 대기하지 않고 바로 최종 실패 처리로 넘어간다.)
-                if (!succeeded && attempt < task.maxAttempts) {
-                    delay(backoffDelayFor(attempt))
-                }
-            }
-            if (!succeeded) {
+            try {
+                processTask(shardIndex, task)
+            } catch (ex: CancellationException) {
+                // shutdown()/workerJobs 개별 cancel()로 인한 진짜 취소 — 그대로 전파해야 for 루프가
+                // 멈추고 워커 코루틴이 정상적으로 종료된다.
+                throw ex
+            } catch (ex: Throwable) {
+                // Error(OutOfMemoryError 등, processTask 안의 catch (ex: Exception)이 잡지 못하는
+                // Throwable) — 여기서 삼키지 않고 for 루프를 빠져나가게 두면 이 샤드 워커 코루틴
+                // 자체가 영구 종료되어, 형제 샤드는 살아남아도(클래스 KDoc "샤드 워커 간 격리" 참고)
+                // 정작 이 샤드로 라우팅되는 이후 모든 작업은 소비자 없는 채널에 쌓이다 드롭된다
+                // (Codex 리뷰 지적, 2026-08-25 후속). 이 작업 하나만 최종 실패로 처리하고 루프는
+                // 계속 돈다 — "같은 샤드 내 워커 생존" 참고.
                 finalFailureCount.incrementAndGet()
-                logger.error("DB 쓰기 최종 실패: shard={}, op={}", shardIndex, task.operationName)
+                logger.error(
+                    "DB 쓰기 중 처리 불가능한 오류(Error) 발생 — 이 작업만 최종 실패로 처리하고 워커는 계속 동작합니다: shard={}, op={}",
+                    shardIndex, task.operationName, ex,
+                )
                 runFallback(task, shardIndex)
             }
+        }
+    }
+
+    /** [runShardWorker]가 작업 하나를 재시도 한도까지 시도하는 본체 — 성공/최종 실패 판정과 백오프를 담당한다. */
+    private suspend fun processTask(shardIndex: Int, task: GateDbWriteTask) {
+        var attempt = 0
+        var succeeded = false
+        while (!succeeded && attempt < task.maxAttempts) {
+            attempt++
+            // 블로킹 호출을 전용 풀에 위임한다. withTimeout이 실제로 감싸는 건 execution.await()라는
+            // 완전히 협조적인 suspend 지점뿐이므로, 타임아웃이 지나면 이 execution의 스레드는
+            // 백그라운드에 버려둔 채 워커 코루틴은 즉시 다음 시도/작업으로 넘어갈 수 있다.
+            val execution: Deferred<Unit> = scope.async(blockingDispatcher) { task.execute() }
+            try {
+                withTimeout(task.timeout) { execution.await() }
+                succeeded = true
+            } catch (ex: TimeoutCancellationException) {
+                // withTimeout()이 자체적으로 던지는 취소 예외 — 우리가 건 타임아웃이므로 작업
+                // 실패로 간주하고 재시도한다(아래 일반 CancellationException과는 구분해야 함).
+                logger.warn(
+                    "DB 쓰기 타임아웃(shard={}, op={}, attempt={}/{}, timeout={}) - 버려둔 블로킹 호출은 " +
+                        "백그라운드에서 계속 진행되며 JDBC 소켓 타임아웃이 최종적으로 정리합니다.",
+                    shardIndex, task.operationName, attempt, task.maxAttempts, task.timeout,
+                )
+                logLateCompletion(execution, shardIndex, task)
+            } catch (ex: CancellationException) {
+                // shutdown()/workerJobs 개별 cancel()로 인한 진짜 취소 — 작업 실패로 삼켜 재시도하면
+                // 코루틴이 취소된 상태로 계속 루프를 도는 구조적 동시성 위반이 된다. 그대로 전파한다.
+                throw ex
+            } catch (ex: Exception) {
+                logger.warn(
+                    "DB 쓰기 실패(shard={}, op={}, attempt={}/{})",
+                    shardIndex, task.operationName, attempt, task.maxAttempts, ex,
+                )
+            }
+            // 재시도 전에는 지수 백오프로 잠깐 쉰다 — DB 장애 시 즉시 3연타로 부하를 더하지 않기 위함.
+            // (마지막 시도 실패 후에는 대기하지 않고 바로 최종 실패 처리로 넘어간다.)
+            if (!succeeded && attempt < task.maxAttempts) {
+                delay(backoffDelayFor(attempt))
+            }
+        }
+        if (!succeeded) {
+            finalFailureCount.incrementAndGet()
+            logger.error("DB 쓰기 최종 실패: shard={}, op={}", shardIndex, task.operationName)
+            runFallback(task, shardIndex)
         }
     }
 

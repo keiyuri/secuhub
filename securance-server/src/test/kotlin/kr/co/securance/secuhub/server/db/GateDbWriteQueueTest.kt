@@ -331,4 +331,44 @@ class GateDbWriteQueueTest {
             queue.shutdown()
         }
     }
+
+    /**
+     * 같은 샤드 생존 회귀 테스트(Codex 리뷰 지적, 2026-08-25 후속) — 위 테스트는 "다른" 샤드가
+     * 살아남는지만 확인했는데, 그것만으로는 부족했다. [GateDbWriteQueue.runShardWorker]가
+     * `Error`를 그대로 밖으로 흘리면 형제 샤드는 [scope](SupervisorJob)로 격리돼 살아남지만,
+     * 정작 그 `Error`를 던진 **자기 자신의 샤드 워커 코루틴**은 영구 종료된다 — 이후 같은 샤드로
+     * 라우팅되는 모든 작업(같은 디바이스뿐 아니라 해시가 같은 다른 디바이스도 포함)이 소비자
+     * 없는 채널에 쌓이다 드롭된다. [processTask]를 [runShardWorker]의 `catch (ex: Throwable)`로
+     * 감싸 이 작업 하나만 최종 실패 처리하고 `for` 루프는 계속 돌게 고쳤다.
+     */
+    @Test
+    fun `한 샤드에서 Error가 발생해도 같은 샤드가 이후 작업을 계속 처리한다`() {
+        val queue = GateDbWriteQueue(shardCount = 1)
+        val afterErrorDone = CountDownLatch(1)
+
+        // 이 샤드(유일한 샤드)의 워커를 Error로 죽이려 시도한다.
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "same-shard-error", operationName = "SPURIOUS_ERROR") {
+                throw OutOfMemoryError("같은 샤드 생존 재현용 — 실제 OOM이 아니라 의도적으로 던진 것")
+            },
+        )
+        Thread.sleep(200) // 위 작업이 처리되어 워커가 Error를 마주칠 시간을 준다.
+
+        // 같은 샤드(같은 파티션키)로 뒤이어 들어온 정상 작업도 여전히 처리돼야 한다 — 워커가
+        // 죽어버렸다면 이 작업은 채널에 그대로 쌓인 채 영원히 실행되지 않는다.
+        queue.enqueue(
+            GateDbWriteTask(partitionKey = "same-shard-error", operationName = "SHOULD_STILL_RUN_AFTER_ERROR") {
+                afterErrorDone.countDown()
+            },
+        )
+
+        try {
+            assertTrue(
+                afterErrorDone.await(3, TimeUnit.SECONDS),
+                "Error 발생 이후 같은 샤드의 후속 작업이 처리되지 않았습니다 — 워커가 영구 종료됐을 가능성이 있습니다",
+            )
+        } finally {
+            queue.shutdown()
+        }
+    }
 }

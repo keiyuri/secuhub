@@ -111,12 +111,34 @@ data class GateDbWriteTask(
  * [runShardWorker]가 `Error`를 그대로 밖으로 흘리면 형제 샤드는 살아남지만, **그 `Error`를 던진
  * 샤드 자신의 워커 코루틴**은 영구 종료된다. 이후 같은 샤드로 해시되는 모든 작업은 소비자가
  * 사라진 [Channel]에 쌓이다가 용량(1000)을 넘기면 계속 드롭되고, 그 파티션키(디바이스)의 DB
- * 쓰기는 프로세스를 재기동하기 전까지 복구되지 않는다. 그래서 [runShardWorker]는 작업 하나를
- * 처리하는 [processTask] 전체를 `catch (ex: Throwable)`로 한 번 더 감싼다 — `Exception`이 아닌
- * `Error`가 [processTask] 밖으로 새어 나와도 이 작업 하나만 최종 실패로 처리(카운터 증가 +
- * [runFallback])하고, `for (task in shard)` 루프 자체는 계속 돌아 다음 작업을 받는다.
- * `CancellationException`만은 예외로 그대로 다시 던져 shutdown()에 의한 정상 종료를 방해하지
- * 않는다.
+ * 쓰기는 프로세스를 재기동하기 전까지 복구되지 않는다.
+ *
+ * **`VirtualMachineError`는 "작업 실패"로 삼키지 않는다(Codex 적대적 리뷰 지적, 2026-08-25
+ * 재후속)**: 위 문제의 첫 수정은 [runShardWorker]가 [processTask] 전체를 `catch (ex: Throwable)`로
+ * 감싸 이 작업 하나만 최종 실패 처리하고 루프를 계속 돌게 했다. 하지만 `Throwable`을 이렇게
+ * 넓게 잡으면 `OutOfMemoryError`/`StackOverflowError` 같은 [VirtualMachineError](JVM 자체가
+ * 이미 불안정하다는 신호)까지 "이 작업 하나만 실패했을 뿐"인 것처럼 로그·카운터·fallback을
+ * 실행하고 **곧바로 다음 작업을 계속 처리**하게 된다 — 손상됐을 수 있는 JVM 상태로 DB 쓰기를
+ * 계속 시도하는 셈이라 위험하고, 진짜 치명적 장애를 평범한 작업 실패로 위장해 감지·복구를
+ * 방해한다. 그래서 [processTask]는 `VirtualMachineError`(와 절대 삼켜서는 안 되는 `ThreadDeath`)를
+ * 만나면 삼키지 않고 그대로 재전파한다 — [runShardWorker]도 이를 다시 재전파해 그 시도의
+ * 콜스택(잠재적으로 손상된 상태)을 즉시 벗어난다.
+ *
+ * 대신 [runShardWorker]를 감싸는 [superviseShardWorker]가 `VirtualMachineError`를 받으면 그
+ * 사실을 ERROR 레벨로 남기고(직전 작업 결과는 신뢰할 수 없다는 뜻) 짧은 지연 후 **새 코루틴으로
+ * [runShardWorker]를 재시작**한다 — "죽은 척만 하고 계속 처리"가 아니라 "실제로 죽고, 새로
+ * 태어난 워커가 다음 작업부터 이어받는" 구조다. 채널에서 이미 소비된(=죽음의 원인이 된) 작업은
+ * 재시도되지 않고 유실되며([runFallback]도 호출되지 않는다 — fallback 자체도 블로킹 IO라 같은
+ * 손상된 JVM 상태에서 또 실패할 수 있다), 그 뒤에 들어온 작업들은 재시작된 워커가 정상적으로
+ * 이어받는다. `ThreadDeath`는 [superviseShardWorker]에서도 잡지 않고 그대로 통과시킨다(JVM
+ * 명세상 항상 다시 던져야 하는 유일한 예외).
+ *
+ * `VirtualMachineError`가 아닌 그 외 `Throwable`(예: `AssertionError`, `task.execute()`가 직접
+ * `throw`한 커스텀 `Error`)은 JVM 자체의 건전성과 무관하므로 여전히 [runShardWorker]가 이 작업
+ * 하나만 최종 실패로 처리(카운터 증가 + [runFallback])하고 워커를 재시작 없이 계속 사용한다 —
+ * 재시작(및 그 지연)은 진짜 `VirtualMachineError`에만 쓰는 무거운 대응이다.
+ * `CancellationException`은 어느 계층에서도 그대로 다시 던져 shutdown()에 의한 정상 종료를
+ * 방해하지 않는다.
  */
 open class GateDbWriteQueue(
     private val shardCount: Int,
@@ -149,7 +171,7 @@ open class GateDbWriteQueue(
 
     /** 샤드별 워커 코루틴 — 각각 [scope](SupervisorJob 보유)의 직접 자식으로 걸어 서로 격리한다(클래스 KDoc "샤드 워커 간 격리" 참고). */
     private val workerJobs: List<Job> = shards.mapIndexed { index, shard ->
-        scope.launch { runShardWorker(index, shard) }
+        scope.launch { superviseShardWorker(index, shard) }
     }
 
     /** 작업을 파티션 큐에 넣는다. 큐가 가득 차면 드롭하고 카운터만 올린다(계획서 3.5절 방어적 설계). */
@@ -180,6 +202,33 @@ open class GateDbWriteQueue(
         blockingExecutor.shutdown()
     }
 
+    /**
+     * [runShardWorker]를 감독한다 — `VirtualMachineError`로 죽으면 새 코루틴으로 재시작해 채널
+     * 소비자를 복구한다(클래스 KDoc "`VirtualMachineError`는 '작업 실패'로 삼키지 않는다" 참고).
+     * `ThreadDeath`는 JVM 명세상 항상 다시 던져야 하므로 여기서도 잡지 않고 그대로 통과시킨다.
+     */
+    private suspend fun superviseShardWorker(shardIndex: Int, shard: Channel<GateDbWriteTask>) {
+        while (true) {
+            try {
+                runShardWorker(shardIndex, shard)
+                return // shard.close()(shutdown())로 채널이 정상 종료됨 — 재시작하지 않고 끝낸다.
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: VirtualMachineError) {
+                logger.error(
+                    "샤드 워커가 VirtualMachineError로 종료되어 재시작합니다(shard={}) — 직전 작업 결과는 " +
+                        "신뢰할 수 없어 유실 처리합니다. 같은 오류가 반복되면 프로세스 자체의 안정성을 " +
+                        "점검해야 합니다.",
+                    shardIndex, ex,
+                )
+                // 짧은 지연 후 재시작 — 같은 오류가 즉시 반복되는 크래시 루프에서 로그/CPU가
+                // 무한정 소모되는 것을 막는다. 재시작 자체를 포기하지는 않는다 — 채널에 소비자가
+                // 아예 없는 것보다는(=그 샤드로 라우팅되는 모든 이후 작업이 드롭됨) 낫다는 판단이다.
+                delay(SHARD_WORKER_RESTART_DELAY)
+            }
+        }
+    }
+
     private suspend fun runShardWorker(shardIndex: Int, shard: Channel<GateDbWriteTask>) {
         for (task in shard) {
             try {
@@ -188,13 +237,14 @@ open class GateDbWriteQueue(
                 // shutdown()/workerJobs 개별 cancel()로 인한 진짜 취소 — 그대로 전파해야 for 루프가
                 // 멈추고 워커 코루틴이 정상적으로 종료된다.
                 throw ex
+            } catch (ex: VirtualMachineError) {
+                // OutOfMemoryError/StackOverflowError 등 — 여기서 삼켜 다음 작업을 계속 처리하면
+                // 안 된다(클래스 KDoc 참고). superviseShardWorker가 워커 자체를 재시작한다.
+                throw ex
             } catch (ex: Throwable) {
-                // Error(OutOfMemoryError 등, processTask 안의 catch (ex: Exception)이 잡지 못하는
-                // Throwable) — 여기서 삼키지 않고 for 루프를 빠져나가게 두면 이 샤드 워커 코루틴
-                // 자체가 영구 종료되어, 형제 샤드는 살아남아도(클래스 KDoc "샤드 워커 간 격리" 참고)
-                // 정작 이 샤드로 라우팅되는 이후 모든 작업은 소비자 없는 채널에 쌓이다 드롭된다
-                // (Codex 리뷰 지적, 2026-08-25 후속). 이 작업 하나만 최종 실패로 처리하고 루프는
-                // 계속 돈다 — "같은 샤드 내 워커 생존" 참고.
+                // VirtualMachineError가 아닌 Error(예: AssertionError, task.execute()가 직접 던진
+                // 커스텀 Error) — JVM 자체의 건전성과는 무관하므로 이 작업 하나만 최종 실패로
+                // 처리하고 워커 재시작 없이 for 루프를 계속 돈다.
                 finalFailureCount.incrementAndGet()
                 logger.error(
                     "DB 쓰기 중 처리 불가능한 오류(Error) 발생 — 이 작업만 최종 실패로 처리하고 워커는 계속 동작합니다: shard={}, op={}",
@@ -299,4 +349,9 @@ open class GateDbWriteQueue(
 
     private fun shardIndexOf(partitionKey: String): Int =
         (partitionKey.hashCode() and Int.MAX_VALUE) % shardCount
+
+    companion object {
+        /** [superviseShardWorker]가 `VirtualMachineError` 이후 워커를 재시작하기 전 대기하는 시간. */
+        private val SHARD_WORKER_RESTART_DELAY = 1.seconds
+    }
 }

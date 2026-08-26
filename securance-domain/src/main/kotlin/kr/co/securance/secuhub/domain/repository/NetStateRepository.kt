@@ -20,7 +20,16 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
 
     /**
      * 코드 리뷰 지적 R-8(2026-08-20) 대응 — `applied_seq`가 [seq] 이하인 행에만(=더 최신 쓰기가
-     * 아직 적용되지 않았을 때만) [dtlState]/[checkTime]/[applied_seq]를 반영하는 조건부 UPSERT.
+     * 아직 적용되지 않았을 때만) [dtlState]/[checkTime]/[serverIp]/[applied_seq]를 반영하는 조건부
+     * UPSERT.
+     *
+     * **컬럼 누락 수정(2026-08-26 dev DB 실측 검증)**: [NetState.serverIp]("이 상태를 보고한 백엔드
+     * 인스턴스 IP")는 엔티티에 매핑돼 있었지만 이 메서드가 이 컬럼을 INSERT/UPDATE 절 어디에도
+     * 포함하지 않아 실제로는 한 번도 쓰인 적이 없었다 — dev DB(`securance_gate`)에 남아 있던
+     * `server_ip` 값은 이 앱이 아니라 예전 코드/레거시가 채운 잔존 데이터였다(2026-08-26 확인,
+     * `applied_seq`가 최근에 갱신된 행조차 `server_ip`가 실제 접속 서버와 무관하게 고정돼 있었음).
+     * 다중 인스턴스 배포에서 "어느 인스턴스가 이 레인의 연결 상태를 마지막으로 관측했는지" 추적할
+     * 유일한 컬럼이므로, `dtl_state`/`check_time`과 동일한 `applied_seq` 가드로 함께 갱신한다.
      *
      * [kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl]이 예전에 쓰던
      * 인메모리 시퀀스 맵 + 락([ReentrantLock])을 이 한 문장으로 대체한다 — DB가 `INSERT ...
@@ -47,11 +56,12 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
     @Transactional
     @Query(
         value = """
-        INSERT INTO tb_net_state (dtl_ip, dtl_lane_no, loc_id, grp_id, dtl_state, check_time, applied_seq)
-        VALUES (:dtlIp, :dtlLaneNo, :locId, :grpId, :dtlState, :checkTime, :seq)
+        INSERT INTO tb_net_state (dtl_ip, dtl_lane_no, loc_id, grp_id, dtl_state, check_time, applied_seq, server_ip)
+        VALUES (:dtlIp, :dtlLaneNo, :locId, :grpId, :dtlState, :checkTime, :seq, :serverIp)
         ON DUPLICATE KEY UPDATE
             dtl_state = IF(applied_seq <= VALUES(applied_seq), VALUES(dtl_state), dtl_state),
             check_time = IF(applied_seq <= VALUES(applied_seq), VALUES(check_time), check_time),
+            server_ip = IF(applied_seq <= VALUES(applied_seq), VALUES(server_ip), server_ip),
             applied_seq = IF(applied_seq <= VALUES(applied_seq), VALUES(applied_seq), applied_seq)
         """,
         nativeQuery = true,
@@ -64,6 +74,7 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
         @Param("dtlState") dtlState: String,
         @Param("checkTime") checkTime: String,
         @Param("seq") seq: Long,
+        @Param("serverIp") serverIp: String,
     )
 
     /**

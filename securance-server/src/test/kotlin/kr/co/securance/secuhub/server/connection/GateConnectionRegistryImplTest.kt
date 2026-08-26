@@ -51,6 +51,7 @@ private data class UpsertCall(
     val dtlState: String,
     val checkTime: String,
     val seq: Long,
+    val serverIp: String,
 )
 
 /**
@@ -70,6 +71,7 @@ private fun recordUpsertCalls(repository: NetStateRepository, into: MutableList<
             dtlState = invocation.getArgument(4),
             checkTime = invocation.getArgument(5),
             seq = invocation.getArgument(6),
+            serverIp = invocation.getArgument(7),
         )
         null
     }.`when`(repository).upsertIfNewer(
@@ -80,6 +82,7 @@ private fun recordUpsertCalls(repository: NetStateRepository, into: MutableList<
         org.mockito.ArgumentMatchers.anyString(),
         org.mockito.ArgumentMatchers.anyString(),
         org.mockito.ArgumentMatchers.anyLong(),
+        org.mockito.ArgumentMatchers.anyString(),
     )
 }
 
@@ -334,6 +337,10 @@ class GateConnectionRegistryImplTest {
         // 검증한다.
         assertTrue(call.seq > 0L, "seq가 발급돼야 한다")
         assertTrue(call.checkTime.isNotBlank())
+        // 컬럼 누락 회귀 방지(2026-08-26 dev DB 실측 검증) — server_ip가 예전에는 upsertIfNewer
+        // 호출 자체에 전달되지 않아 DB에 한 번도 쓰인 적이 없었다. 값 자체는 로컬 IP 조회 성공
+        // 여부에 따라 환경마다 다를 수 있어 "비어있지 않다"만 검증한다.
+        assertTrue(call.serverIp.isNotBlank(), "server_ip가 채워져야 한다")
     }
 
     /**

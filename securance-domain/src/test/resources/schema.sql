@@ -152,6 +152,65 @@ CREATE TABLE tb_data_snd (
     version         BIGINT      NOT NULL DEFAULT 0
 );
 
+-- `NetStateRepositoryTest`(@DataJpaTest) 전용 최소 스키마. 운영 마이그레이션(V1__init_schema.sql +
+-- V31__add_net_state_applied_seq.sql + V32__add_net_state_seq.sql)의 [NetState] 엔티티가 매핑하는
+-- 컬럼 전체를 재현한다 — 게이트 연결 상태(수신 데이터와 무관한 별도 갱신 경로)가 컬럼 누락 없이
+-- 저장되는지 검증한다(2026-08-26 DB 저장 컬럼 누락 검증 작업).
+CREATE TABLE tb_net_state (
+    dtl_ip       VARCHAR(20) NOT NULL,
+    dtl_lane_no  TINYINT     NOT NULL,
+    loc_id       BIGINT      NOT NULL,
+    grp_id       BIGINT      NOT NULL,
+    dtl_id       BIGINT NULL,
+    dtl_type     TINYINT NULL,
+    dtl_no       INT NULL,
+    dtl_state    CHAR(1) NOT NULL DEFAULT 'N',
+    dtl_ping     CHAR(1) NULL,
+    check_time   VARCHAR(20) NULL,
+    server_ip    VARCHAR(20) NULL,
+    server_cd    VARCHAR(20) NULL,
+    applied_seq  BIGINT NOT NULL DEFAULT 0,
+    reg_date     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    mod_date     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (dtl_ip, dtl_lane_no, loc_id, grp_id)
+);
+
+-- `OprStatusRepositoryTest`(@DataJpaTest) 전용 최소 스키마. 운영 마이그레이션(V1__init_schema.sql +
+-- V11__opr_status_write_columns.sql + V15__fix_tb_opr_status_bigint_columns.sql +
+-- V16__fix_tb_opr_status_dtl_type.sql)의 [OprStatus] 엔티티가 매핑하는 컬럼 전체를 재현한다.
+CREATE TABLE tb_opr_status (
+    opr_date          VARCHAR(20) NOT NULL,
+    opr_seq           INT         NOT NULL DEFAULT 1,
+    dtl_ip            VARCHAR(20) NOT NULL,
+    dtl_lane_no       TINYINT     NOT NULL,
+    dtl_id            BIGINT NULL,
+    dtl_type          INT         NOT NULL DEFAULT 1,
+    dtl_no            INT         NOT NULL DEFAULT 1,
+    loc_id            BIGINT NULL,
+    grp_id            BIGINT NULL,
+    opr_gate_type     VARCHAR(20) NULL,
+    opr_user_mode     VARCHAR(20) NULL,
+    opr_security_mode VARCHAR(20) NULL,
+    opr_inout_time    INT         NOT NULL DEFAULT 0,
+    opr_user_count    INT NULL,
+    opr_total_count   BIGINT      NOT NULL,
+    opr_before_total  BIGINT      NOT NULL,
+    opr_in_count      INT NULL,
+    opr_in_total      BIGINT      NOT NULL,
+    opr_in_before     BIGINT      NOT NULL,
+    opr_out_count     INT NULL,
+    opr_out_total     BIGINT      NOT NULL,
+    opr_out_before    BIGINT      NOT NULL,
+    opr_door_count    INT NULL,
+    opr_door_total    BIGINT      NOT NULL,
+    opr_door_before   BIGINT      NOT NULL,
+    use_yn            CHAR(1)     NOT NULL DEFAULT 'Y',
+    reg_user          VARCHAR(50) NOT NULL DEFAULT 'service',
+    reg_date          TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    mod_date          TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (opr_date, opr_seq, dtl_ip, dtl_lane_no)
+);
+
 -- `GateLogRepositoryTest`(@DataJpaTest) 전용 최소 스키마. 운영 마이그레이션(V7__add_gate_log.sql)의
 -- 컬럼을 그대로 재현한다(자연키 UNIQUE 제약 포함 — existsBy... 중복 판단 쿼리가 실제로 그 컬럼
 -- 조합을 대상으로 동작하는지 검증하려면 필요하다).

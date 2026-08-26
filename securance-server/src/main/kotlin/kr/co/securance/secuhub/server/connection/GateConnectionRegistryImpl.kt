@@ -308,8 +308,19 @@ class GateConnectionRegistryImpl(
                     dtlState = if (online) "Y" else "N",
                     checkTime = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm")),
                     seq = seq,
+                    serverIp = LOCAL_SERVER,
                 )
             },
         )
+    }
+
+    companion object {
+        /**
+         * `tb_net_state.server_ip` — 이 레인의 연결 상태를 마지막으로 관측/기록한 백엔드 인스턴스 IP
+         * (다중 인스턴스 배포 시 추적용). [kr.co.securance.secuhub.server.control.GateControlDispatcher.LOCAL_SERVER]와
+         * 동일한 패턴(2026-08-26 dev DB 실측 검증 — 이 컬럼이 그동안 전혀 쓰이지 않던 문제 수정).
+         */
+        private val LOCAL_SERVER: String =
+            runCatching { java.net.InetAddress.getLocalHost().hostAddress }.getOrDefault("unknown")
     }
 }

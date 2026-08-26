@@ -28,17 +28,28 @@
 -- 매 패킷마다 "Unknown column" 오류로 깨진다 — 이 변경이 애초에 해결하려는 장애와 대칭이다.
 -- 이를 완전히 막을 수는 없지만(다른 저장소 배포 상태를 SQL만으로 확정할 수 없음), 최소한의
 -- 방어로 이 스키마에 현재 등록된 저장 프로시저 정의에 삭제 대상 컬럼명이 남아 있으면 마이그레이션
--- 자체를 실패시킨다. 단, `information_schema.ROUTINES.ROUTINE_DEFINITION`은 마이그레이션 실행
--- 계정에 SHOW_ROUTINE/SUPER 권한(또는 프로시저 정의자 권한)이 없으면 NULL만 보여 이 가드를
--- 무력화할 수 있다 — 이 저장소가 GateControl의 배포 상태를 검증할 수 있는 유일하고 완전한
--- 수단은 아니며, 실제로는 두 저장소 운영자 간 배포 순서 합의(GateControl 전환 완료 확인 후 이
--- 마이그레이션 적용)가 반드시 선행돼야 한다.
+-- 자체를 실패시킨다.
 --
 -- [Codex 리뷰 지적, 2026-08-26, P2] 최초 버전은 삭제 대상 30개 컬럼 중 `anal_data_stx` 단 하나만
 -- LIKE로 검사했다 — GateControl이 일부 컬럼(예: `anal_data_stx`)은 이미 뺐지만 다른 컬럼(예:
 -- `anal_data_gate_operation_status`)은 여전히 참조하는 중간 버전 프로시저가 배포돼 있으면 이
 -- 가드를 그대로 통과해 그 컬럼을 DROP해버리고, 해당 구버전 프로시저의 패킷 처리가 깨진다. 가드의
 -- 목적(삭제 대상 컬럼 중 하나라도 참조되면 막는다)에 맞게 30개 전부를 OR로 검사한다.
+--
+-- [Codex 적대적 리뷰 지적, 2026-08-26, high, fail-open 수정] `information_schema.ROUTINES.
+-- ROUTINE_DEFINITION`은 마이그레이션 실행 계정에 SHOW_ROUTINE/SUPER 권한(또는 프로시저 정의자
+-- 권한)이 없으면 프로시저별로 NULL만 보인다 — `NULL LIKE '%...%'`는 항상 NULL(참이 아님)이므로
+-- 위 30개 OR 검사는 조용히 0건으로 집계되고 가드가 "안전하다"고 오판해 통과했다. 즉 이 권한
+-- 제약이 있는 계정으로 배포하면, 실제로는 구버전 프로시저가 이 컬럼들을 여전히 참조하고 있어도
+-- 가드가 fail-open으로 막지 못하고 DROP이 그대로 실행된다 — "확인할 수 없다"를 "안전하다"로
+-- 잘못 취급하던 것. "확인할 수 없으면 막는다"(fail-closed)로 바꾼다: 이 스키마에 등록된 프로시저
+-- 중 정의를 읽을 수 없는(ROUTINE_DEFINITION IS NULL) 것이 하나라도 있으면, 그 안에 삭제 대상
+-- 컬럼 참조가 있는지 이 마이그레이션이 검증할 수 없다는 뜻이므로 마이그레이션 자체를 실패시킨다
+-- (프로시저가 하나도 없는 스키마는 애초에 검증할 대상이 없으므로 통과). 이 경우 운영자는
+-- 마이그레이션 계정에 프로시저 정의 조회 권한을 부여하거나, 실제 프로시저 본문을 수동으로 확인한
+-- 뒤 재시도해야 한다 — 이 저장소가 GateControl의 배포 상태를 검증할 수 있는 유일하고 완전한
+-- 수단은 아니며, 실제로는 두 저장소 운영자 간 배포 순서 합의(GateControl 전환 완료 확인 후 이
+-- 마이그레이션 적용)가 반드시 선행돼야 한다.
 -- ============================================================================
 
 SET @v33_legacy_ref_count = (
@@ -80,10 +91,26 @@ SET @v33_legacy_ref_count = (
           )
 );
 
+-- fail-closed 가드: 이 스키마에 등록된 프로시저 중 정의를 아예 읽을 수 없는(SHOW_ROUTINE/SUPER
+-- 권한 부족 등으로 ROUTINE_DEFINITION이 NULL인) 것이 있으면, 위 @v33_legacy_ref_count 검사가
+-- 그 프로시저는 건너뛴 것이므로 "삭제 대상 컬럼을 참조하지 않는다"고 확정할 수 없다 — 이 경우도
+-- 막는다(확인 불가 = 안전하지 않음으로 취급).
+SET @v33_unreadable_proc_count = (
+    SELECT COUNT(*)
+    FROM information_schema.ROUTINES
+    WHERE ROUTINE_SCHEMA = DATABASE()
+      AND ROUTINE_TYPE = 'PROCEDURE'
+      AND ROUTINE_DEFINITION IS NULL
+);
+
 SET @v33_guard_sql = IF(
     @v33_legacy_ref_count > 0,
     'SELECT * FROM v33_guard_legacy_procedure_references_dropped_columns',
-    'DO 0'
+    IF(
+        @v33_unreadable_proc_count > 0,
+        'SELECT * FROM v33_guard_cannot_verify_procedure_definitions',
+        'DO 0'
+    )
 );
 
 PREPARE v33_guard_stmt FROM @v33_guard_sql;

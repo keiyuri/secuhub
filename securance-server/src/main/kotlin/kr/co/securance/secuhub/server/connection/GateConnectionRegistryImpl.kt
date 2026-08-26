@@ -8,6 +8,7 @@ import kr.co.securance.secuhub.domain.entity.NetStateId
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
 import kr.co.securance.secuhub.server.config.ServerModeConfig
+import kr.co.securance.secuhub.server.control.localServerId
 import kr.co.securance.secuhub.server.db.GateDbWriteQueue
 import kr.co.securance.secuhub.server.db.GateDbWriteTask
 import org.slf4j.LoggerFactory
@@ -308,19 +309,15 @@ class GateConnectionRegistryImpl(
                     dtlState = if (online) "Y" else "N",
                     checkTime = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm")),
                     seq = seq,
-                    serverIp = LOCAL_SERVER,
+                    // `tb_net_state.server_ip`도 `tb_data_snd.snd_server`와 동일하게 VARCHAR(20)이다
+                    // (2026-08-26 dev DB 실측 확인). 여기서 InetAddress.getLocalHost().hostAddress를
+                    // 직접 다시 쓰면 IPv6 환경에서 길이 초과로 이 UPSERT 자체가 매번 실패하는(코드
+                    // 리뷰로 발견, a3faf12가 snd_server에서 이미 겪은 것과 동일한 버그) 회귀가 생긴다
+                    // — [GateControlService.localServerId]가 이미 IPv4 우선 탐지 + 20자 강제 절단을
+                    // 처리해 두었으므로 새로 만들지 않고 그대로 재사용한다.
+                    serverIp = localServerId,
                 )
             },
         )
-    }
-
-    companion object {
-        /**
-         * `tb_net_state.server_ip` — 이 레인의 연결 상태를 마지막으로 관측/기록한 백엔드 인스턴스 IP
-         * (다중 인스턴스 배포 시 추적용). [kr.co.securance.secuhub.server.control.GateControlDispatcher.LOCAL_SERVER]와
-         * 동일한 패턴(2026-08-26 dev DB 실측 검증 — 이 컬럼이 그동안 전혀 쓰이지 않던 문제 수정).
-         */
-        private val LOCAL_SERVER: String =
-            runCatching { java.net.InetAddress.getLocalHost().hostAddress }.getOrDefault("unknown")
     }
 }

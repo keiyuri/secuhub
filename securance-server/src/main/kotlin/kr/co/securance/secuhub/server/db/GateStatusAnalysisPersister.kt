@@ -599,38 +599,15 @@ internal class GateStatusAnalysisPersister(
             analData = analysis.operationStatusHex,
             analTail = tailHex,
             objCd = "%02X".format(SpeedGateProtocolConstants.ObjectCode.GATE_STATUS),
-            analDataStx = headerFields.stx,
-            analDataPacketLen = headerFields.packetLen,
-            analDataProtocolVer = headerFields.protocolVer,
-            analDataFrameOption = headerFields.frameOption,
-            analDataAddress = headerFields.address,
-            analDataCommand = headerFields.command,
-            analDataSubcommand = headerFields.subcommand,
+            // anal_data_* 33개 중 30개는 GateControl(SR_Speed_Server)이 write-only(어디서도
+            // SELECT하지 않음)로 판단해 2026-08-26 dev DB에서 실제로 DROP했다(GateControl 커밋
+            // 8c840c3/41696f2, dev DB 실측 검증 완료). GateControl이 계속 유지하는 3개만 남긴다 —
+            // [DataReceiveAnalysis] KDoc 및
+            // securance-domain/src/main/resources/db/migration/V33__drop_write_only_anal_data_columns.sql
+            // 참고.
             analDataObjectCode = headerFields.objectCode,
-            analDataInfoLength = headerFields.infoLength,
-            analDataCount = headerFields.count,
-            analDataLength = headerFields.length,
-            analDataGateName = identity.dtlName ?: "",
-            analDataIp = state.dtlIp,
-            analDataGateLaneNumber = raw.laneNumber,
-            analDataGateLaneCount = laneCountHex,
-            analDataGateType = raw.gateType,
-            analDataUserMode = raw.userMode,
-            analDataSecurityMode = raw.securityMode,
-            analDataInoutTime = raw.inoutTime,
-            analDataUserCount = raw.userCount,
-            analDataTotalCount = raw.totalCount,
-            analDataOperationSensorStatus1 = raw.operationSensor1,
-            analDataSafetySensorStatus = raw.safetySensor,
-            analDataOperationSensorStatus2 = raw.operationSensor2,
-            analDataOpticalSensorStatus = raw.opticalSensor,
-            analDataOutputStatus = raw.outputStatus,
             analDataMotorOperationCount = raw.motorCount,
             analDataMasterInTotalCount = raw.masterInCount,
-            analDataGateOperationStatus = raw.operationStatus,
-            analDataCheckSum = checkSum,
-            analDataPacketChecksum = packetChecksum,
-            analDataEtx = etx,
             // desc_data_info_length/desc_gate_name/desc_gate_ip는 레거시 트리거가 항상 채우던 필드인데
             // 이 엔티티 도입 초기에는 매핑이 누락돼 빈 문자열로만 저장되고 있었다(2026-08-14 실 DB
             // 조회로 확인 — anal_id=856773 등 secuhub가 쓴 행만 이 세 컬럼이 비어 있었다).

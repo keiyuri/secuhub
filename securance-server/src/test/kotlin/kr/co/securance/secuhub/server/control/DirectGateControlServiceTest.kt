@@ -121,6 +121,13 @@ class DirectGateControlServiceTest {
         assertEquals("operator1", saved.sndUser)
         assertEquals(SpeedGateControlCommand.RESET_MOTOR.legacyCode, saved.sndTypeCd)
         assertEquals("Y", saved.sndYn)
+        // 2026-08-25: DIRECT 모드에서 snd_header/snd_data/snd_tail/snd_data_tp가 빈 문자열로
+        // 저장되던 매핑 누락을 수정 — QueuedGateControlService와 동일하게 채워지는지 검증한다.
+        assertEquals("RESET_MOTOR", saved.sndDataTp)
+        assertTrue(saved.sndHeader.isNotBlank())
+        assertTrue(saved.sndData.isNotBlank())
+        assertTrue(saved.sndTail.isNotBlank())
+        assertTrue(saved.sndServer.isNotBlank())
         state.actor.close()
     }
 

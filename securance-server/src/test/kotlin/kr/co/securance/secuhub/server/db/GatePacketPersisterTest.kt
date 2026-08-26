@@ -281,9 +281,12 @@ class GatePacketPersisterTest {
     }
 
     @Test
-    fun `anal_data_ 헤더 파생 컬럼들을 패킷 헤더에서 채운다`() {
-        // 회귀 방지(2026-08-14) — DataReceiveAnalysis에 새로 매핑한 anal_data_* 33개 컬럼 중
-        // 헤더 바이트에서 뽑을 수 있는 11개가 실제로 채워지는지 검증한다.
+    fun `anal_data_object_code는 패킷 헤더에서 채운다`() {
+        // 2026-08-26 축소 — GateControl이 write-only로 판단해 dev DB에서 실제로 DROP한 30개
+        // `anal_data_*` 컬럼(이 테스트가 원래 검증하던 analDataStx/analDataGateName/analDataIp/
+        // analDataAddress 포함)을 엔티티/GateStatusAnalysisPersister 매핑에서도 제거했다 —
+        // 살아남은 3개 중 헤더 파생 필드는 analDataObjectCode뿐이다. V33 마이그레이션 및
+        // DataReceiveAnalysis KDoc 참고.
         val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
         `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
         val persister = newPersister(analysisRepository)
@@ -294,11 +297,7 @@ class GatePacketPersisterTest {
         val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
         verify(analysisRepository, timeout(5_000)).save(captor.capture())
         val saved = captor.value
-        assertEquals("02", saved.analDataStx) // SpeedGateProtocolConstants.STX
         assertEquals("4D", saved.analDataObjectCode) // ObjectCode.GATE_STATUS
-        assertEquals("캐시된이름", saved.analDataGateName)
-        assertEquals("192.168.0.205", saved.analDataIp)
-        assertTrue(saved.analDataAddress.isNotEmpty())
     }
 
     @Test
@@ -544,9 +543,12 @@ class GatePacketPersisterTest {
     }
 
     @Test
-    fun `anal_data_ 레인 raw 필드 19개를 레인 상태 블록과 Tail에서 채운다`() {
-        // 재검증(2026-08-18) — V30에서 새로 매핑한 19개 컬럼(레인 상태 블록 74바이트 + Tail 4바이트
-        // 파생)이 실제로 채워지는지 고정한다. desc_* 계열(decoded)과 짝을 이루는 raw hex 컬럼이다.
+    fun `anal_data_motor_operation_count anal_data_master_in_total_count을 레인 상태 블록에서 채운다`() {
+        // 2026-08-26 축소 — V30에서 매핑했던 19개 컬럼 중 GateControl이 write-only로 판단해
+        // dev DB에서 실제로 DROP한 17개(analDataGateLaneNumber/analDataGateLaneCount/
+        // analDataCheckSum 등 이 테스트가 원래 검증하던 필드 포함)를 엔티티/
+        // GateStatusAnalysisPersister 매핑에서도 제거했다 — 살아남은 3개 중 레인 상태 블록
+        // 파생 필드는 이 두 개뿐이다. V33 마이그레이션 및 DataReceiveAnalysis KDoc 참고.
         val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
         `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
         val persister = newPersister(analysisRepository)
@@ -566,26 +568,8 @@ class GatePacketPersisterTest {
         val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
         verify(analysisRepository, timeout(5_000)).save(captor.capture())
         val saved = captor.value
-        assertEquals("01", saved.analDataGateLaneNumber)
-        assertEquals("01", saved.analDataGateLaneCount) // 레인 1개
-        assertEquals("01", saved.analDataGateType)
-        assertEquals("02", saved.analDataUserMode)
-        assertEquals("01", saved.analDataSecurityMode)
-        assertEquals("05", saved.analDataInoutTime)
-        assertEquals("03", saved.analDataUserCount)
-        assertEquals("00000064", saved.analDataTotalCount) // totalCount=100(0x64)
-        assertTrue(saved.analDataOperationSensorStatus1.isNotEmpty())
-        assertTrue(saved.analDataSafetySensorStatus.isNotEmpty())
-        assertTrue(saved.analDataOperationSensorStatus2.isNotEmpty())
-        assertTrue(saved.analDataOpticalSensorStatus.isNotEmpty())
-        assertTrue(saved.analDataOutputStatus.isNotEmpty())
         assertTrue(saved.analDataMotorOperationCount.isNotEmpty())
         assertTrue(saved.analDataMasterInTotalCount.isNotEmpty())
-        assertTrue(saved.analDataGateOperationStatus.isNotEmpty())
-        // Tail(4바이트: XOR,SUM,0x08,ETX) = 12 34 56 78 → check_sum(2)/packet_checksum(1)/etx(1) 분할.
-        assertEquals("1234", saved.analDataCheckSum)
-        assertEquals("56", saved.analDataPacketChecksum)
-        assertEquals("78", saved.analDataEtx)
     }
 
     @Test

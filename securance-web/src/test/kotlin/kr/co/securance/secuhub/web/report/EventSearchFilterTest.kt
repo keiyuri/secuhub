@@ -42,14 +42,22 @@ class EventSearchFilterTest {
     @Autowired
     private lateinit var repository: DataReceiveAnalysisRepository
 
-    private fun sample(analTp: String) = DataReceiveAnalysis(
+    private fun sample(
+        analTp: String,
+        locId: Long? = null,
+        grpId: Long? = null,
+        dtlIp: String = "192.168.0.10",
+        resolveYn: String = "N",
+    ) = DataReceiveAnalysis(
         analDate = "202608140000",
         analTp = analTp,
-        dtlIp = "192.168.0.10",
+        dtlIp = dtlIp,
         dtlLaneNo = 1,
         rcvDate = "202608140000",
         errType = 3,
-        resolveYn = "N",
+        resolveYn = resolveYn,
+        locId = locId,
+        grpId = grpId,
     )
 
     @Test
@@ -83,5 +91,60 @@ class EventSearchFilterTest {
         val result = repository.findAll(filter.toSpecification(), PageRequest.of(0, 10, Sort.by("analId")))
 
         assertEquals(2, result.totalElements)
+    }
+
+    // 2026-08-25 소스 전수 검토 지적 — analType 외 나머지 조건(locId/grpId/dtlIp/resolveYn)은
+    // toSpecification()에서 실제로 조립되는데도 이 테스트에서 한 번도 검증되지 않았다.
+    @Test
+    fun `locId와 grpId를 지정하면 두 조건을 모두 만족하는 행만 조회된다`() {
+        val target = entityManager.persistAndFlush(sample(analTp = "NOR", locId = 1L, grpId = 10L))
+        entityManager.persistAndFlush(sample(analTp = "NOR", locId = 1L, grpId = 11L)) // grpId 불일치 — 제외돼야 함
+        entityManager.persistAndFlush(sample(analTp = "NOR", locId = 2L, grpId = 10L)) // locId 불일치 — 제외돼야 함
+        entityManager.clear()
+
+        val filter = EventSearchFilter(
+            locId = 1L,
+            grpId = 10L,
+            fromDate = LocalDate.of(2026, 8, 14),
+            toDate = LocalDate.of(2026, 8, 14),
+        )
+        val result = repository.findAll(filter.toSpecification(), PageRequest.of(0, 10, Sort.by("analId")))
+
+        assertEquals(1, result.totalElements)
+        assertEquals(target.analId, result.content.single().analId)
+    }
+
+    @Test
+    fun `dtlIp를 지정하면 해당 IP만 조회된다`() {
+        val target = entityManager.persistAndFlush(sample(analTp = "NOR", dtlIp = "192.168.0.10"))
+        entityManager.persistAndFlush(sample(analTp = "NOR", dtlIp = "192.168.0.11"))
+        entityManager.clear()
+
+        val filter = EventSearchFilter(
+            dtlIp = "192.168.0.10",
+            fromDate = LocalDate.of(2026, 8, 14),
+            toDate = LocalDate.of(2026, 8, 14),
+        )
+        val result = repository.findAll(filter.toSpecification(), PageRequest.of(0, 10, Sort.by("analId")))
+
+        assertEquals(1, result.totalElements)
+        assertEquals(target.analId, result.content.single().analId)
+    }
+
+    @Test
+    fun `resolveYn을 지정하면 해결 상태가 일치하는 행만 조회된다`() {
+        val unresolved = entityManager.persistAndFlush(sample(analTp = "PLM", resolveYn = "N"))
+        entityManager.persistAndFlush(sample(analTp = "PLM", resolveYn = "Y"))
+        entityManager.clear()
+
+        val filter = EventSearchFilter(
+            resolveYn = "N",
+            fromDate = LocalDate.of(2026, 8, 14),
+            toDate = LocalDate.of(2026, 8, 14),
+        )
+        val result = repository.findAll(filter.toSpecification(), PageRequest.of(0, 10, Sort.by("analId")))
+
+        assertEquals(1, result.totalElements)
+        assertEquals(unresolved.analId, result.content.single().analId)
     }
 }

@@ -543,6 +543,28 @@ class GatePacketPersisterTest {
     }
 
     @Test
+    fun `user_mode_cd security_mode_cd는 원본 코드값을 문자열로 채운다`() {
+        // dtl_type_cd와 같은 경위(2026-08-26) — 실 DB(192.168.0.26:28031/securance_gate) 조회로
+        // 엔티티 매핑이 아예 없어 두 컬럼이 항상 NULL로 저장되던 것을 확인했다. desc_user_mode/
+        // desc_security_mode(표시 문자열)와 별개로 원본 코드값도 채워야 한다.
+        val analysisRepository = mock(DataReceiveAnalysisRepository::class.java)
+        `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
+        val persister = newPersister(analysisRepository)
+        val state = newState("192.168.0.205")
+
+        val block = laneBlock(laneNo = 1, totalCount = 100).apply {
+            this[offsets.USER_MODE] = 0x02
+            this[offsets.SECURITY_MODE] = 0x01
+        }
+        persister.persistStatusAnalysis(state, statusPacket(block))
+
+        val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
+        verify(analysisRepository, timeout(5_000)).save(captor.capture())
+        assertEquals("2", captor.value.userModeCd)
+        assertEquals("1", captor.value.securityModeCd)
+    }
+
+    @Test
     fun `anal_data_motor_operation_count anal_data_master_in_total_count을 레인 상태 블록에서 채운다`() {
         // 2026-08-26 축소 — V30에서 매핑했던 19개 컬럼 중 GateControl이 write-only로 판단해
         // dev DB에서 실제로 DROP한 17개(analDataGateLaneNumber/analDataGateLaneCount/

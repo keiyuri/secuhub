@@ -33,6 +33,12 @@
 -- 무력화할 수 있다 — 이 저장소가 GateControl의 배포 상태를 검증할 수 있는 유일하고 완전한
 -- 수단은 아니며, 실제로는 두 저장소 운영자 간 배포 순서 합의(GateControl 전환 완료 확인 후 이
 -- 마이그레이션 적용)가 반드시 선행돼야 한다.
+--
+-- [Codex 리뷰 지적, 2026-08-26, P2] 최초 버전은 삭제 대상 30개 컬럼 중 `anal_data_stx` 단 하나만
+-- LIKE로 검사했다 — GateControl이 일부 컬럼(예: `anal_data_stx`)은 이미 뺐지만 다른 컬럼(예:
+-- `anal_data_gate_operation_status`)은 여전히 참조하는 중간 버전 프로시저가 배포돼 있으면 이
+-- 가드를 그대로 통과해 그 컬럼을 DROP해버리고, 해당 구버전 프로시저의 패킷 처리가 깨진다. 가드의
+-- 목적(삭제 대상 컬럼 중 하나라도 참조되면 막는다)에 맞게 30개 전부를 OR로 검사한다.
 -- ============================================================================
 
 SET @v33_legacy_ref_count = (
@@ -40,7 +46,38 @@ SET @v33_legacy_ref_count = (
     FROM information_schema.ROUTINES
     WHERE ROUTINE_SCHEMA = DATABASE()
       AND ROUTINE_TYPE = 'PROCEDURE'
-      AND ROUTINE_DEFINITION LIKE '%anal_data_stx%'
+      AND (
+               ROUTINE_DEFINITION LIKE '%anal_data_stx%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_packet_len%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_protocol_ver%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_frame_option%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_address%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_command%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_subcommand%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_info_length%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_count%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_length%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_gate_name%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_ip%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_mac%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_gate_lane_number%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_gate_lane_count%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_gate_type%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_user_mode%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_security_mode%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_inout_time%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_user_count%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_total_count%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_operation_sensor_status1%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_safety_sensor_status%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_operation_sensor_status2%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_optical_sensor_status%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_output_status%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_gate_operation_status%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_check_sum%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_packet_checksum%'
+            OR ROUTINE_DEFINITION LIKE '%anal_data_etx%'
+          )
 );
 
 SET @v33_guard_sql = IF(

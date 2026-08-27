@@ -68,6 +68,7 @@ class GateFieldsErrorsRenderingTest {
         `when`(menuProvider.menu()).thenReturn(emptyList())
         `when`(locationService.findAllActive()).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
+        `when`(gateTypeCodeService.gateTypeNames()).thenReturn(emptyMap())
         `when`(groupService.findAllForManagement(null, false)).thenReturn(emptyList())
 
         mockMvc.get("/gates/groups") { with(csrf()) }.andExpect {
@@ -82,6 +83,7 @@ class GateFieldsErrorsRenderingTest {
         `when`(locationService.findAllActive()).thenReturn(emptyList())
         `when`(groupService.findAllActiveByLocation(null)).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
+        `when`(gateTypeCodeService.gateTypeNames()).thenReturn(emptyMap())
         `when`(detailService.findAllForManagement(null, false)).thenReturn(emptyList())
 
         mockMvc.get("/gates/details") { with(csrf()) }.andExpect {
@@ -96,6 +98,7 @@ class GateFieldsErrorsRenderingTest {
         `when`(locationService.findAllActive()).thenReturn(emptyList())
         `when`(groupService.findAllActiveByLocation(null)).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
+        `when`(gateTypeCodeService.gateTypeNames()).thenReturn(emptyMap())
         `when`(detailService.findAllForManagement(1L, false)).thenReturn(emptyList())
 
         mockMvc.get("/gates/details") {
@@ -129,6 +132,7 @@ class GateFieldsErrorsRenderingTest {
     fun `게이트그룹 수정 진입 시 groupFormModal을 여는 자동 오픈 스크립트가 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
+        `when`(gateTypeCodeService.gateTypeNames()).thenReturn(emptyMap())
         val location = GateLocation(locId = 1L, locName = "테스트위치")
         `when`(locationService.findAllActive()).thenReturn(emptyList())
         `when`(groupService.findAllForManagement(1L, false)).thenReturn(emptyList())
@@ -147,6 +151,7 @@ class GateFieldsErrorsRenderingTest {
     fun `레인 수정 진입 시 detailFormModal을 여는 자동 오픈 스크립트가 렌더링된다`() {
         `when`(menuProvider.menu()).thenReturn(emptyList())
         `when`(gateTypeCodeService.gateTypes()).thenReturn(emptyList())
+        `when`(gateTypeCodeService.gateTypeNames()).thenReturn(emptyMap())
         `when`(locationService.findAllActive()).thenReturn(emptyList())
         `when`(groupService.findAllActiveByLocation(null)).thenReturn(emptyList())
         `when`(detailService.findAllForManagement(1L, false)).thenReturn(emptyList())

@@ -259,6 +259,7 @@ class GateDetailController(
         model.addAttribute("allLocations", locationService.findAllActive())
         model.addAttribute("allGroups", groupOptions(grpId, showInactive))
         model.addAttribute("gateTypes", gateTypeCodeService.gateTypes())
+        model.addAttribute("gateTypeNames", gateTypeCodeService.gateTypeNames())
         model.addAttribute("selectedGrpId", grpId)
         model.addAttribute("showInactive", showInactive)
         model.addAttribute("details", detailService.findAllForManagement(grpId, showInactive))

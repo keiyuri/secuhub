@@ -71,7 +71,7 @@
               <tr th:each="dtl : ${details}">
                 <td th:text="${dtl.dtlLaneNo}">0</td>
                 <td th:text="${dtl.dtlIp}">IP</td>
-                <td th:text="${dtl.dtlType}">1</td>
+                <td th:text="${gateTypeNames.get(dtl.dtlType)} ?: ${dtl.dtlType}">1</td>
                 <td th:text="${dtl.dtlName}">이름</td>
                 <td th:text="${dtl.useYn} ? '사용' : '미사용'">사용</td>
                 <td th:text="${dtl.analysisYn} ? 'Y' : 'N'">Y</td>

@@ -29,6 +29,15 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes
 @Service
 class GateTypeCodeService(private val codeMasterRepository: CodeMasterRepository) {
     fun gateTypes(): List<CodeMaster> = codeMasterRepository.findById_CodeGroupAndUseYnTrueOrderByDisplayOrder("GATE_TYPE")
+
+    // 목록 화면(groups.html/details.html)이 게이트 타입 원시값(1/2/3/4)을 그대로 찍지 않고
+    // "Speed Gate" 같은 표시명으로 보여줄 수 있도록 원시값→표시명 맵을 노출한다(2026-08-27,
+    // "게이트 타입을 선택할 수 없다" 버그 조사 중 함께 발견 — 목록은 값만 나와 어떤 타입인지
+    // 바로 알아보기 어려웠다). `code.id.codeCd`가 숫자 문자열이 아닌 코드가 섞여 있으면 그 항목만
+    // 조용히 건너뛴다 — toIntOrNull()이 null이면 associate에 넣지 않으므로 예외로 화면 전체가
+    // 깨지지 않는다.
+    fun gateTypeNames(): Map<Int, String> =
+        gateTypes().mapNotNull { code -> code.id.codeCd.toIntOrNull()?.let { it to code.codeName } }.toMap()
 }
 
 /**
@@ -268,6 +277,7 @@ class GateGroupController(
         model.addAttribute("pageTitle", "게이트그룹 관리")
         model.addAttribute("allLocations", locationOptions(locId, showInactive))
         model.addAttribute("gateTypes", gateTypeCodeService.gateTypes())
+        model.addAttribute("gateTypeNames", gateTypeCodeService.gateTypeNames())
         model.addAttribute("selectedLocId", locId)
         model.addAttribute("showInactive", showInactive)
         model.addAttribute("groups", groupService.findAllForManagement(locId, showInactive))

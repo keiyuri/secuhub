@@ -35,9 +35,11 @@ class GateTypeCodeService(private val codeMasterRepository: CodeMasterRepository
     // "게이트 타입을 선택할 수 없다" 버그 조사 중 함께 발견 — 목록은 값만 나와 어떤 타입인지
     // 바로 알아보기 어려웠다). `code.id.codeCd`가 숫자 문자열이 아닌 코드가 섞여 있으면 그 항목만
     // 조용히 건너뛴다 — toIntOrNull()이 null이면 associate에 넣지 않으므로 예외로 화면 전체가
-    // 깨지지 않는다.
-    fun gateTypeNames(): Map<Int, String> =
-        gateTypes().mapNotNull { code -> code.id.codeCd.toIntOrNull()?.let { it to code.codeName } }.toMap()
+    // 깨지지 않는다. 호출부가 이미 조회해 둔 [gateTypes] 목록을 그대로 받는다 — 여기서 다시
+    // [gateTypes]를 호출하면 화면 1회 렌더링마다 같은 조회(`tb_code`)가 두 번 나가게 된다(코드
+    // 리뷰 지적, 2026-08-27).
+    fun gateTypeNames(codes: List<CodeMaster> = gateTypes()): Map<Int, String> =
+        codes.mapNotNull { code -> code.id.codeCd.toIntOrNull()?.let { it to code.codeName } }.toMap()
 }
 
 /**
@@ -276,8 +278,9 @@ class GateGroupController(
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "게이트그룹 관리")
         model.addAttribute("allLocations", locationOptions(locId, showInactive))
-        model.addAttribute("gateTypes", gateTypeCodeService.gateTypes())
-        model.addAttribute("gateTypeNames", gateTypeCodeService.gateTypeNames())
+        val gateTypes = gateTypeCodeService.gateTypes()
+        model.addAttribute("gateTypes", gateTypes)
+        model.addAttribute("gateTypeNames", gateTypeCodeService.gateTypeNames(gateTypes))
         model.addAttribute("selectedLocId", locId)
         model.addAttribute("showInactive", showInactive)
         model.addAttribute("groups", groupService.findAllForManagement(locId, showInactive))

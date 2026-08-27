@@ -157,8 +157,21 @@ class DataReceiveAnalysis(
     @Column(name = "desc_user_mode", nullable = false, length = 30)
     var descUserMode: String = "",
 
+    /**
+     * `desc_user_mode`(표시 문자열)의 원본 코드값(예: "1") — [dtlTypeCd]와 같은 경위(레거시
+     * `usp_process_analysis`가 함께 채우던 컬럼인데 이 저장소 엔티티에 매핑이 누락돼 있었다).
+     * 실 DB 조회(2026-08-26, `192.168.0.26:28031/securance_gate`)로 secuhub가 저장한 행만
+     * `user_mode_cd`/`security_mode_cd`가 NULL인 것을 확인했다.
+     */
+    @Column(name = "user_mode_cd", length = 10)
+    var userModeCd: String? = null,
+
     @Column(name = "desc_security_mode", nullable = false, length = 20)
     var descSecurityMode: String = "",
+
+    /** `desc_security_mode`의 원본 코드값 — [userModeCd]와 동일한 이유로 추가. */
+    @Column(name = "security_mode_cd", length = 10)
+    var securityModeCd: String? = null,
 
     @Column(name = "desc_inout_time", nullable = false, length = 20)
     var descInoutTime: String = "",

@@ -292,7 +292,7 @@ class GateConnectionRegistryImplTest {
         // 회귀 방지 테스트: 예전에는 loc_id/grp_id를 항상 0으로 고정해 저장했다(스캐폴드 플레이스홀더).
         // 위치/그룹별로 tb_net_state를 조회하는 화면은 항상 빈 결과를 받게 되는 버그였다.
         val location = GateLocation(locId = 7L, locName = "본관")
-        val group = GateGroup(grpId = 3L, location = location, grpName = "1층", gateTypeCode = 1)
+        val group = GateGroup(grpId = 3L, location = location, grpName = "1층")
         val gateDetail = GateDetail(
             dtlId = 1L,
             location = location,
@@ -350,7 +350,7 @@ class GateConnectionRegistryImplTest {
     @Test
     fun `enqueueNetStateUpdate는 호출(발생) 순서 그대로 단조증가하는 시퀀스를 발급한다`() {
         val location = GateLocation(locId = 7L, locName = "본관")
-        val group = GateGroup(grpId = 3L, location = location, grpName = "1층", gateTypeCode = 1)
+        val group = GateGroup(grpId = 3L, location = location, grpName = "1층")
         val gateDetail = GateDetail(
             dtlId = 1L, location = location, group = group,
             dtlIp = "192.168.0.30", dtlLaneNo = 1, dtlType = 1,

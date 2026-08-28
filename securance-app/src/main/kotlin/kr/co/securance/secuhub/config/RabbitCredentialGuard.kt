@@ -14,12 +14,19 @@ import org.springframework.stereotype.Component
  * `securance.messaging.rabbitmq.enabled` 값과 무관하게 `spring.rabbitmq.*`를 기동 시점에
  * 바인딩하므로, fallback을 지우면 RabbitMQ를 아예 안 쓰는 배포(기본값)까지 기동이 막힌다.
  *
- * 대신 "prod" 프로필에서 실제로 연동을 켰는데(`enabled=true`) 자격증명이 기본값 그대로면,
- * 조용히 guest로 연결을 시도하는 대신 기동 자체를 막아 운영자가 환경변수 설정을 빠뜨렸음을
- * 즉시 알게 한다 — `SecuranceApplication` 컴포넌트 스캔 루트 하위라 별도 등록 없이 인식된다.
+ * 대신 실제로 연동을 켰는데(`enabled=true`) 자격증명이 기본값 그대로면, 조용히 guest로 연결을
+ * 시도하는 대신 기동 자체를 막아 운영자가 환경변수 설정을 빠뜨렸음을 즉시 알게 한다 —
+ * `SecuranceApplication` 컴포넌트 스캔 루트 하위라 별도 등록 없이 인식된다.
+ *
+ * `@Profile("prod")`가 아니라 `@Profile("!local")`을 쓴다(코드 리뷰 지적, 2026-08-28) — "prod"
+ * 문자열에만 걸면 배포 스크립트가 `--spring.profiles.active` 자체를 빠뜨린 경우(과거 S-1 DB URL
+ * 사고와 동일한 실수 패턴, [LocalProfileAutoDetector] KDoc 참고) 가드가 전혀 실행되지 않아 guest/guest로
+ * 운영 브로커에 조용히 연결을 시도할 수 있었다. 이 프로젝트는 "local"과 "prod" 두 프로필만 쓰므로,
+ * "local이 아니면(=개발자가 명시적으로 로컬임을 선언하지 않는 한) 항상 검사"로 바꿔 프로필 누락
+ * 시에도 기본 안전 상태(가드 활성)를 보장한다.
  */
 @Component
-@Profile("prod")
+@Profile("!local")
 class RabbitCredentialGuard(
     @Value("\${securance.messaging.rabbitmq.enabled}") private val enabled: Boolean,
     @Value("\${spring.rabbitmq.username}") private val username: String,

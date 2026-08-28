@@ -2,7 +2,10 @@ package kr.co.securance.secuhub.scheduler.config
 
 import kr.co.securance.secuhub.scheduler.job.NetCheckJob
 import kr.co.securance.secuhub.scheduler.job.ReqStatusJob
+import kr.co.securance.secuhub.scheduler.job.RetentionCleanupJob
+import org.quartz.CronTrigger
 import org.quartz.SimpleTrigger
+import java.util.TimeZone
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -52,5 +55,32 @@ class SchedulerConfigurationTest {
     fun `기본 폴링 주기는 레거시와 동일한 10초다`() {
         assertEquals(10L, SchedulerProperties().reqStatusIntervalSeconds)
         assertEquals(NetCheckJob::class.java, configuration.netCheckJobDetail().jobClass)
+    }
+
+    @Test
+    fun `retentionTimeZone이 UTC 오프셋이어도 트리거에 정확히 그 오프셋이 반영된다`() {
+        // Opus 재검증 회귀 테스트(2026-08-28): TimeZone.getTimeZone(String)을 직접 쓰면
+        // "+09:00" 같은 오프셋 ID를 인식하지 못해 조용히 GMT로 대체됐었다(검증은 ZoneId.of로
+        // 통과하는데 실제 트리거는 다른 시간대로 도는 불일치). ZoneId를 경유하도록 고친 뒤에는
+        // rawOffset이 실제로 KST(+9시간)와 같아야 한다.
+        val properties = SchedulerProperties(retentionTimeZone = "+09:00")
+        val trigger = configuration.retentionCleanupJobTrigger(
+            configuration.retentionCleanupJobDetail(),
+            properties,
+        ) as CronTrigger
+
+        assertEquals(TimeZone.getTimeZone("GMT+09:00").rawOffset, trigger.timeZone.rawOffset)
+    }
+
+    @Test
+    fun `RetentionCleanupJob 트리거는 기본적으로 Asia_Seoul 시간대로 동작한다`() {
+        val properties = SchedulerProperties()
+        val trigger = configuration.retentionCleanupJobTrigger(
+            configuration.retentionCleanupJobDetail(),
+            properties,
+        ) as CronTrigger
+
+        assertEquals(TimeZone.getTimeZone("Asia/Seoul"), trigger.timeZone)
+        assertEquals(RetentionCleanupJob::class.java, configuration.retentionCleanupJobDetail().jobClass)
     }
 }

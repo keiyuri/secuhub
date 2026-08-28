@@ -54,15 +54,20 @@
   </div>
 
   <div class="card card-outline card-primary" th:if="${result != null}">
-    <div class="card-header"><h3 class="card-title">상세 내역</h3></div>
+    <div class="card-header">
+      <h3 class="card-title">
+        상세 내역
+        <span class="badge text-bg-secondary" th:text="${result.rows.totalElements} + '건'">0건</span>
+      </h3>
+    </div>
     <div class="table-responsive">
       <table class="table table-sm table-striped mb-0">
         <thead><tr><th>일시</th><th>레인</th><th>총 통행</th><th>입</th><th>출</th><th>도어</th></tr></thead>
         <tbody>
-          <tr th:if="${#lists.isEmpty(result.rows)}">
+          <tr th:if="${result.rows.empty}">
             <td colspan="6" class="text-center text-muted">조회된 데이터가 없습니다.</td>
           </tr>
-          <tr th:each="row : ${result.rows}">
+          <tr th:each="row : ${result.rows.content}">
             <td th:text="${row.id.oprDate}">일시</td>
             <td th:text="${row.id.dtlLaneNo}">0</td>
             <td th:text="${row.totalCount}">0</td>
@@ -72,6 +77,18 @@
           </tr>
         </tbody>
       </table>
+    </div>
+    <div class="card-footer" th:if="${result.rows.totalPages > 1}">
+      <nav>
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" th:each="p : ${#numbers.sequence(0, result.rows.totalPages - 1)}"
+              th:classappend="${p == result.rows.number} ? 'active'">
+            <a class="page-link"
+               th:href="@{/reports/access(locId=${selectedLocId},grpId=${selectedGrpId},fromDate=${fromDate},toDate=${toDate},page=${p})}"
+               th:text="${p + 1}">1</a>
+          </li>
+        </ul>
+      </nav>
     </div>
   </div>
 

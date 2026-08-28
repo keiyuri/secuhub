@@ -143,7 +143,23 @@ class SecurityConfigTest {
     @WithMockUser(roles = ["ADMIN"])
     fun `ROLE_ADMIN만으로는 control 경로에 접근할 수 없다`() {
         // 두 역할은 독립적이다 — admin 권한이 자동으로 control 권한을 포함하지 않는다.
+        // roleHierarchy는 VIEW만 공통 하위로 포함시키므로 이 회귀는 계속 유지된다.
         mockMvc.get("/control/probe").andExpect { status { isForbidden() } }
+    }
+
+    @Test
+    @WithMockUser(roles = ["ADMIN"])
+    fun `ROLE_ADMIN만 있어도(authView=N) 대시보드에 접근할 수 있다`() {
+        // 회귀 방지 테스트(코드 리뷰 지적, 2026-08-28): roleHierarchy 도입 전에는
+        // authAdmin=Y, authView=N 조합의 계정이 /admin/**에는 들어가면서도
+        // anyRequest -> hasRole("VIEW")로 보호되는 화면(대시보드 등)에서는 전부 403을 받았다.
+        mockMvc.get("/dashboard").andExpect { status { isOk() } }
+    }
+
+    @Test
+    @WithMockUser(roles = ["CONTROL"])
+    fun `ROLE_CONTROL만 있어도(authView=N) 대시보드에 접근할 수 있다`() {
+        mockMvc.get("/dashboard").andExpect { status { isOk() } }
     }
 
     @Test

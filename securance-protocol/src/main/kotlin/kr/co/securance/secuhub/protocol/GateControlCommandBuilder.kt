@@ -14,9 +14,14 @@ package kr.co.securance.secuhub.protocol
  *   TCP 접속(IP)과 [SpeedGateProtocolConstants] 기준 레인 비트마스크가 아니라, 이 웹의
  *   `GateConnectionRegistry.sendToLane(ip, laneNo, packet)`가 소켓 자체로 처리하므로 문제되지 않는다.
  * - Data Info Length(offset 22), Data Count 상위바이트(offset 23)를 설정하지 않는다(0으로 남음).
- * - Data Length(offset 25~26)를 실제로 계산하지 않고 offset 26에 `0x5D` 고정값을 넣는다(원본 버그로
- *   보이지만, 실기기가 이미 이 형식을 그대로 받아 처리 중이므로 "고쳐서" 보내면 오히려 호환성이
- *   깨질 위험이 있다 — 사용자 확인 하에 그대로 재현).
+ * - (#12 모드변경에 한함) Data Length(offset 25~26)를 실제로 계산하지 않고 offset 26에 `0x5D`(93)
+ *   고정값을 넣는다 — 실기기가 이미 이 형식을 그대로 받아 처리 중이므로 "고쳐서" 보내면 호환성이
+ *   깨질 위험이 있어 사용자 확인 하에 그대로 재현한다. 다만 93은 모드변경 페이로드가 정확히
+ *   93바이트인 것과 정확히 일치한다 — 즉 "정체불명 버그"가 아니라 실제 길이를 그대로 담고 있을
+ *   가능성이 높다(코드 리뷰 재검토, 2026-08-28). #13(모터설정, 17바이트 페이로드)과
+ *   [buildTimeSyncCommand](#7/#15, 26바이트)는 이 고정값을 쓰지 않고 각자의 실제 payload 크기를
+ *   계산해 넣는다 — 헤더 Data Length가 실제 payload와 다르면 이를 신뢰하는 수신측의 패킷 경계
+ *   파싱이 어긋날 수 있기 때문이다(`buildPacket`의 `dataLength` 파라미터 참고).
  * 즉 [SpeedGatePacketCodec.buildPacket]과는 헤더 조립 방식이 다르다. 두 빌더를 섞어 쓰지 않는다.
  */
 object GateControlCommandBuilder {
@@ -58,11 +63,33 @@ object GateControlCommandBuilder {
         }
     }
 
+    /** #12(모드변경) 레거시가 실제로 채워 보낸 고정값(93) — 아래 [buildPacket] `dataLength` 기본값. */
+    private const val LEGACY_FIXED_DATA_LENGTH = 0x5D
+
     /**
      * 레거시 `BuildPacket`(Brian 분기)을 그대로 포팅 — Header(27) + payload + Tail(4).
      * Address(offset 6~18)는 레거시와 동일하게 전부 0으로 둔다.
+     *
+     * @param dataLength Data Length(offset 26)에 넣을 값. 기본값은 #12(모드변경)에서 사용자 확인
+     *   하에 재현하기로 한 레거시 고정값(93=0x5D, `LEGACY_FIXED_DATA_LENGTH`)이다 — 대응 legacy
+     *   원본(`GenerateCmdBody`)이 실측으로 이 고정값을 그대로 내보내는 것이 확인됐고, 공교롭게도
+     *   93은 모드변경 페이로드의 실제 크기와 정확히 같다. #13(모터설정)/[buildTimeSyncCommand](#7/#15)는
+     *   각자 실제 payload 크기를 명시적으로 넘긴다(코드 리뷰 재검토, 2026-08-28) — 그렇지 않으면
+     *   Data Length를 신뢰하는 수신측의 패킷 경계 파싱이 어긋날 수 있다.
      */
-    private fun buildPacket(command1: Byte, command2: Byte, objectCode: Byte, payload: ByteArray): ByteArray {
+    private fun buildPacket(
+        command1: Byte,
+        command2: Byte,
+        objectCode: Byte,
+        payload: ByteArray,
+        dataLength: Int = LEGACY_FIXED_DATA_LENGTH,
+    ): ByteArray {
+        // Opus 재검증 지적(2026-08-28): Data Length는 offset 25~26의 2바이트 필드인데 기존 코드는
+        // header[26](하위 바이트)만 채우고 header[25](상위 바이트)는 항상 0으로 남겨뒀다 — 256 이상
+        // payload가 생기면 상위 바이트 누락으로 값이 어긋나고, and 0xFF로 인해 초과분이 조용히
+        // 잘렸다. SpeedGatePacketCodec.buildPacket이 이미 같은 필드를 require로 막고 있어 두
+        // 빌더의 안전장치를 맞춘다.
+        require(dataLength in 0..0xFFFF) { "dataLength는 0..65535 범위여야 합니다: $dataLength" }
         val header = ByteArray(27)
         header[0] = 0x02 // STX
         header[3] = 0x04 // Version
@@ -72,7 +99,8 @@ object GateControlCommandBuilder {
         header[20] = command2
         header[21] = objectCode
         header[24] = 0x01 // Data Count(low) — 레거시 원본 그대로, 상위바이트/DataInfoLength는 미설정
-        header[26] = 0x5D // Data Length(low) — 레거시 원본 그대로(고정값, 실제 길이 계산 없음)
+        header[25] = ((dataLength ushr 8) and 0xFF).toByte() // Data Length(high)
+        header[26] = (dataLength and 0xFF).toByte() // Data Length(low)
 
         val body = header + payload
         val totalLength = body.size + 4
@@ -129,10 +157,16 @@ object GateControlCommandBuilder {
             else -> ControlMode.NORMAL
         }
 
+        // 코드 리뷰 지적(2026-08-28): 대소문자 무관("Contains 기반 판정")을 계약으로 문서화해놓고
+        // 정작 여기서는 정규화 전 원본 controlType을 검사했다 — 위 ctrlTp1(운영모드)은 uppercase()를
+        // 거치는데 보안등급 판정만 빠져 있어, 소문자 controlType으로 호출하면 운영모드는 정상
+        // 반영되고 보안등급만 조용히 누락되는 불일치가 생겼다. 유일한 현재 호출부(GateControlController)가
+        // 호출 전 이미 uppercase()를 적용해 우연히 가려져 있었을 뿐이다.
+        val normalizedControlType = controlType.uppercase()
         when {
-            controlType.contains("LM") -> body[2] = 0x01
-            controlType.contains("MM") -> body[2] = 0x02
-            controlType.contains("HM") -> body[2] = 0x03
+            normalizedControlType.contains("LM") -> body[2] = 0x01
+            normalizedControlType.contains("MM") -> body[2] = 0x02
+            normalizedControlType.contains("HM") -> body[2] = 0x03
         }
 
         timeDataUser?.let {
@@ -159,6 +193,14 @@ object GateControlCommandBuilder {
      * #13 GateSetupMotor 명령을 만든다(레거시 `bMotor` 17바이트 배열 레이아웃).
      * index 0=레인번호, 1~6=메인모터(초기속도/초기카운트/오픈속도/오픈카운트/클로즈속도/클로즈카운트),
      * 7~8=레거시 원본에서도 채워지지 않는 미사용 영역, 9~14=서브모터(동일 순서), 15~16=미사용.
+     *
+     * Data Length(offset 26)에는 #12(모드변경)의 레거시 고정값(93) 대신 실제 payload 크기(17)를
+     * 담는다(코드 리뷰 재검토, 2026-08-28 사용자 확인) — 93은 모드변경 페이로드가 정확히 93바이트인
+     * 것과 정확히 일치해, "정체불명 고정값"이 아니라 실제로는 모드변경용 길이가 모터설정에 그대로
+     * 복붙된 것으로 보인다. 헤더 Data Length가 실제 payload와 다르면 이를 신뢰하는 수신측의 패킷
+     * 경계 파싱이 어긋날 수 있다는 논리(원래 타임싱크 수정과 동일)가 여기에도 적용되므로, 사용자
+     * 확인을 거쳐 실제 길이를 쓰도록 바꾼다. 클래스 KDoc의 "#12/#13 모두 실측 확인된 고정값 재현"
+     * 문구는 #12(모드변경)에 대해서만 유효한 것으로 정정한다.
      */
     fun buildMotorSetupCommand(laneNo: Int, main: MotorParams, sub: MotorParams): ByteArray {
         require(laneNo in 0..255) { "레인 번호는 0~255 범위여야 합니다: $laneNo" }
@@ -177,13 +219,18 @@ object GateControlCommandBuilder {
         body[13] = sub.closeSpeed.toByte()
         body[14] = sub.closeCount.toByte()
 
-        return buildPacket(CMD1_SEND_DATA, CMD2_WRITE, OBJECT_MOTOR, body)
+        return buildPacket(CMD1_SEND_DATA, CMD2_WRITE, OBJECT_MOTOR, body, dataLength = body.size)
     }
 
     /**
      * #7/#15(Phase 5) 타임존 동기화 명령을 만든다(레거시 `SetTimeData`, Object Code 0x54).
      * @param timezoneData [TimeZoneCommandBuilder.buildTimezoneHexData]가 만든 26바이트 페이로드.
+     *
+     * Data Length(offset 26)에는 #12/#13의 레거시 고정값(93) 대신 실제 payload 크기를 담는다 —
+     * `SetTimeData`는 `GenerateCmdBody`/`SetControlMotor`와 별개 legacy 함수라 93 고정값이 이
+     * 경로에도 적용됐는지 검증된 바 없고, 26바이트 페이로드에 93을 채우면 Data Length를 신뢰하는
+     * 수신측이 패킷 경계를 잘못 파싱할 수 있다(코드 리뷰 지적).
      */
     fun buildTimeSyncCommand(timezoneData: ByteArray): ByteArray =
-        buildPacket(CMD1_SEND_DATA, CMD2_WRITE, OBJECT_TIME, timezoneData)
+        buildPacket(CMD1_SEND_DATA, CMD2_WRITE, OBJECT_TIME, timezoneData, dataLength = timezoneData.size)
 }

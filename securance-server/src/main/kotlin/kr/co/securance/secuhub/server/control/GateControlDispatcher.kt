@@ -15,6 +15,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** 폴링 1회의 처리 결과 요약. 잡 로그와 테스트 단언에 쓴다. */
 data class DispatchSummary(
@@ -130,25 +131,46 @@ class GateControlDispatcher(
     private data class AckKey(val dtlIp: String, val dtlLaneNo: Int)
 
     /**
+     * `dispatchPending()`의 동시 재진입을 막는 가드(코드 리뷰 지적, 2026-08-28).
+     *
+     * [lastSentAt]/[attempts]는 `ConcurrentHashMap`이라 개별 읽기/쓰기는 스레드 안전하지만,
+     * [sendPendingCommands]의 쿨다운 체크(읽기 → 나중에 쓰기)는 원자적이지 않은 check-then-act다.
+     * 실제 물리 중복 전송은 [DataSendRepository.claimForSend]의 DB 레벨 원자적 UPDATE가 막아주지만,
+     * `dispatchPending()` 자체는 `SendControlJob`의 `@DisallowConcurrentExecution`(Quartz 어노테이션)
+     * 하나에만 재진입 방지를 의존하고 있었다 — 그 캡슐화 경계 밖에서 이 메서드를 실수로 다시
+     * 호출하거나 향후 다른 트리거가 추가되면 조용히 깨질 수 있는 가정이었다. 클래스 자체에서도
+     * 재진입을 막아 이 가정을 캐스케이딩 프로퍼티가 아니라 불변식으로 만든다.
+     */
+    private val dispatching = AtomicBoolean(false)
+
+    /**
      * 폴링 1회를 수행한다: ACK 확인 → 타임아웃 처리 → 신규/재전송 발송.
      *
      * 순서가 중요하다. 타임아웃 처리를 먼저 하면, 방금 도착한 ACK가 반영되기 전에 같은 명령이
      * 재전송되어 게이트가 두 번 동작할 수 있다.
      */
     fun dispatchPending(): DispatchSummary {
-        val expired = expireStalePending()
-        val confirmed = confirmAckedCommands()
-        val (retried, failed) = reapAckTimeouts()
-        val (sent, skipped) = sendPendingCommands()
-
-        val summary = DispatchSummary(sent, skipped, confirmed, retried, failed, expired)
-        if (summary.hasWork) {
-            logger.debug(
-                "제어 명령 폴링 결과: 전송={}, 보류={}, ACK확인={}, 재전송={}, 실패확정={}, 유효기간초과={}",
-                sent, skipped, confirmed, retried, failed, expired,
-            )
+        if (!dispatching.compareAndSet(false, true)) {
+            logger.warn("dispatchPending() 재진입이 감지되어 이번 호출을 건너뜁니다 — 이전 실행이 아직 끝나지 않았습니다.")
+            return DispatchSummary(0, 0, 0, 0, 0, 0)
         }
-        return summary
+        try {
+            val expired = expireStalePending()
+            val confirmed = confirmAckedCommands()
+            val (retried, failed) = reapAckTimeouts()
+            val (sent, skipped) = sendPendingCommands()
+
+            val summary = DispatchSummary(sent, skipped, confirmed, retried, failed, expired)
+            if (summary.hasWork) {
+                logger.debug(
+                    "제어 명령 폴링 결과: 전송={}, 보류={}, ACK확인={}, 재전송={}, 실패확정={}, 유효기간초과={}",
+                    sent, skipped, confirmed, retried, failed, expired,
+                )
+            }
+            return summary
+        } finally {
+            dispatching.set(false)
+        }
     }
 
     /**

@@ -4,6 +4,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy
+import org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.invoke
 import org.springframework.security.config.http.SessionCreationPolicy
@@ -54,6 +56,30 @@ class SecurityConfig {
      */
     @Bean
     fun sessionRegistry(): SessionRegistry = SessionRegistryImpl()
+
+    /**
+     * ROLE_ADMIN과 ROLE_CONTROL 각각이 ROLE_VIEW를 포함하도록 하는 계층(코드 리뷰 지적, 2026-08-28).
+     *
+     * `tb_users.auth_view/auth_ctrl/auth_admin`은 서로 독립적인 Y/N 플래그이고
+     * [SecurityUserDetailsService]가 이를 각각 별개 권한으로 1:1 매핑한다. 계층이 없으면
+     * `authAdmin=Y, authView=N`처럼 "상위 권한만 켜고 하위는 안 켠" 계정이 admin 하위 경로에는
+     * 들어가면서도 `/dashboard`처럼 `anyRequest -> hasRole("VIEW")`로 보호되는 화면은 전부 403을
+     * 받는다 — "ADMIN/CONTROL이면 최소 조회는 포함"이라는 화면/문서상 암묵적 전제와 실제 권한
+     * 부여가 어긋나는 것이다. 이 빈을 등록하면 Kotlin DSL의 `hasRole`/`hasAnyRole`(아래
+     * `authorizeHttpRequests`)이 컨텍스트에서 자동으로 감지해 적용한다.
+     *
+     * **의도적으로 `ROLE_ADMIN > ROLE_CONTROL`은 넣지 않는다** — [SecurityConfigTest]의
+     * "ROLE_ADMIN만으로는 control 경로에 접근할 수 없다" 회귀 테스트가 명시하듯, ADMIN과 CONTROL은
+     * 서로 독립적인 권한으로 유지하기로 이미 결정되어 있다(2026-08-13). 둘 다 VIEW만 상위에서
+     * 포함하도록 좁혀, 그 결정을 깨지 않으면서 위 결함만 해소한다.
+     */
+    @Bean
+    fun roleHierarchy(): RoleHierarchy = RoleHierarchyImpl.fromHierarchy(
+        """
+        ROLE_ADMIN > ROLE_VIEW
+        ROLE_CONTROL > ROLE_VIEW
+        """.trimIndent(),
+    )
 
     @Bean
     fun securityFilterChain(

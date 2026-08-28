@@ -11,6 +11,7 @@ import org.springframework.data.domain.Sort
 import org.springframework.data.jpa.domain.Specification
 import org.springframework.stereotype.Controller
 import org.springframework.stereotype.Service
+import org.springframework.ui.ExtendedModelMap
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
@@ -103,7 +104,7 @@ class GateLogReportController(
         @RequestParam(defaultValue = "0") page: Int,
         model: Model,
     ): String {
-        val filter = toFilter(dtlIp, dtlLaneNo, eventType, fromDate, toDate)
+        val filter = toFilter(dtlIp, dtlLaneNo, eventType, fromDate, toDate, model)
         populateCommon(model, filter)
         model.addAttribute("result", gateLogReportService.search(filter, page, PAGE_SIZE))
         return "reports/gate-logs"
@@ -118,7 +119,9 @@ class GateLogReportController(
         @RequestParam(required = false) toDate: String?,
         response: HttpServletResponse,
     ) {
-        val filter = toFilter(dtlIp, dtlLaneNo, eventType, fromDate, toDate)
+        // 엑셀 다운로드 응답에는 안내 메시지를 실을 화면이 없다(LogReportController.exportExcel과
+        // 동일한 이유로 Model을 요구하지 않는 대신 빈 Model을 넘긴다).
+        val filter = toFilter(dtlIp, dtlLaneNo, eventType, fromDate, toDate, ExtendedModelMap())
         val rows = gateLogReportService.searchForExport(filter)
         excelExportService.export(
             response = response,
@@ -138,10 +141,18 @@ class GateLogReportController(
     }
 
     private fun toFilter(
-        dtlIp: String?, dtlLaneNo: Int?, eventType: Int?, fromDate: String?, toDate: String?,
+        dtlIp: String?, dtlLaneNo: Int?, eventType: Int?, fromDate: String?, toDate: String?, model: Model,
     ): GateLogSearchFilter {
         val to = toDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now()
-        val from = fromDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: to.minusDays(6)
+        var from = fromDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: to.minusDays(6)
+
+        // 다른 리포트(LogReportController/AccessReportController)와 동일하게 조회기간 상한을 둔다
+        // (코드 리뷰 지적, 2026-08-28) — 이 화면만 상한이 없어 넓은 기간을 반복 조회하면 매 요청마다
+        // 넓은 eventTime 범위 스캔이 발생해 DB 부하가 커질 수 있었다.
+        if (from.isBefore(to.minusMonths(3))) {
+            model.addAttribute("error", "최근 3개월까지만 조회 가능합니다.")
+            from = to.minusMonths(3)
+        }
         return GateLogSearchFilter(dtlIp, dtlLaneNo, eventType, from, to)
     }
 

@@ -60,6 +60,24 @@ class ConcurrentLoginAuditListenerTest {
     }
 
     @Test
+    fun `X-Forwarded-For 헤더가 있으면 예외 없이 처리한다(프록시 뒤 배포 시나리오)`() {
+        // 회귀 방지 테스트(코드 리뷰 지적, 2026-08-28): remoteAddr만 쓰면 리버스 프록시 뒤에서는
+        // 항상 프록시 IP만 찍혀 실제 발신지를 특정할 수 없었다. X-Forwarded-For가 있는 요청도
+        // clientAddressOf가 예외 없이 처리하는지 확인한다(로그 문자열 자체는 검증하지 않는다).
+        val sessionRegistry = mock(SessionRegistry::class.java)
+        val existing = SessionInformation("admin-principal", "OLD-SESSION", Date())
+        `when`(sessionRegistry.getAllSessions(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(false)))
+            .thenReturn(listOf(existing))
+
+        val request = MockHttpServletRequest()
+        request.remoteAddr = "10.0.0.5" // 리버스 프록시의 IP
+        request.addHeader("X-Forwarded-For", "203.0.113.10, 10.0.0.5")
+        RequestContextHolder.setRequestAttributes(ServletRequestAttributes(request))
+
+        ConcurrentLoginAuditListener(sessionRegistry).onSuccess(successEvent("admin"))
+    }
+
+    @Test
     fun `RequestContext가 없어도(비 HTTP 스레드) 예외 없이 처리한다`() {
         val sessionRegistry = mock(SessionRegistry::class.java)
         val existing = SessionInformation("admin-principal", "OLD-SESSION", Date())

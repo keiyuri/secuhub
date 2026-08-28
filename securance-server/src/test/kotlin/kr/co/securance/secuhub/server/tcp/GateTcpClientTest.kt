@@ -66,7 +66,7 @@ class GateTcpClientTest {
     private fun gateDetail(dtlIp: String, dtlLaneNo: Int, dtlType: Int = 1) = GateDetail(
         dtlId = dtlLaneNo.toLong(),
         location = GateLocation(locId = 1L, locName = "loc"),
-        group = GateGroup(grpId = 1L, location = GateLocation(locId = 1L, locName = "loc"), grpName = "grp", gateTypeCode = 1),
+        group = GateGroup(grpId = 1L, location = GateLocation(locId = 1L, locName = "loc"), grpName = "grp"),
         dtlIp = dtlIp,
         dtlLaneNo = dtlLaneNo,
         dtlType = dtlType,

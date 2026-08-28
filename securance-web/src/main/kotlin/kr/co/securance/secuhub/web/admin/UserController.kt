@@ -6,6 +6,8 @@ import jakarta.validation.constraints.Size
 import kr.co.securance.secuhub.domain.entity.AppUser
 import kr.co.securance.secuhub.domain.repository.AppUserRepository
 import kr.co.securance.secuhub.web.menu.MenuProvider
+import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Controller
@@ -117,6 +119,8 @@ class UserController(
     private val userManagementService: UserManagementService,
     private val menuProvider: MenuProvider,
 ) {
+    private val logger = LoggerFactory.getLogger(UserController::class.java)
+
     @GetMapping
     fun list(@RequestParam(required = false, defaultValue = "false") showInactive: Boolean, model: Model): String {
         populateCommon(model, showInactive)
@@ -204,9 +208,19 @@ class UserController(
         redirectAttributes: RedirectAttributes,
     ): String {
         val currentUserId = SecurityContextHolder.getContext().authentication?.name
-        runCatching { userManagementService.delete(userId, currentUserId) }
-            .onSuccess { redirectAttributes.addFlashAttribute("message", "사용자가 삭제되었습니다.") }
-            .onFailure { redirectAttributes.addFlashAttribute("error", it.message) }
+        // 예상되는 예외(로그인 중인 계정 자기 삭제, FK 참조 잔존)만 좁게 잡아 안내 메시지로 바꾼다
+        // (코드 리뷰 지적, 2026-08-28) — GateDetailController.delete 등과 동일한 패턴. 나머지 모든
+        // 예외(DB 커넥션 장애 등)까지 runCatching으로 삼키면 로그 없이 사라져 장애 추적이
+        // 불가능해지므로, 예상 밖 예외는 잡지 않고 GlobalExceptionHandler로 그대로 전파한다.
+        try {
+            userManagementService.delete(userId, currentUserId)
+            redirectAttributes.addFlashAttribute("message", "사용자가 삭제되었습니다.")
+        } catch (ex: IllegalArgumentException) {
+            redirectAttributes.addFlashAttribute("error", ex.message)
+        } catch (ex: DataIntegrityViolationException) {
+            logger.warn("사용자[{}] 삭제 실패 - 연관 데이터 존재", userId, ex)
+            redirectAttributes.addFlashAttribute("error", "연관된 데이터가 남아있어 이 사용자를 삭제할 수 없습니다.")
+        }
         return "redirect:/admin/users?showInactive=$showInactive"
     }
 

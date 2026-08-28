@@ -17,7 +17,9 @@ import org.springframework.stereotype.Component
  * 레거시 `SpeedServer.ProcessReceiveData`에 대응하며, 처리 순서는 다음과 같다.
  * 1. ACK 패킷(CMD1 0x07/0x08)은 `tb_data_rcv_ack`에 적재하고 종료한다(ACK에 ACK를 보내지 않는다).
  * 2. 대표 레인 번호를 구해 커넥션의 레인 집합에 **합집합으로만** 추가한다.
- * 3. `GATE_STATUS`(0x4D)일 때만 레인 집합을 authoritative하게 교체하고 `tb_net_state`를 온라인으로 기록한다.
+ * 3. `GATE_STATUS`(0x4D)이고 레인이 1개 이상 보고됐을 때만 레인 집합을 authoritative하게 교체한다
+ *    (레인 0개 보고는 라우팅 교체를 건너뛴다 — 아래 문단 및 인라인 주석 참고). `tb_net_state` 온라인/
+ *    오프라인 기록은 레인 보고 여부와 무관하게 항상 최신화한다.
  * 4. 직전 패킷과 비교해 변경이 있을 때만 객체 코드별 상세 저장을 큐에 넣는다.
  * 5. **변경 여부와 무관하게 항상 ACK를 회신한다.**
  *
@@ -26,8 +28,9 @@ import org.springframework.stereotype.Component
  * 나가지 않았다(`SpeedServer.cs:841` 주석 참고). 여기서는 ACK 전송을 [handle]의 마지막에 두고
  * 중간 분기는 조기 종료하지 않는 구조로 만들어 구조적으로 재발을 막는다.
  *
- * `GATE_STATUS`(0x4D) 패킷 수신 시 레인 집합을 authoritative하게 갱신하고 `tb_net_state`를
- * 온라인으로 기록한다. 같은 패킷 끝에 로그 엔트리가 이어 붙어 있으면(레거시 검증 결과 —
+ * `GATE_STATUS`(0x4D) 패킷 수신 시(레인이 1개 이상 보고된 경우) 레인 집합을 authoritative하게
+ * 갱신하고 `tb_net_state`를 온라인/오프라인으로 기록한다. 같은 패킷 끝에 로그 엔트리가 이어 붙어
+ * 있으면(레거시 검증 결과 —
  * [GateLogService] 클래스 KDoc "레이아웃 정정" 참고) [GateLogService.handleEmbedded]에 위임해
  * 저장한다(계획서 3.8절, 신규 설계). 문서상 정의된 독립 `GATE_LOG`(0x61) ObjectCode도 하위 호환
  * 경로로 계속 지원한다([GateLogService.handle]). 그 외 객체 코드는 로그만 남긴다 — 상세 저장
@@ -75,54 +78,80 @@ class DefaultGatePacketHandler(
         if (isStatusPacket) {
             val laneOffsets = PacketDiffer.laneOffsetsOf(packet.raw)
             val lanes = laneOffsets.keys.toList()
+
+            // 레인 라우팅(sendToLane 대상 판단)은 패킷에 보고된 레인 전체를 그대로 쓴다 — 아래
+            // net_state(온라인 표시)와는 목적이 달라, 센서가 일시적으로 끊겼다고 제어 대상에서
+            // 빼면 안 된다.
+            //
+            // [Codex 적대적 리뷰 지적, 2026-08-28] `lanes`가 비어 있을 때도 무조건
+            // `replaceLaneNumbers(emptyList())`를 호출하면, `hasAuthoritativeLaneInfo`가 true로
+            // 세워지고 레인 집합이 비므로 `GateConnectionRegistryImpl.sendToLane`의
+            // `!state.ownsLane(dtlLaneNo) && hasAuthoritativeLaneInfo` 가드에 걸려 **이 장치로 향하는
+            // 모든 레인 지정 제어 명령이 즉시 전부 거부**된다. 장치 재기동, 손상된 패킷, 일시적인
+            // 레인 수 0 오보고 단 한 번만으로 다음 정상 상태 패킷이 올 때까지 그 게이트의 원격
+            // 제어(예: 비상 개방)가 완전히 막힐 수 있다 — 프로토콜에 "이 값이 확정된 구성 변경인지
+            // 일시적 이상인지" 구분할 필드가 없는 이상, 라우팅 정보를 되돌릴 수 없는 authoritative
+            // 상태로 성급히 굳히면 안 된다.
+            //
+            // 그래서 `lanes.isNotEmpty()`일 때만 라우팅을 교체한다 — 레인이 실제로 보고된 상태
+            // 패킷만 신뢰하고, 빈 보고는 라우팅 관점에서는 무시한다(직전까지 알려진 레인 구성을
+            // 그대로 유지해 제어 시도 자체는 계속 가능하게 둔다. 물리적으로 진짜 레인이 없다면 전송을
+            // 시도해도 장치가 응답하지 않아 ACK 타임아웃으로 자연히 실패할 뿐이다 — "장애 원인
+            // 불명확"이 "명령 자체가 거부됨"보다 훨씬 안전한 실패 모드다). 반대로 아래 온라인/오프라인
+            // net_state 갱신은 이 조건과 무관하게 항상 수행한다 — 대시보드 표시 정확성(레인이
+            // 사라지면 오프라인으로 보여야 함)은 라우팅 가용성만큼 되돌릴 수 없는 리스크가 아니고,
+            // 빈 보고가 반복되면(예: 실제로 레인이 사라짐) 매 패킷마다 다시 오프라인으로 수렴하므로
+            // 일시적 글리치의 대가가 "제어 명령 전면 차단"이 아니라 "짧은 대시보드 깜빡임" 정도로
+            // 끝난다.
             if (lanes.isNotEmpty()) {
-                // 레인 라우팅(sendToLane 대상 판단)은 패킷에 보고된 레인 전체를 그대로 쓴다 — 아래
-                // net_state(온라인 표시)와는 목적이 달라, 센서가 일시적으로 끊겼다고 제어 대상에서
-                // 빼면 안 된다.
                 state.replaceLaneNumbers(lanes)
+            }
 
-                // net_state(온라인 여부)는 "레인이 패킷에 보고됐는지"가 아니라 "레인 블록의 실제
-                // 센서 값이 살아있는지"까지 확인한다(레거시 `ClsPacketAnalyzer.IsNotConnected` 대응,
-                // 어드버서리얼 리뷰 지적 — 레거시는 있었지만 신규 구현에서 누락돼 있었다). 게이트가
-                // 레인 슬롯을 계속 보고해도 물리 센서가 분리되면 나머지 바이트가 전부 0으로 오므로,
-                // 단순 존재 여부만 보면 실제로는 끊긴 레인이 대시보드에 계속 온라인으로 표시된다.
-                //
-                // [레거시와의 의도적 차이] 레거시 SpeedServer.cs(라인 1096~1141)는 이 검사를
-                // `iLaneCntForNet > 1`(다중 레인)일 때만 적용했다 — 단일 레인 게이트는 이 지점에서
-                // net_state를 아예 건드리지 않고, ClsQuartzJobReqStatus의 주기적 TCP 소켓 생존 폴링
-                // 결과만으로 온라인/오프라인을 판정했다(TCP 생존=레인 생존으로 취급). 재검토 시 이
-                // 차이를 발견해 사용자에게 확인했고, "레인 수와 무관하게 항상 isLaneConnected를
-                // 적용"하는 현재 동작을 그대로 유지하기로 결정했다 — 물리 센서 분리를 TCP 연결
-                // 생존 여부보다 더 빠르고 정확하게 감지할 수 있어 레거시보다 개선된 동작으로 판단.
-                val currentLaneSet = laneOffsets.filterValues { offset -> PacketDiffer.isLaneConnected(packet.raw, offset) }.keys
+            // net_state(온라인 여부)는 "레인이 패킷에 보고됐는지"가 아니라 "레인 블록의 실제
+            // 센서 값이 살아있는지"까지 확인한다(레거시 `ClsPacketAnalyzer.IsNotConnected` 대응,
+            // 어드버서리얼 리뷰 지적 — 레거시는 있었지만 신규 구현에서 누락돼 있었다). 게이트가
+            // 레인 슬롯을 계속 보고해도 물리 센서가 분리되면 나머지 바이트가 전부 0으로 오므로,
+            // 단순 존재 여부만 보면 실제로는 끊긴 레인이 대시보드에 계속 온라인으로 표시된다.
+            // 레인이 아예 보고되지 않으면(`laneOffsets`가 비어 있으면) currentLaneSet은 자연히
+            // 빈 집합이 되어, 아래 로직이 이전에 온라인이던 레인 전부를 오프라인으로 전이시킨다.
+            //
+            // [레거시와의 의도적 차이] 레거시 SpeedServer.cs(라인 1096~1141)는 이 검사를
+            // `iLaneCntForNet > 1`(다중 레인)일 때만 적용했다 — 단일 레인 게이트는 이 지점에서
+            // net_state를 아예 건드리지 않고, ClsQuartzJobReqStatus의 주기적 TCP 소켓 생존 폴링
+            // 결과만으로 온라인/오프라인을 판정했다(TCP 생존=레인 생존으로 취급). 재검토 시 이
+            // 차이를 발견해 사용자에게 확인했고, "레인 수와 무관하게 항상 isLaneConnected를
+            // 적용"하는 현재 동작을 그대로 유지하기로 결정했다 — 물리 센서 분리를 TCP 연결
+            // 생존 여부보다 더 빠르고 정확하게 감지할 수 있어 레거시보다 개선된 동작으로 판단.
+            val currentLaneSet = laneOffsets.filterValues { offset -> PacketDiffer.isLaneConnected(packet.raw, offset) }.keys
 
-                // 상태 전이(오프라인→온라인) 시에만 net_state를 큐잉한다(적대적 리뷰 지적) — 매 폴링마다
-                // 전 레인을 무조건 다시 쓰면 DB 쓰기 큐(샤드당 1000)가 대수/레인 수가 많을 때 곧바로
-                // 포화되어 오히려 조용히 드롭당한다. 이미 온라인으로 기록한 레인은 다시 쓰지 않고,
-                // 새로 나타난 레인(최초 접속 또는 재연결로 온라인 집합에 없던 레인)만 기록한다.
-                //
-                // 축소된 레인도 함께 처리해야 한다(적대적 리뷰 재지적) — authoritative 상태 패킷의
-                // 레인 집합이 줄어들면(레인 일부만 내려가는 경우 등) 사라진 레인은 온라인 상태로
-                // 영구히 남아 대시보드가 실제 구성과 어긋난다. 그 레인은 laneSnapshot(위 replaceLaneNumbers로
-                // 이미 교체됨)에서도 빠지므로 커넥션 종료 시의 오프라인 일괄 처리 대상에도 잡히지 않는다.
-                // 사라진 레인을 여기서 명시적으로 오프라인 처리하고 onlineLanesRecorded에서도 제거해야,
-                // 그 레인이 나중에 다시 나타났을 때도 "새로 나타난 레인"으로 인식되어 온라인 갱신이
-                // 정상적으로 다시 큐잉된다. (센서만 끊겨 currentLaneSet에서 빠진 레인도 동일하게
-                // 오프라인으로 전이된다.)
-                val newlyOnlineLanes = currentLaneSet - state.onlineLanesRecorded
-                val newlyOfflineLanes = state.onlineLanesRecorded - currentLaneSet
-                if (newlyOnlineLanes.isNotEmpty()) {
-                    // state를 이미 들고 있으므로 캐시 조회 오버로드로 넘긴다 — dtlIp만 넘기면 매 레인마다
-                    // tb_gate_dtl을 재조회하는 오버로드로 빠져, 캐시를 만든 취지(레거시 M-8 N+1 제거)가
-                    // 무색해진다(2026-08-13 Opus 전체 리뷰 지적).
-                    newlyOnlineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = true) }
-                }
-                if (newlyOfflineLanes.isNotEmpty()) {
-                    newlyOfflineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = false) }
-                }
-                if (newlyOnlineLanes.isNotEmpty() || newlyOfflineLanes.isNotEmpty()) {
-                    state.onlineLanesRecorded = currentLaneSet
-                }
+            // 상태 전이(오프라인→온라인) 시에만 net_state를 큐잉한다(적대적 리뷰 지적) — 매 폴링마다
+            // 전 레인을 무조건 다시 쓰면 DB 쓰기 큐(샤드당 1000)가 대수/레인 수가 많을 때 곧바로
+            // 포화되어 오히려 조용히 드롭당한다. 이미 온라인으로 기록한 레인은 다시 쓰지 않고,
+            // 새로 나타난 레인(최초 접속 또는 재연결로 온라인 집합에 없던 레인)만 기록한다.
+            //
+            // 축소된 레인도 함께 처리해야 한다(적대적 리뷰 재지적) — authoritative 상태 패킷의
+            // 레인 집합이 줄어들면(레인 일부만 내려가는 경우) 사라진 레인은 온라인 상태로 영구히
+            // 남아 대시보드가 실제 구성과 어긋난다. lanes가 비어 있지 않은 한 그 레인은
+            // laneSnapshot(위 replaceLaneNumbers로 이미 교체됨)에서도 빠지므로 커넥션 종료 시의
+            // 오프라인 일괄 처리 대상에도 잡히지 않는다(레인 수 0 보고는 위에서 replaceLaneNumbers를
+            // 건너뛰므로 laneSnapshot이 아니라 여기 currentLaneSet/onlineLanesRecorded 비교로만
+            // 오프라인 전이가 이뤄진다). 사라진 레인을 여기서 명시적으로 오프라인 처리하고
+            // onlineLanesRecorded에서도 제거해야, 그 레인이 나중에 다시 나타났을 때도 "새로 나타난
+            // 레인"으로 인식되어 온라인 갱신이 정상적으로 다시 큐잉된다. (센서만 끊겨 currentLaneSet에서
+            // 빠진 레인도 동일하게 오프라인으로 전이된다.)
+            val newlyOnlineLanes = currentLaneSet - state.onlineLanesRecorded
+            val newlyOfflineLanes = state.onlineLanesRecorded - currentLaneSet
+            if (newlyOnlineLanes.isNotEmpty()) {
+                // state를 이미 들고 있으므로 캐시 조회 오버로드로 넘긴다 — dtlIp만 넘기면 매 레인마다
+                // tb_gate_dtl을 재조회하는 오버로드로 빠져, 캐시를 만든 취지(레거시 M-8 N+1 제거)가
+                // 무색해진다(2026-08-13 Opus 전체 리뷰 지적).
+                newlyOnlineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = true) }
+            }
+            if (newlyOfflineLanes.isNotEmpty()) {
+                newlyOfflineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = false) }
+            }
+            if (newlyOnlineLanes.isNotEmpty() || newlyOfflineLanes.isNotEmpty()) {
+                state.onlineLanesRecorded = currentLaneSet
             }
         }
 

@@ -64,13 +64,12 @@ class GateGroupService(
     // GateGroupRepository.findByIdWithLocation 주석 참고).
     fun findByIdOrNull(grpId: Long): GateGroup? = groupRepository.findByIdWithLocation(grpId)
 
-    // form.locId/gateTypeCode는 컨트롤러의 @Validated(@NotNull)가 이미 통과시킨 뒤에만 서비스로
-    // 들어오지만, Kotlin 타입 자체는 여전히 nullable(Long?/Int?)이라 여기서 한 번 더 unwrap한다.
+    // form.locId는 컨트롤러의 @Validated(@NotNull)가 이미 통과시킨 뒤에만 서비스로 들어오지만,
+    // Kotlin 타입 자체는 여전히 nullable(Long?)이라 여기서 한 번 더 unwrap한다.
 
     @Transactional
     fun create(form: GateGroupForm) {
         val locId = requireNotNull(form.locId) { "위치를 선택하세요" }
-        val gateTypeCode = requireNotNull(form.gateTypeCode) { "게이트 타입을 선택하세요" }
         val location = locationRepository.findById(locId).orElseThrow {
             NoSuchElementException("위치를 찾을 수 없습니다: $locId")
         }
@@ -79,7 +78,6 @@ class GateGroupService(
                 location = location,
                 grpName = form.grpName,
                 laneCount = form.laneCount,
-                gateTypeCode = gateTypeCode,
                 linkType = form.linkType,
                 useYn = form.useYn,
             ),
@@ -89,7 +87,6 @@ class GateGroupService(
     @Transactional
     fun update(grpId: Long, form: GateGroupForm) {
         val locId = requireNotNull(form.locId) { "위치를 선택하세요" }
-        val gateTypeCode = requireNotNull(form.gateTypeCode) { "게이트 타입을 선택하세요" }
         val group = groupRepository.findById(grpId).orElseThrow {
             NoSuchElementException("그룹을 찾을 수 없습니다: $grpId")
         }
@@ -100,7 +97,6 @@ class GateGroupService(
         }
         group.grpName = form.grpName
         group.laneCount = form.laneCount
-        group.gateTypeCode = gateTypeCode
         group.linkType = form.linkType
         group.useYn = form.useYn
     }
@@ -133,8 +129,6 @@ data class GateGroupForm(
     var grpName: String = "",
     @field:Min(value = 1, message = "레인 수는 1 이상이어야 합니다")
     var laneCount: Int = 1,
-    @field:NotNull(message = "게이트 타입을 선택하세요")
-    var gateTypeCode: Int? = null,
     var linkType: Int = 1,
     var useYn: Boolean = true,
 ) {
@@ -147,7 +141,6 @@ data class GateGroupForm(
 class GateGroupController(
     private val groupService: GateGroupService,
     private val locationService: GateLocationService,
-    private val gateTypeCodeService: GateTypeCodeService,
     private val menuProvider: MenuProvider,
 ) {
     @GetMapping
@@ -176,7 +169,6 @@ class GateGroupController(
                 locId = group.location.locId,
                 grpName = group.grpName,
                 laneCount = group.laneCount,
-                gateTypeCode = group.gateTypeCode,
                 linkType = group.linkType,
                 useYn = group.useYn,
             ),
@@ -267,7 +259,6 @@ class GateGroupController(
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "게이트그룹 관리")
         model.addAttribute("allLocations", locationOptions(locId, showInactive))
-        model.addAttribute("gateTypes", gateTypeCodeService.gateTypes())
         model.addAttribute("selectedLocId", locId)
         model.addAttribute("showInactive", showInactive)
         model.addAttribute("groups", groupService.findAllForManagement(locId, showInactive))

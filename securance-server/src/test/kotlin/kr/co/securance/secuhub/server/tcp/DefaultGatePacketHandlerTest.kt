@@ -23,6 +23,8 @@ import reactor.netty.Connection
 import reactor.netty.NettyOutbound
 import java.time.LocalDateTime
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private object FakeCodec : GateProtocolCodec {
     override val supportedGateTypes: Set<Int> = setOf(1)
@@ -192,6 +194,60 @@ class DefaultGatePacketHandlerTest {
         // 보고되므로 라우팅 대상에서는 빠지지 않지만, net_state는 오프라인으로 전이돼야 한다.
         handler.handle(state, fakeStatusPacket(laneCount = 2) { lane -> if (lane == 2) 0x00 else 0x01 })
         verify(registry, times(1)).enqueueNetStateUpdate(state, 2, false)
+    }
+
+    @Test
+    fun `레인 수 0을 보고하면 이전에 온라인이던 레인을 전부 오프라인으로 큐잉한다`() = runBlocking {
+        // 회귀 방지 테스트(코드 리뷰 지적, 2026-08-28): 예전에는 laneOffsetsOf 결과가 비어 있으면
+        // (장치가 GATE_STATUS 패킷에서 레인 수 0을 보고) 오프라인 전이 로직 블록 전체가
+        // `if (lanes.isNotEmpty())`에 걸려 스킵됐다 — 실제로 끊긴 게이트가 대시보드에 영구히
+        // 온라인으로 남는 문제였다. 이제는 레인 수 0도 authoritative 갱신으로 처리해 이전에
+        // 온라인이던 레인을 모두 오프라인으로 큐잉해야 한다.
+        val registry = mock(GateConnectionRegistryImpl::class.java)
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
+        val state = newState()
+
+        handler.handle(state, fakeStatusPacket(laneCount = 2))
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 1, true)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 2, true)
+
+        handler.handle(state, fakeStatusPacket(laneCount = 0))
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 1, false)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 2, false)
+
+        // 이후 레인이 다시 나타나면 "새로 나타난 레인"으로 인식되어 다시 온라인으로 큐잉돼야 한다.
+        handler.handle(state, fakeStatusPacket(laneCount = 2))
+        verify(registry, times(2)).enqueueNetStateUpdate(state, 1, true)
+        verify(registry, times(2)).enqueueNetStateUpdate(state, 2, true)
+    }
+
+    @Test
+    fun `레인 수 0을 보고해도 레인 라우팅(authoritative 상태)은 건드리지 않아 제어 명령이 계속 가능하다`() = runBlocking {
+        // 회귀 방지 테스트(Codex 적대적 리뷰 지적, 2026-08-28): 위 "레인 수 0을 보고하면..." 수정의
+        // 1차 버전은 lanes가 비어 있어도 무조건 state.replaceLaneNumbers(emptyList())를 호출했다 —
+        // 그러면 hasAuthoritativeLaneInfo=true + 레인 집합 비어있음 조합이 되어
+        // GateConnectionRegistryImpl.sendToLane의 "!ownsLane && hasAuthoritativeLaneInfo" 가드에
+        // 걸려, 장치 재기동/손상된 패킷 등으로 인한 단 한 번의 일시적 레인 수 0 보고만으로 그 장치의
+        // 모든 레인 지정 제어 명령이 다음 정상 상태 패킷이 올 때까지 거부됐다. 이제는 레인이 실제로
+        // 보고된 패킷만 라우팅에 반영하고, 빈 보고는 라우팅을 그대로 둔다 — net_state(대시보드)만
+        // 오프라인으로 전이되고 라우팅 정보(hasAuthoritativeLaneInfo/laneSnapshot)는 유지돼야 한다.
+        val registry = mock(GateConnectionRegistryImpl::class.java)
+        val handler = DefaultGatePacketHandler(registry, mock(GatePacketPersister::class.java), mock(GateControlDispatcher::class.java), mock(GateLogService::class.java), mock(OprStatusPersister::class.java))
+        val state = newState()
+
+        handler.handle(state, fakeStatusPacket(laneCount = 2))
+        assertTrue(state.hasAuthoritativeLaneInfo)
+        assertEquals(setOf(1, 2), state.laneSnapshot())
+
+        handler.handle(state, fakeStatusPacket(laneCount = 0))
+
+        // net_state는 여전히 오프라인으로 전이된다(대시보드 정확성은 유지).
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 1, false)
+        verify(registry, times(1)).enqueueNetStateUpdate(state, 2, false)
+        // 그러나 라우팅 상태(레인 소유권)는 직전 authoritative 값 그대로 남아, sendToLane이 이
+        // 장치의 레인 1/2로 향하는 제어 명령을 계속 받아들일 수 있어야 한다.
+        assertTrue(state.hasAuthoritativeLaneInfo)
+        assertEquals(setOf(1, 2), state.laneSnapshot())
     }
 
     @Test

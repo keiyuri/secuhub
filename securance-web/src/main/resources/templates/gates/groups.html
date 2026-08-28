@@ -57,7 +57,7 @@
         </div>
         <div class="table-responsive">
           <table class="table table-sm table-striped mb-0">
-            <thead><tr><th>위치</th><th>그룹명</th><th>레인수</th><th>게이트타입</th><th>사용</th><th></th></tr></thead>
+            <thead><tr><th>위치</th><th>그룹명</th><th>레인수</th><th>연결종류</th><th>사용</th><th></th></tr></thead>
             <tbody>
               <tr th:if="${#lists.isEmpty(groups)}">
                 <td colspan="6" class="text-center text-muted">등록된 게이트그룹이 없습니다.</td>
@@ -66,7 +66,7 @@
                 <td th:text="${grp.location.locName}">위치</td>
                 <td th:text="${grp.grpName}">그룹명</td>
                 <td th:text="${grp.laneCount}">1</td>
-                <td th:text="${grp.gateTypeCode}">1</td>
+                <td th:text="${grp.linkType == 1} ? '1:1' : '1:N'">1:1</td>
                 <td th:text="${grp.useYn} ? '사용' : '미사용'">사용</td>
                 <td class="text-end text-nowrap">
                   <a class="btn btn-sm btn-outline-secondary" th:href="@{/gates/details(grpId=${grp.grpId})}">레인</a>
@@ -121,17 +121,12 @@
                      th:classappend="${#fields.hasErrors('laneCount')} ? 'is-invalid'"/>
               <div class="invalid-feedback" th:if="${#fields.hasErrors('laneCount')}" th:errors="*{laneCount}"></div>
             </div>
+            <!-- 코드 리뷰 지적(2026-08-28): 이 화면의 "게이트 타입" 선택은 더 이상 쓰지 않는다 —
+                 실제 프로토콜 코덱 선택은 레인(tb_gate_dtl.dtl_type, 게이트 상세 화면) 단위로
+                 이미 이뤄지고 있어 그룹 레벨 값은 중복 캐시였다(GateGroup.gateTypeCode 삭제,
+                 V33 마이그레이션 참고). 그룹 레벨에서 실제 의미를 갖는 "연결 종류" 선택만 남긴다. -->
             <div class="mb-3">
-              <label class="form-label">게이트 타입</label>
-              <select class="form-select" th:field="*{gateTypeCode}"
-                      th:classappend="${#fields.hasErrors('gateTypeCode')} ? 'is-invalid'">
-                <option value="">선택하세요</option>
-                <option th:each="code : ${gateTypes}" th:value="${code.id.codeCd}" th:text="${code.codeName}"></option>
-              </select>
-              <div class="invalid-feedback" th:if="${#fields.hasErrors('gateTypeCode')}" th:errors="*{gateTypeCode}"></div>
-            </div>
-            <div class="mb-3">
-              <label class="form-label">연결 방식</label>
+              <label class="form-label">연결 종류</label>
               <select class="form-select" th:field="*{linkType}">
                 <option value="1">1:1</option>
                 <option value="2">1:N</option>

@@ -7,6 +7,8 @@
 <body>
 <div layout:fragment="content">
 
+  <div class="alert alert-warning py-2" th:if="${error}" th:text="${error}"></div>
+
   <div class="card card-outline card-secondary mb-3">
     <div class="card-body py-2">
       <form method="get" th:action="@{/reports/events}" class="row g-2 align-items-end">

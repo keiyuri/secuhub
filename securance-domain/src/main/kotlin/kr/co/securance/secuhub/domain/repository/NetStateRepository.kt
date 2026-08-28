@@ -19,6 +19,15 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
     fun findByIdGrpId(grpId: Long): List<NetState>
 
     /**
+     * 코드 리뷰 지적(2026-08-28) — [kr.co.securance.secuhub.web.gate.GateTreeService.buildTreeUncached]가
+     * 대시보드 트리 재조립 때마다 이 테이블을 `findAll()`로 조건 없이 전량 스캔했다. 위치/그룹/게이트는
+     * `useYn` 필터가 이미 적용된 반면 온라인 상태만 필터 없이 전체를 읽어, 비활성화되거나 삭제된
+     * 그룹의 잔여 행까지 매번 스캔 대상에 포함시켰다. 트리에 실제로 표시되는 활성 그룹 ID로만
+     * 좁혀 조회한다(현재 표시 대상과 동일한 범위로 스캔을 제한).
+     */
+    fun findByIdGrpIdIn(grpIds: Collection<Long>): List<NetState>
+
+    /**
      * 코드 리뷰 지적 R-8(2026-08-20) 대응 — `applied_seq`가 [seq] 이하인 행에만(=더 최신 쓰기가
      * 아직 적용되지 않았을 때만) [dtlState]/[checkTime]/[applied_seq]를 반영하는 조건부 UPSERT.
      *

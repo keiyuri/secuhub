@@ -17,19 +17,38 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.scheduling.quartz.CronTriggerFactoryBean
 import org.springframework.scheduling.quartz.JobDetailFactoryBean
 import org.springframework.scheduling.quartz.SimpleTriggerFactoryBean
+import java.time.ZoneId
 import java.util.Date
+import java.util.TimeZone
 
 @Configuration
 @EnableConfigurationProperties(SchedulerProperties::class)
 class SchedulerConfiguration {
 
-    @Bean
-    fun netCheckJobDetail(): JobDetail =
+    /**
+     * `JobDetailFactoryBean` 보일러플레이트 추출(코드 리뷰 지적, 2026-08-28) — 아래 5개 잡이
+     * `setJobClass`/`setName`/`setDurability(true)`만 다른 값으로 거의 동일하게 반복하던 것을
+     * 하나로 모은다. 잡 이름을 잘못된 잡 클래스에 연결하는 복붙 실수 위험도 줄어든다.
+     */
+    private fun jobDetail(jobClass: Class<out org.quartz.Job>, name: String): JobDetail =
         JobDetailFactoryBean().apply {
-            setJobClass(NetCheckJob::class.java)
-            setName("netCheckJob")
+            setJobClass(jobClass)
+            setName(name)
             setDurability(true)
         }.also { it.afterPropertiesSet() }.`object`!!
+
+    /** `SimpleTriggerFactoryBean` 보일러플레이트 추출 — 시작 지연/반복 주기만 다른 4개 트리거가 대상. */
+    private fun simpleTrigger(jobDetail: JobDetail, startDelayMillis: Long, repeatIntervalMillis: Long): Trigger =
+        SimpleTriggerFactoryBean().apply {
+            setJobDetail(jobDetail)
+            setStartTime(Date(System.currentTimeMillis() + startDelayMillis))
+            setRepeatInterval(repeatIntervalMillis)
+            setRepeatCount(SimpleTrigger.REPEAT_INDEFINITELY)
+            setMisfireInstruction(SimpleTrigger.MISFIRE_INSTRUCTION_RESCHEDULE_NEXT_WITH_REMAINING_COUNT)
+        }.also { it.afterPropertiesSet() }.`object`!!
+
+    @Bean
+    fun netCheckJobDetail(): JobDetail = jobDetail(NetCheckJob::class.java, "netCheckJob")
 
     /**
      * 잡 시작을 살짝 지연시켜(+15초) 애플리케이션 기동 직후 커넥션이 아직 없을 때 몰리는 것을 피한다
@@ -37,21 +56,10 @@ class SchedulerConfiguration {
      */
     @Bean
     fun netCheckJobTrigger(netCheckJobDetail: JobDetail, properties: SchedulerProperties): Trigger =
-        SimpleTriggerFactoryBean().apply {
-            setJobDetail(netCheckJobDetail)
-            setStartTime(Date(System.currentTimeMillis() + 15_000))
-            setRepeatInterval(properties.netCheckIntervalSeconds * 1000)
-            setRepeatCount(SimpleTrigger.REPEAT_INDEFINITELY)
-            setMisfireInstruction(SimpleTrigger.MISFIRE_INSTRUCTION_RESCHEDULE_NEXT_WITH_REMAINING_COUNT)
-        }.also { it.afterPropertiesSet() }.`object`!!
+        simpleTrigger(netCheckJobDetail, startDelayMillis = 15_000, repeatIntervalMillis = properties.netCheckIntervalSeconds * 1000)
 
     @Bean
-    fun reqStatusJobDetail(): JobDetail =
-        JobDetailFactoryBean().apply {
-            setJobClass(ReqStatusJob::class.java)
-            setName("reqStatusJob")
-            setDurability(true)
-        }.also { it.afterPropertiesSet() }.`object`!!
+    fun reqStatusJobDetail(): JobDetail = jobDetail(ReqStatusJob::class.java, "reqStatusJob")
 
     /**
      * `NetCheckJob`(+15초)보다 조금 더 늦게(+20초) 시작해 기동 직후 두 잡이 같은 커넥션 집합에
@@ -59,13 +67,7 @@ class SchedulerConfiguration {
      */
     @Bean
     fun reqStatusJobTrigger(reqStatusJobDetail: JobDetail, properties: SchedulerProperties): Trigger =
-        SimpleTriggerFactoryBean().apply {
-            setJobDetail(reqStatusJobDetail)
-            setStartTime(Date(System.currentTimeMillis() + 20_000))
-            setRepeatInterval(properties.reqStatusIntervalSeconds * 1000)
-            setRepeatCount(SimpleTrigger.REPEAT_INDEFINITELY)
-            setMisfireInstruction(SimpleTrigger.MISFIRE_INSTRUCTION_RESCHEDULE_NEXT_WITH_REMAINING_COUNT)
-        }.also { it.afterPropertiesSet() }.`object`!!
+        simpleTrigger(reqStatusJobDetail, startDelayMillis = 20_000, repeatIntervalMillis = properties.reqStatusIntervalSeconds * 1000)
 
     // ── 제어 명령 전송 잡(QUEUED 모드 전용) ──────────────────────────
 
@@ -76,12 +78,7 @@ class SchedulerConfiguration {
         havingValue = "QUEUED",
         matchIfMissing = true,
     )
-    fun sendControlJobDetail(): JobDetail =
-        JobDetailFactoryBean().apply {
-            setJobClass(SendControlJob::class.java)
-            setName("sendControlJob")
-            setDurability(true)
-        }.also { it.afterPropertiesSet() }.`object`!!
+    fun sendControlJobDetail(): JobDetail = jobDetail(SendControlJob::class.java, "sendControlJob")
 
     /**
      * 제어 명령 폴링 트리거. 다른 잡들과 달리 시작 지연을 짧게(+5초) 둔다 — 운영자가 누른 제어
@@ -99,15 +96,13 @@ class SchedulerConfiguration {
         matchIfMissing = true,
     )
     fun sendControlJobTrigger(sendControlJobDetail: JobDetail, properties: ControlProperties): Trigger =
-        SimpleTriggerFactoryBean().apply {
-            setJobDetail(sendControlJobDetail)
-            setStartTime(Date(System.currentTimeMillis() + 5_000))
-            setRepeatInterval(properties.pollIntervalSeconds.coerceAtLeast(1) * 1000)
-            setRepeatCount(SimpleTrigger.REPEAT_INDEFINITELY)
-            // 폴링이 밀렸을 때 밀린 횟수만큼 몰아서 실행하면 같은 명령을 반복 조회하게 되므로,
-            // 다음 정상 시각으로 재조정만 하고 지나간 실행은 버린다.
-            setMisfireInstruction(SimpleTrigger.MISFIRE_INSTRUCTION_RESCHEDULE_NEXT_WITH_REMAINING_COUNT)
-        }.also { it.afterPropertiesSet() }.`object`!!
+        // 폴링이 밀렸을 때 밀린 횟수만큼 몰아서 실행하면 같은 명령을 반복 조회하게 되므로,
+        // 다음 정상 시각으로 재조정만 하고 지나간 실행은 버린다(simpleTrigger의 공통 정책).
+        simpleTrigger(
+            sendControlJobDetail,
+            startDelayMillis = 5_000,
+            repeatIntervalMillis = properties.pollIntervalSeconds.coerceAtLeast(1) * 1000,
+        )
 
     // ── D5 데이터 보관 정리 잡 ──────────────────────────────────────
 
@@ -118,12 +113,7 @@ class SchedulerConfiguration {
         havingValue = "true",
         matchIfMissing = true,
     )
-    fun retentionCleanupJobDetail(): JobDetail =
-        JobDetailFactoryBean().apply {
-            setJobClass(RetentionCleanupJob::class.java)
-            setName("retentionCleanupJob")
-            setDurability(true)
-        }.also { it.afterPropertiesSet() }.`object`!!
+    fun retentionCleanupJobDetail(): JobDetail = jobDetail(RetentionCleanupJob::class.java, "retentionCleanupJob")
 
     /**
      * 다른 잡들과 달리 매초/매십초 반복이 아니라 하루 한 번 도는 cron 트리거를 쓴다
@@ -141,6 +131,16 @@ class SchedulerConfiguration {
         CronTriggerFactoryBean().apply {
             setJobDetail(retentionCleanupJobDetail)
             setCronExpression(properties.retentionCron)
+            // 코드 리뷰 지적(2026-08-28): 명시하지 않으면 JVM 기본 타임존을 쓴다 — 배포 환경이
+            // UTC라면 "새벽 3시"가 실제로는 KST 정오에 실행돼 트래픽이 몰리는 시간대에 대량 삭제가
+            // 돈다. SchedulerProperties.retentionTimeZone(기본 Asia/Seoul) KDoc 참고.
+            //
+            // Opus 재검증 지적(2026-08-28): TimeZone.getTimeZone(String) 오버로드는 인식 못 하는
+            // ID(예: 오프셋 표기 "+09:00")를 조용히 "GMT"로 대체한다 — SchedulerProperties의 init
+            // 검증(ZoneId.of)은 이런 값도 통과시키므로, 검증은 통과했는데 실제로는 GMT로 도는 불일치가
+            // 생길 수 있었다. ZoneId를 거쳐 TimeZone.getTimeZone(ZoneId) 오버로드를 쓰면 같은 문자열을
+            // 검증(ZoneId.of)과 적용 양쪽에서 동일하게 해석해 이 불일치를 없앤다.
+            setTimeZone(TimeZone.getTimeZone(ZoneId.of(properties.retentionTimeZone)))
             setMisfireInstruction(CronTrigger.MISFIRE_INSTRUCTION_DO_NOTHING)
         }.also { it.afterPropertiesSet() }.`object`!!
 
@@ -153,12 +153,7 @@ class SchedulerConfiguration {
         havingValue = "true",
         matchIfMissing = true,
     )
-    fun oprStatusOutboxReplayJobDetail(): JobDetail =
-        JobDetailFactoryBean().apply {
-            setJobClass(OprStatusOutboxReplayJob::class.java)
-            setName("oprStatusOutboxReplayJob")
-            setDurability(true)
-        }.also { it.afterPropertiesSet() }.`object`!!
+    fun oprStatusOutboxReplayJobDetail(): JobDetail = jobDetail(OprStatusOutboxReplayJob::class.java, "oprStatusOutboxReplayJob")
 
     /**
      * 다른 상시 폴링 잡들(+5~20초)보다 늦게(+30초) 시작한다 — 이 잡은 드물게(드롭/최종실패 시에만)
@@ -175,11 +170,9 @@ class SchedulerConfiguration {
         oprStatusOutboxReplayJobDetail: JobDetail,
         properties: SchedulerProperties,
     ): Trigger =
-        SimpleTriggerFactoryBean().apply {
-            setJobDetail(oprStatusOutboxReplayJobDetail)
-            setStartTime(Date(System.currentTimeMillis() + 30_000))
-            setRepeatInterval(properties.oprStatusOutboxReplayIntervalSeconds * 1000)
-            setRepeatCount(SimpleTrigger.REPEAT_INDEFINITELY)
-            setMisfireInstruction(SimpleTrigger.MISFIRE_INSTRUCTION_RESCHEDULE_NEXT_WITH_REMAINING_COUNT)
-        }.also { it.afterPropertiesSet() }.`object`!!
+        simpleTrigger(
+            oprStatusOutboxReplayJobDetail,
+            startDelayMillis = 30_000,
+            repeatIntervalMillis = properties.oprStatusOutboxReplayIntervalSeconds * 1000,
+        )
 }

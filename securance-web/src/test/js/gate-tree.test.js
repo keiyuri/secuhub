@@ -38,11 +38,12 @@ describe('escapeHtml', () => {
 describe('renderDetail/renderGroup/renderLocation', () => {
   test('레인 이름이 없으면 dtlIp를 라벨로 쓰고, 게이트 이름은 이스케이프한다', () => {
     const { renderDetail } = loadGateTree();
-    const grp = { gateTypeCode: 1 };
+    // 코드 리뷰 지적(2026-08-28): 게이트 타입은 이제 그룹이 아니라 레인(dtl) 자신의 값이다
+    // (GateGroup.gateTypeCode 삭제) — data-gate-type은 d.dtlType에서 나와야 한다.
     const html = renderDetail(
       {},
-      grp,
-      { dtlId: 1, dtlIp: '192.168.0.1', dtlLaneNo: 1, dtlName: '<b>1번</b>', online: true },
+      {},
+      { dtlId: 1, dtlIp: '192.168.0.1', dtlLaneNo: 1, dtlName: '<b>1번</b>', dtlType: 1, online: true },
     );
     expect(html).toContain('&lt;b&gt;1번&lt;/b&gt;');
     expect(html).toContain('data-online="true"');
@@ -52,13 +53,13 @@ describe('renderDetail/renderGroup/renderLocation', () => {
 
   test('오프라인 레인은 빨간 상태 아이콘을 쓴다', () => {
     const { renderDetail } = loadGateTree();
-    const html = renderDetail({}, { gateTypeCode: 1 }, { dtlId: 2, dtlIp: '192.168.0.2', dtlLaneNo: 1, online: false });
+    const html = renderDetail({}, {}, { dtlId: 2, dtlIp: '192.168.0.2', dtlLaneNo: 1, dtlType: 1, online: false });
     expect(html).toContain('text-danger');
   });
 
   test('그룹에 레인이 없으면 안내 문구를 표시한다', () => {
     const { renderGroup } = loadGateTree();
-    const html = renderGroup({}, { grpId: 1, grpName: '1층', gateTypeCode: 1, details: [] });
+    const html = renderGroup({}, { grpId: 1, grpName: '1층', details: [] });
     expect(html).toContain('등록된 레인이 없습니다');
   });
 

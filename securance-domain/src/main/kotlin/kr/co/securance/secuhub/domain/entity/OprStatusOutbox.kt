@@ -85,8 +85,12 @@ class OprStatusOutbox(
     @Column(name = "processed_date")
     var processedDate: LocalDateTime? = null,
 
+    // 다른 모든 단일 PK 엔티티(DataReceive, DataSend, GateDetail 등)와 동일하게 val로 고정한다
+    // (코드 리뷰 지적, 2026-08-28) — var였던 이전에는 영속성 컨텍스트가 관리 중인 인스턴스의 ID를
+    // 실수로 재할당하면 Hibernate의 1차 캐시/식별자 추적이 깨져 엉뚱한 행에 UPDATE가 나가거나
+    // 예외가 발생할 수 있었다.
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "outbox_id")
-    var outboxId: Long? = null,
+    val outboxId: Long? = null,
 )

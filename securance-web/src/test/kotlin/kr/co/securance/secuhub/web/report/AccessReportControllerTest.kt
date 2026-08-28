@@ -4,15 +4,24 @@ import kr.co.securance.secuhub.web.common.ExcelExportService
 import kr.co.securance.secuhub.web.gate.GateGroupService
 import kr.co.securance.secuhub.web.gate.GateLocationService
 import kr.co.securance.secuhub.web.menu.MenuProvider
+import jakarta.servlet.http.HttpServletResponse
+import kr.co.securance.secuhub.domain.entity.OprStatus
+import kr.co.securance.secuhub.domain.entity.OprStatusId
 import org.junit.jupiter.api.Test
+import org.mockito.ArgumentMatchers.anyInt
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.Mockito
+import org.mockito.Mockito.never
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.SpringBootConfiguration
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.context.annotation.Import
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageImpl
+import org.springframework.data.domain.PageRequest
 import org.springframework.security.test.context.support.WithMockUser
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf
 import org.springframework.test.context.bean.override.mockito.MockitoBean
@@ -68,7 +77,12 @@ class AccessReportControllerTest {
     @MockitoBean
     private lateinit var menuProvider: MenuProvider
 
-    private val emptyResult = AccessReportResult(rows = emptyList(), totalIn = 0, totalOut = 0, totalDoor = 0)
+    private val emptyResult = AccessReportResult(
+        rows = Page.empty<kr.co.securance.secuhub.domain.entity.OprStatus>(PageRequest.of(0, AccessReportService.PAGE_SIZE)),
+        totalIn = 0,
+        totalOut = 0,
+        totalDoor = 0,
+    )
 
     @Test
     @WithMockUser
@@ -89,7 +103,7 @@ class AccessReportControllerTest {
         `when`(menuProvider.menu()).thenReturn(emptyList())
         `when`(locationService.findAllActive()).thenReturn(emptyList())
         `when`(groupService.findAllActiveByLocation(1L)).thenReturn(emptyList())
-        `when`(accessReportService.search(anyLong(), anyLong(), anyLocalDate(), anyLocalDate()))
+        `when`(accessReportService.search(anyLong(), anyLong(), anyLocalDate(), anyLocalDate(), anyInt()))
             .thenReturn(emptyResult)
 
         mockMvc.get("/reports/access") {
@@ -108,7 +122,7 @@ class AccessReportControllerTest {
         `when`(menuProvider.menu()).thenReturn(emptyList())
         `when`(locationService.findAllActive()).thenReturn(emptyList())
         `when`(groupService.findAllActiveByLocation(1L)).thenReturn(emptyList())
-        `when`(accessReportService.search(anyLong(), anyLong(), anyLocalDate(), anyLocalDate()))
+        `when`(accessReportService.search(anyLong(), anyLong(), anyLocalDate(), anyLocalDate(), anyInt()))
             .thenReturn(emptyResult)
 
         val from = LocalDate.now().minusYears(1).toString()
@@ -126,6 +140,61 @@ class AccessReportControllerTest {
         // AccessReportController.resolveRange는 3개월 상한을 넘는 fromDate를 to.minusMonths(3)으로
         // 잘라내야 한다 — 원래 요청한 1년 전 날짜가 그대로 쓰이면 안 된다.
         assert(boundedFrom.isAfter(LocalDate.parse(from))) { "3개월 상한이 적용되지 않았다: $boundedFrom" }
+    }
+
+    @Test
+    @WithMockUser
+    fun `엑셀 내보내기 결과가 상한 이내면 정상적으로 파일을 생성한다`() {
+        val row = OprStatus(id = OprStatusId(oprDate = "20260828", oprSeq = 1, dtlIp = "10.0.0.1", dtlLaneNo = 1))
+        val page = PageImpl(listOf(row), PageRequest.of(0, AccessReportService.MAX_EXPORT_ROWS), 1)
+        `when`(accessReportService.searchForExport(anyLong(), anyLong(), anyLocalDate(), anyLocalDate()))
+            .thenReturn(page)
+
+        mockMvc.get("/reports/access/excel") {
+            param("locId", "1")
+            param("grpId", "2")
+            with(csrf())
+        }.andExpect {
+            status { isOk() }
+        }
+
+        verify(excelExportService).export(
+            response = anyOf<HttpServletResponse>(),
+            fileName = anyOf<String>(),
+            headers = anyOf<List<String>>(),
+            rows = anyOf<List<List<Any?>>>(),
+        )
+    }
+
+    @Test
+    @WithMockUser
+    fun `엑셀 내보내기 결과가 상한을 넘으면 잘라내지 않고 명시적으로 거부한다`() {
+        // Codex 적대적 리뷰 지적(2026-08-28) 회귀 테스트 — 조회 결과가 MAX_EXPORT_ROWS를 넘으면
+        // 오래된 행이 조용히 잘린 채로 "정상" 엑셀 파일이 내려가면 안 된다. totalElements만
+        // 상한을 넘도록 구성해(content 자체는 페이지 크기 이내) 이 경로를 재현한다.
+        val row = OprStatus(id = OprStatusId(oprDate = "20260828", oprSeq = 1, dtlIp = "10.0.0.1", dtlLaneNo = 1))
+        val page = PageImpl(
+            listOf(row),
+            PageRequest.of(0, AccessReportService.MAX_EXPORT_ROWS),
+            AccessReportService.MAX_EXPORT_ROWS + 1L,
+        )
+        `when`(accessReportService.searchForExport(anyLong(), anyLong(), anyLocalDate(), anyLocalDate()))
+            .thenReturn(page)
+
+        mockMvc.get("/reports/access/excel") {
+            param("locId", "1")
+            param("grpId", "2")
+            with(csrf())
+        }.andExpect {
+            status { isEqualTo(413) } // SC_PAYLOAD_TOO_LARGE
+        }
+
+        verify(excelExportService, never()).export(
+            response = anyOf<HttpServletResponse>(),
+            fileName = anyOf<String>(),
+            headers = anyOf<List<String>>(),
+            rows = anyOf<List<List<Any?>>>(),
+        )
     }
 }
 

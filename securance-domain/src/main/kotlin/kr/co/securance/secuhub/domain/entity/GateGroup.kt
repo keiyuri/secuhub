@@ -37,10 +37,6 @@ class GateGroup(
     @Column(name = "lane_cnt", nullable = false)
     var laneCount: Int = 1,
 
-    /** 게이트 타입 원시값(1=Speed,2=Flap,3=Turn,4=Fast) — 표시는 `tb_code`(CodeMaster) 조회로. */
-    @Column(name = "dtl_type", nullable = false)
-    var gateTypeCode: Int,
-
     /** 연결 방식: 1=1:1, 2=1:N (계획서 3.2절, `securance.server.mode`와는 별개의 축). */
     @Column(name = "link_type", nullable = false)
     var linkType: Int = 1,

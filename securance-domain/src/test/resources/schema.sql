@@ -259,7 +259,7 @@ CREATE TABLE tb_gate_grp (
     loc_id      BIGINT NOT NULL,
     grp_nm      VARCHAR(200) NOT NULL,
     lane_cnt    INT NOT NULL DEFAULT 1,
-    dtl_type    INT NOT NULL,
+    dtl_type    INT NULL, -- V35__relax_gate_grp_dtl_type_nullable.sql: GateGroup.gateTypeCode 제거로 NOT NULL 해제
     link_type   INT NOT NULL DEFAULT 1,
     use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
     grp_x       INT NULL,

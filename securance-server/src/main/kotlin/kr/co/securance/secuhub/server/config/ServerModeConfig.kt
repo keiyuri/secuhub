@@ -73,4 +73,24 @@ data class ServerModeConfig(
      * 담당 — [kr.co.securance.secuhub.server.tcp.GateTcpServer.registerDisposeGuard] 참고).
      */
     val writeTimeoutSeconds: Long = 15,
-)
+) {
+    init {
+        // 코드 리뷰 지적(2026-08-28): actorDispatcherParallelism은 사용처(GateTcpServer/GateTcpClient)에서
+        // coerceAtLeast(1)로 방어되지만 dbWriterShards에는 동일한 방어가 없었다. 0으로 잘못 설정해도
+        // 기동 자체는 성공(빈 샤드 리스트)해, 운영자가 첫 게이트 패킷이 들어와 GateDbWriteQueue의
+        // `partitionKey.hashCode() % shardCount` 계산에서 ArithmeticException이 나서야 뒤늦게
+        // 설정 실수를 알게 됐다 — RabbitCredentialGuard와 같은 취지로, 기동 시점에 즉시 막는다.
+        require(dbWriterShards >= 1) { "securance.server.db-writer-shards는 1 이상이어야 합니다: $dbWriterShards" }
+
+        // 코드 리뷰 지적(2026-08-28): actorQueueCapacity는 그대로 kotlinx.coroutines의
+        // Channel(capacity=...)에 전달되는데, 그 생성자는 0(RENDEZVOUS)/-1(UNLIMITED)/-2(CONFLATED)를
+        // 특수 의미로 해석한다. 0으로 설정하면 "제출 즉시 거부"가 아니라 RENDEZVOUS 채널(수신자가
+        // 대기 중이 아니면 항상 실패)이 되어 거의 모든 패킷이 드롭되고, 음수로 설정하면 반대로
+        // 무제한 큐가 되어 GateTaskRejectedException으로 보호하려던 백프레셔 설계 의도가 조용히
+        // 무력화된다. 양의 정수만 "유한 버퍼" 의미로 쓰이도록 기동 시점에 막는다.
+        require(actorQueueCapacity >= 1) {
+            "securance.server.actor-queue-capacity는 1 이상이어야 합니다(0/음수는 kotlinx.coroutines " +
+                "Channel의 특수 용량 값과 충돌합니다): $actorQueueCapacity"
+        }
+    }
+}

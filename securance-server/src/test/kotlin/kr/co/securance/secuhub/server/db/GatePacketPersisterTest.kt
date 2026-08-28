@@ -393,7 +393,7 @@ class GatePacketPersisterTest {
         `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
         val gateDetailRepository = mock(GateDetailRepository::class.java)
         val location = GateLocation(locId = 77, locName = "새위치")
-        val group = GateGroup(grpId = 88, location = location, grpName = "새그룹", gateTypeCode = 1)
+        val group = GateGroup(grpId = 88, location = location, grpName = "새그룹")
         val liveDetail = GateDetail(
             dtlId = 159, location = location, group = group,
             dtlIp = "192.168.0.205", dtlLaneNo = 1, dtlType = 9, dtlName = "새이름",
@@ -431,7 +431,7 @@ class GatePacketPersisterTest {
         `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
         val gateDetailRepository = mock(GateDetailRepository::class.java)
         val location = GateLocation(locId = 77, locName = "새위치")
-        val group = GateGroup(grpId = 88, location = location, grpName = "새그룹", gateTypeCode = 1)
+        val group = GateGroup(grpId = 88, location = location, grpName = "새그룹")
         val liveDetail = GateDetail(
             dtlId = 159, location = location, group = group,
             dtlIp = "192.168.0.205", dtlLaneNo = 1, dtlType = 9, dtlName = "새이름",
@@ -507,7 +507,7 @@ class GatePacketPersisterTest {
         `when`(analysisRepository.findTopByDtlIpAndDtlLaneNoOrderByAnalIdDesc(anyString(), anyInt())).thenReturn(null)
         val gateDetailRepository = mock(GateDetailRepository::class.java)
         val location = GateLocation(locId = 77, locName = "새위치")
-        val group = GateGroup(grpId = 88, location = location, grpName = "새그룹", gateTypeCode = 1)
+        val group = GateGroup(grpId = 88, location = location, grpName = "새그룹")
         val liveDetail = GateDetail(
             dtlId = 159, location = location, group = group,
             dtlIp = "192.168.0.205", dtlLaneNo = 1, dtlType = 9, dtlName = "새이름",

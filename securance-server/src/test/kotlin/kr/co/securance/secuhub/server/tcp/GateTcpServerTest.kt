@@ -116,7 +116,7 @@ class GateTcpServerTest {
     @Test
     fun `지원하지 않는 게이트 타입의 연결은 즉시 닫힌다`() {
         val location = GateLocation(locId = 1L, locName = "loc")
-        val group = GateGroup(grpId = 1L, location = location, grpName = "grp", gateTypeCode = 3)
+        val group = GateGroup(grpId = 1L, location = location, grpName = "grp")
         val gateDetail = GateDetail(
             dtlId = 1L, location = location, group = group,
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 3, // FakeCodec은 1만 지원 — 3은 미지원.
@@ -137,7 +137,7 @@ class GateTcpServerTest {
     @Test
     fun `등록된 게이트가 패킷을 보내면 핸들러가 호출된다`() {
         val location = GateLocation(locId = 1L, locName = "loc")
-        val group = GateGroup(grpId = 1L, location = location, grpName = "grp", gateTypeCode = 1)
+        val group = GateGroup(grpId = 1L, location = location, grpName = "grp")
         val gateDetail = GateDetail(
             dtlId = 1L, location = location, group = group,
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 1,
@@ -178,7 +178,7 @@ class GateTcpServerTest {
         // 차는) 게이트일수록 재접속 폭풍에 빠지는 구조적 결함이었다. 이제는 큐 포화가 나면 그
         // 패킷만 드롭하고 연결은 유지되어야 한다.
         val location = GateLocation(locId = 1L, locName = "loc")
-        val group = GateGroup(grpId = 1L, location = location, grpName = "grp", gateTypeCode = 1)
+        val group = GateGroup(grpId = 1L, location = location, grpName = "grp")
         val gateDetail = GateDetail(
             dtlId = 1L, location = location, group = group,
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 1,
@@ -244,7 +244,7 @@ class GateTcpServerTest {
         // 단절 등)이 isChannelActive=true인 채로 무기한 남았다 — NetCheckJob도 이를 감지할 방법이
         // 없었다. ReadTimeoutHandler 도입 이후에는 idle 시간이 지나면 서버가 스스로 소켓을 닫아야 한다.
         val location = GateLocation(locId = 1L, locName = "loc")
-        val group = GateGroup(grpId = 1L, location = location, grpName = "grp", gateTypeCode = 1)
+        val group = GateGroup(grpId = 1L, location = location, grpName = "grp")
         val gateDetail = GateDetail(
             dtlId = 1L, location = location, group = group,
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 1,
@@ -269,7 +269,7 @@ class GateTcpServerTest {
         // 적대적 리뷰 지적 회귀 테스트: 예전에는 stop()이 서버 소켓만 닫고 이미 등록된 커넥션은
         // 방치했다 — 클라이언트 입장에서는 소켓이 계속 열려 있는 것처럼 보였다.
         val location = GateLocation(locId = 1L, locName = "loc")
-        val group = GateGroup(grpId = 1L, location = location, grpName = "grp", gateTypeCode = 1)
+        val group = GateGroup(grpId = 1L, location = location, grpName = "grp")
         val gateDetail = GateDetail(
             dtlId = 1L, location = location, group = group,
             dtlIp = "127.0.0.1", dtlLaneNo = 1, dtlType = 1,

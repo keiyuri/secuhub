@@ -2,6 +2,7 @@ package kr.co.securance.secuhub.domain.repository
 
 import kr.co.securance.secuhub.domain.entity.OprStatus
 import kr.co.securance.secuhub.domain.entity.OprStatusId
+import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
@@ -11,7 +12,40 @@ import org.springframework.transaction.annotation.Transactional
 
 /** `tb_opr_status` 리포지토리 — 대시보드 통행량 위젯(`uvw_user_cnt` 대응, 계획서 5.2절)의 원본 데이터. */
 interface OprStatusRepository : JpaRepository<OprStatus, OprStatusId> {
-    fun findByLocIdAndGrpIdAndIdOprDateBetween(locId: Long, grpId: Long, fromDate: String, toDate: String): List<OprStatus>
+    /**
+     * 코드 리뷰 지적(2026-08-28): 형제 리포트(LogReportController 등)와 달리 이 조회만
+     * [Pageable] 없이 조건에 맞는 전체 행을 반환해, 통행량이 많은 그룹을 3개월치로 조회하면
+     * 수십만 행이 한 번에 메모리로 올라갈 수 있었다. 화면/엑셀 각각에서 [Pageable]로 건수를
+     * 제한해 호출하도록 오버로드를 추가했다(기존 무제한 시그니처는 제거).
+     */
+    fun findByLocIdAndGrpIdAndIdOprDateBetween(
+        locId: Long,
+        grpId: Long,
+        fromDate: String,
+        toDate: String,
+        pageable: Pageable,
+    ): Page<OprStatus>
+
+    /**
+     * 화면 상단 요약 위젯(입/출/도어 합계)은 전체 조회 결과에 대한 집계라 [Pageable]로 페이지를
+     * 나눠도 값이 달라지면 안 된다 — 행을 메모리로 가져와 합산하는 대신 DB에서 SUM으로 직접
+     * 집계한다(코드 리뷰 지적, 2026-08-28. 위 [findByLocIdAndGrpIdAndIdOprDateBetween] 참고).
+     */
+    @Query(
+        """
+        SELECT COALESCE(SUM(o.inTotal), 0) AS totalIn,
+               COALESCE(SUM(o.outTotal), 0) AS totalOut,
+               COALESCE(SUM(o.doorTotal), 0) AS totalDoor
+        FROM OprStatus o
+        WHERE o.locId = :locId AND o.grpId = :grpId AND o.id.oprDate BETWEEN :fromDateKey AND :toDateKey
+        """,
+    )
+    fun sumAccessTotals(
+        @Param("locId") locId: Long,
+        @Param("grpId") grpId: Long,
+        @Param("fromDateKey") fromDateKey: String,
+        @Param("toDateKey") toDateKey: String,
+    ): AccessTotals
 
     /**
      * [kr.co.securance.secuhub.server.db.OprStatusPersister]가 새 분(分) 버킷을 INSERT하기 전에
@@ -68,4 +102,11 @@ interface OprStatusRepository : JpaRepository<OprStatus, OprStatusId> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "DELETE FROM tb_opr_status WHERE opr_date < :cutoff LIMIT :batchSize", nativeQuery = true)
     fun deleteBatchOlderThan(@Param("cutoff") cutoff: String, @Param("batchSize") batchSize: Int): Int
+}
+
+/** [OprStatusRepository.sumAccessTotals]의 인터페이스 프로젝션 — SUM 3종을 한 번의 쿼리로 묶어 받는다. */
+interface AccessTotals {
+    val totalIn: Long
+    val totalOut: Long
+    val totalDoor: Long
 }

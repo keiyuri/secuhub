@@ -34,7 +34,7 @@ import kotlin.test.assertTrue
 class GateTreeServiceTest {
 
     private val loc = GateLocation(locId = 1L, locName = "본관")
-    private val grp = GateGroup(grpId = 10L, location = loc, grpName = "1층 로비", gateTypeCode = 1)
+    private val grp = GateGroup(grpId = 10L, location = loc, grpName = "1층 로비")
     private val dtl = GateDetail(
         dtlId = 100L,
         location = loc,
@@ -56,7 +56,7 @@ class GateTreeServiceTest {
             `when`(it.findAllForTree()).thenReturn(listOf(dtl))
         },
         netStateRepository: NetStateRepository = mock(NetStateRepository::class.java).also {
-            `when`(it.findAll()).thenReturn(
+            `when`(it.findByIdGrpIdIn(listOf(10L))).thenReturn(
                 listOf(NetState(id = NetStateId(dtlIp = "10.0.0.1", dtlLaneNo = 1, locId = 1L, grpId = 10L), dtlState = "Y")),
             )
         },
@@ -91,7 +91,7 @@ class GateTreeServiceTest {
             `when`(it.findAllForTree()).thenReturn(listOf(dtl))
         }
         val netStateRepository = mock(NetStateRepository::class.java).also {
-            `when`(it.findAll()).thenReturn(emptyList())
+            `when`(it.findByIdGrpIdIn(listOf(10L))).thenReturn(emptyList())
         }
 
         val service = GateTreeService(locationRepository, groupRepository, detailRepository, netStateRepository)
@@ -115,7 +115,7 @@ class GateTreeServiceTest {
         service.buildTree()
 
         verify(detailRepository, times(1)).findAllForTree()
-        verify(netStateRepository, times(1)).findAll()
+        verify(netStateRepository, times(1)).findByIdGrpIdIn(listOf(10L))
     }
 
     @Test
@@ -129,7 +129,7 @@ class GateTreeServiceTest {
         service.buildTree()
 
         verify(detailRepository, times(2)).findAllForTree()
-        verify(netStateRepository, times(2)).findAll()
+        verify(netStateRepository, times(2)).findByIdGrpIdIn(listOf(10L))
     }
 
     // 회귀 방지(2026-08-20 Codex 적대적 리뷰 지적) — NTP 보정/VM 시간 동기화로 시스템 시계가
@@ -147,7 +147,7 @@ class GateTreeServiceTest {
         service.buildTree()
 
         verify(detailRepository, times(2)).findAllForTree()
-        verify(netStateRepository, times(2)).findAll()
+        verify(netStateRepository, times(2)).findByIdGrpIdIn(listOf(10L))
     }
 
     /** 잠금 해제 시각 경과 시뮬레이션과 동일한 패턴(LoginAttemptServiceTest 참고)의 가변 [Clock]. */

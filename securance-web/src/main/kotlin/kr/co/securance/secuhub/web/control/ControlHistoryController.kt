@@ -80,13 +80,24 @@ class ControlHistoryController(
         // (2026-08-13 코드 리뷰) — 이 컨트롤러만 LocalDate::parse를 그대로 써서, 잘못된 형식의
         // 쿼리 파라미터(오타/봇 스캔 등)가 들어오면 DateTimeParseException이 그대로 올라가 500
         // 에러 페이지가 노출됐다.
+        val to = toDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: today
+        var from = fromDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: today.minusDays(7)
+
+        // 다른 리포트(LogReportController/AccessReportController)와 동일하게 조회기간 상한을 둔다
+        // (코드 리뷰 지적, 2026-08-28) — 이 화면만 상한이 없어 넓은 기간을 반복 조회하면 매 요청마다
+        // 넓은 sndDate 범위 스캔이 발생해 DB 부하가 커질 수 있었다.
+        if (from.isBefore(to.minusMonths(3))) {
+            model.addAttribute("error", "최근 3개월까지만 조회 가능합니다.")
+            from = to.minusMonths(3)
+        }
+
         val filter = ControlHistoryFilter(
             dtlIp = dtlIp,
             sndTypeCd = sndTypeCd,
             sndYn = sndYn,
             chkYn = chkYn,
-            fromDate = fromDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: today.minusDays(7),
-            toDate = toDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: today,
+            fromDate = from,
+            toDate = to,
         )
         model.addAttribute("menu", menuProvider.menu())
         model.addAttribute("pageTitle", "제어 명령 이력")

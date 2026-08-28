@@ -38,7 +38,7 @@ class GateDetailRepositoryFindAllForTreeTest {
     private fun location(name: String) = entityManager.persistAndFlush(GateLocation(locName = name, useYn = true))
 
     private fun group(loc: GateLocation, name: String) =
-        entityManager.persistAndFlush(GateGroup(location = loc, grpName = name, gateTypeCode = 1, useYn = true))
+        entityManager.persistAndFlush(GateGroup(location = loc, grpName = name, useYn = true))
 
     private fun detail(
         loc: GateLocation,

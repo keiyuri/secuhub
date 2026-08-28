@@ -86,8 +86,5 @@ class QueuedGateControlService(
     companion object {
         /** `tb_data_snd.snd_date` — 스키마 주석 규정 포맷(초 단위). */
         private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
-
-        /** 게이트 타입을 알 수 없을 때의 기본값(Speed Gate). */
-        private const val DEFAULT_GATE_TYPE = 1
     }
 }

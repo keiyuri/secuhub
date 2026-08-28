@@ -15,7 +15,6 @@
   'use strict';
 
   var POLL_INTERVAL_MS = 5000; // dashboard-realtime.js의 SUMMARY 주기와 동일하게 맞춘다.
-  var GATE_TYPE_NAMES = { 1: 'Speed', 2: 'Flap', 3: 'Turn', 4: 'Fast' };
 
   // <details> 펼침/접힘 상태는 폴링마다 트리 전체를 다시 그리므로 별도로 기억해둔다
   // (기본값: 위치는 펼침, 그룹은 접힘 — 그룹이 많으면 화면이 너무 길어지는 것을 방지).
@@ -40,9 +39,14 @@
     var label = d.dtlName ? escapeHtml(d.dtlName) : escapeHtml(d.dtlIp);
     // data-gate-type: 우클릭 메뉴가 "역방향 개방" 항목의 표시 여부를 판단하는 데 쓴다(Flap=2에서만
     // 표시 — SR_Speed_Client ContextMenu_Init의 iGateType==2 분기와 동일).
+    //
+    // 코드 리뷰 지적(2026-08-28): 예전에는 그룹의 gateTypeCode(그룹 레벨 캐시값, 이제 삭제됨)를
+    // 모든 하위 레인에 그대로 썼다 — 레인이 실제로 그룹과 다른 타입일 수 있는데도(그룹 전체가
+    // 항상 같은 타입이라는 보장이 없다) 그룹값을 대신 쓰는 것 자체가 부정확했다. 레인 자신의
+    // 실제 dtlType(GateTreeDetailNode.dtlType, GateDetail.dtlType 원본)을 쓴다.
     return '<li class="gt-dtl" data-dtl-id="' + d.dtlId + '" data-dtl-ip="' + escapeHtml(d.dtlIp) +
       '" data-dtl-lane="' + d.dtlLaneNo + '" data-online="' + d.online +
-      '" data-gate-type="' + grp.gateTypeCode + '">' +
+      '" data-gate-type="' + d.dtlType + '">' +
       statusIcon(d.online) +
       ' <span class="gt-dtl-label">' + label + '</span>' +
       ' <span class="text-muted small">(' + escapeHtml(d.dtlIp) + ' / 레인 ' + d.dtlLaneNo + ')</span>' +
@@ -52,18 +56,19 @@
   function renderGroup(loc, grp) {
     var key = 'grp-' + grp.grpId;
     var open = isExpanded(key, false);
-    var typeName = GATE_TYPE_NAMES[grp.gateTypeCode] || ('타입 ' + grp.gateTypeCode);
     var onlineCount = grp.details.filter(function (d) { return d.online; }).length;
     var detailsHtml = grp.details.length
       ? '<ul class="gt-dtl-list">' + grp.details.map(function (d) { return renderDetail(loc, grp, d); }).join('') + '</ul>'
       : '<div class="text-muted small ms-4">등록된 레인이 없습니다.</div>';
+    // 코드 리뷰 지적(2026-08-28): 그룹 배지에 붙던 게이트 타입 이름을 없앴다 — 게이트 타입은
+    // 레인(dtl) 단위 값으로만 존재하고(GateGroup.gateTypeCode 삭제), 한 그룹의 레인들이 서로 다른
+    // 타입일 수 있어 그룹 대표값 하나로 요약할 수 없다. 타입은 각 레인 항목에서 확인한다.
     // data-loc-id/data-grp-id/data-*-name: 우클릭 메뉴(setupContextMenu)가 그룹 노드 클릭 시
     // target.grpId/grpName과 표시 문구를 이 속성에서 그대로 읽는다.
     return '<details class="gt-grp" data-key="' + key + '" data-loc-id="' + loc.locId +
       '" data-grp-id="' + grp.grpId + '" data-loc-name="' + escapeHtml(loc.locName) +
       '" data-grp-name="' + escapeHtml(grp.grpName) + '"' + (open ? ' open' : '') + '>' +
       '<summary><i class="bi bi-diagram-3"></i> ' + escapeHtml(grp.grpName) +
-      ' <span class="badge text-bg-secondary">' + typeName + '</span>' +
       ' <span class="text-muted small">(' + onlineCount + '/' + grp.details.length + ' 온라인)</span>' +
       '</summary>' + detailsHtml + '</details>';
   }

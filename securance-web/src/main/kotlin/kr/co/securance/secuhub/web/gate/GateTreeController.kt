@@ -25,7 +25,6 @@ data class GateTreeDetailNode(
 data class GateTreeGroupNode(
     val grpId: Long,
     val grpName: String,
-    val gateTypeCode: Int,
     val details: List<GateTreeDetailNode>,
 )
 
@@ -97,11 +96,21 @@ class GateTreeService(
         val locations = locationRepository.findByUseYnTrueOrderByLocName().sortedBy { it.locId }
         // GateGroupRepository.findAllByUseYnTrue()/GateDetailRepository.findAllForTree()는 JOIN FETCH로
         // location/group을 함께 읽어온다(둘 다 LAZY + open-in-view:false, 계획서 4.2절 대응).
-        val groupsByLoc = groupRepository.findAllByUseYnTrue().groupBy { it.location.locId }
+        val groups = groupRepository.findAllByUseYnTrue()
+        val groupsByLoc = groups.groupBy { it.location.locId }
         val detailsByGrp = detailRepository.findAllForTree().groupBy { it.group.grpId }
         // (dtlIp, dtlLaneNo) 복합키로 온라인 여부를 조회한다 — GateResetGridService와 동일한 이유로
         // dtlLaneNo만으로는 IP가 다른 두 장비의 상태가 서로 덮어써질 수 있다.
-        val onlineByKey = netStateRepository.findAll().associate { (it.id.dtlIp to it.id.dtlLaneNo) to it.isOnline }
+        //
+        // 코드 리뷰 지적(2026-08-28): 위치/그룹/게이트는 이미 useYn으로 활성 대상만 걸러졌는데
+        // 온라인 상태만 findAll()로 tb_net_state 전체(비활성/삭제된 그룹의 잔여 행 포함)를 스캔했다.
+        // 트리에 실제로 표시되는 활성 그룹 ID로만 좁혀, 나머지 세 조회와 같은 범위로 맞춘다.
+        val activeGrpIds = groups.mapNotNull { it.grpId }
+        val onlineByKey = if (activeGrpIds.isEmpty()) {
+            emptyMap()
+        } else {
+            netStateRepository.findByIdGrpIdIn(activeGrpIds).associate { (it.id.dtlIp to it.id.dtlLaneNo) to it.isOnline }
+        }
 
         return locations.map { loc ->
             val groups = groupsByLoc[loc.locId].orEmpty()
@@ -122,7 +131,6 @@ class GateTreeService(
                     GateTreeGroupNode(
                         grpId = requireNotNull(grp.grpId),
                         grpName = grp.grpName,
-                        gateTypeCode = grp.gateTypeCode,
                         details = details,
                     )
                 }

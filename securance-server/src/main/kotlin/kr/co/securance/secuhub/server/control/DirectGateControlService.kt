@@ -100,7 +100,7 @@ class DirectGateControlService(
                         chkYn = if (accepted) DataSend.YES else DataSend.NO,
                         dtlIp = request.dtlIp,
                         dtlLaneNo = request.dtlLaneNo,
-                        dtlType = laneInfo?.dtlType ?: 1,
+                        dtlType = laneInfo?.dtlType ?: DEFAULT_GATE_TYPE,
                         dtlId = laneInfo?.dtlId ?: 0,
                         locId = laneInfo?.locId ?: 0,
                         grpId = laneInfo?.grpId ?: 0,

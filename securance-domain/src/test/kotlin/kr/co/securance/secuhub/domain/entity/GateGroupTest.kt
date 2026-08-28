@@ -1,6 +1,5 @@
 package kr.co.securance.secuhub.domain.entity
 
-import kr.co.securance.secuhub.common.gate.GateTypeCodes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -10,7 +9,6 @@ class GateGroupTest {
         location = GateLocation(locName = "테스트 위치"),
         grpName = "테스트 그룹",
         laneCount = laneCount,
-        gateTypeCode = GateTypeCodes.SPEED_GATE,
     )
 
     @Test

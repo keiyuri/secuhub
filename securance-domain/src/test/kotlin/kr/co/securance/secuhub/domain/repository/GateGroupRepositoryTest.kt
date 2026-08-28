@@ -1,6 +1,5 @@
 package kr.co.securance.secuhub.domain.repository
 
-import kr.co.securance.secuhub.common.gate.GateTypeCodes
 import kr.co.securance.secuhub.domain.entity.GateGroup
 import kr.co.securance.secuhub.domain.entity.GateLocation
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -36,7 +35,6 @@ class GateGroupRepositoryTest {
     private fun group(location: GateLocation, name: String) = GateGroup(
         location = location,
         grpName = name,
-        gateTypeCode = GateTypeCodes.SPEED_GATE,
     )
 
     @Test

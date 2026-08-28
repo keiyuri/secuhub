@@ -78,7 +78,8 @@ class OprStatusOutboxReplayJobTest {
         inoutTime = 5,
         reason = "DROPPED_OR_FINAL_FAILURE",
         retryCount = retryCount,
-    ).apply { outboxId = id }
+        outboxId = id,
+    )
 
     private fun buildJob(
         outboxRepository: OprStatusOutboxRepository = mock(OprStatusOutboxRepository::class.java),

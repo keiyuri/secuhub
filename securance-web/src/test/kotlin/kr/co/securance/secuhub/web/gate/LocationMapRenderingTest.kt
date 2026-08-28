@@ -49,7 +49,7 @@ class LocationMapRenderingTest {
     fun `배치도 크기가 없어도 그룹 좌표가 있는 위치 배치도는 500 없이 렌더링된다`() {
         // loc_map은 있지만 loc_map_w/h가 채워지지 않은 레거시 이관 데이터 재현.
         val location = GateLocation(locId = 1L, locName = "테스트위치", locMap = "map.png", locMapWidth = null, locMapHeight = null)
-        val group = GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", gateTypeCode = 1, grpX = 100, grpY = 50)
+        val group = GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", grpX = 100, grpY = 50)
 
         `when`(menuProvider.menu()).thenReturn(emptyList())
         `when`(locationService.findByIdOrNull(1L)).thenReturn(location)
@@ -65,7 +65,7 @@ class LocationMapRenderingTest {
     @WithMockUser
     fun `배치도 크기와 그룹 좌표가 모두 있으면 500 없이 렌더링된다`() {
         val location = GateLocation(locId = 1L, locName = "테스트위치", locMap = "map.png", locMapWidth = 800, locMapHeight = 600)
-        val group = GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", gateTypeCode = 1, grpX = 100, grpY = 50)
+        val group = GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", grpX = 100, grpY = 50)
 
         `when`(menuProvider.menu()).thenReturn(emptyList())
         `when`(locationService.findByIdOrNull(1L)).thenReturn(location)

@@ -62,7 +62,11 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
 
     /**
      * 게이트 전체 장애 해제(레거시 `UpdateResetFlag` — 조건 `has_error_event = 1`).
-     * 생성 컬럼을 그대로 조건에 써서 `IDX_ANAL_ERR3_SCAN` 인덱스를 탄다.
+     * 생성 컬럼을 그대로 조건에 써서 인덱스를 탄다(문서 정정, 2026-09-01 DB 점검 — 원래 이름
+     * `IDX_ANAL_ERR3_SCAN(err_type, has_error_event, anal_id)`은 [V2__fix_dashboard_query_indexes.sql]이
+     * `idx_anal_err3_tp_date(err_type, has_error_event, resolve_yn, anal_tp, anal_date)`로 대체한 뒤로
+     * 개발 DB에 더 이상 존재하지 않는다 — 옵티마이저는 이름이 아니라 조건으로 인덱스를 고르므로
+     * 동작에는 영향 없다).
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
@@ -193,9 +197,12 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
      * `SocketTimeoutException`(Hikari 커넥션 강제 종료 및 후속 롤백 실패까지 연쇄)으로 이어졌다.
      *
      * 올바른 컬럼(`anal_tp`)으로 고치면 정상 동작 시 `anal_id > baseline` 범위가 "직전 폴링 이후
-     * 새로 생긴 몇 건"으로 좁혀져, 기존 `IDX_ANAL_ERR3_SCAN(err_type, has_error_event, anal_id)`
-     * 만으로도 충분히 빠르다(개발 DB에서 최근 anal_id 기준 EXPLAIN 시 rows=1) — 별도 인덱스 추가는
-     * 불필요했다. 장기간 다운타임 이후 재기동 시 밀린 오류가 한꺼번에 몰리는 상황을 대비해 `limit`로
+     * 새로 생긴 몇 건"으로 좁혀져, 기존 인덱스만으로도 충분히 빠르다(문서 정정, 2026-09-01 DB
+     * 점검 — 원래 이름 `IDX_ANAL_ERR3_SCAN(err_type, has_error_event, anal_id)`은
+     * [V2__fix_dashboard_query_indexes.sql]이 대체한 뒤로 존재하지 않고, `anal_id` 범위 조건은
+     * 실제로는 PRIMARY 인덱스 range 스캔으로 처리된다 — 개발 DB에서 실제 최신 anal_id 근방
+     * 임계값으로 EXPLAIN 시 rows 수십 건 수준, ANALYZE 실측도 수 ms대로 확인됨). 별도 인덱스
+     * 추가는 불필요했다. 장기간 다운타임 이후 재기동 시 밀린 오류가 한꺼번에 몰리는 상황을 대비해 `limit`로
      * 상한을 둔다(한 번에 못 따라잡은 나머지는 baseline이 그 배치의 최대값으로 전진하므로 다음
      * 폴링에서 이어서 처리된다).
      */
@@ -220,13 +227,14 @@ interface DataReceiveAnalysisRepository : JpaRepository<DataReceiveAnalysis, Lon
      * 환경에서는 미해결 행의 MAX(anal_id)가 실제 최신 anal_id보다 훨씬 뒤처지거나(오래전에 해결
      * 안 된 행 하나만 남아있는 경우), 미해결 행이 아예 없으면 0으로 잡힌다. 그러면 기동 직후
      * `lastSeenAnalId`가 과거(또는 0)에 고정되고, 이후 매 폴링마다 [findNewUnresolvedErrors]가
-     * 그 오래된 지점부터 현재까지 전체 구간을 다시 스캔해야 한다 — `resolve_yn`이 없는
-     * `IDX_ANAL_ERR3_SCAN(err_type, has_error_event, anal_id)` 인덱스로도 범위 자체가 크면 느려져,
-     * 이번 수정이 없애려던 소켓 타임아웃이 그대로 재현될 수 있었다.
+     * 그 오래된 지점부터 현재까지 전체 구간을 다시 스캔해야 한다 — `resolve_yn` 조건이 없어도
+     * 범위 자체가 크면 느려져, 이번 수정이 없애려던 소켓 타임아웃이 그대로 재현될 수 있었다.
      *
      * 그래서 기준선은 해결 여부와 무관하게 "PLM/STA 스트림에 실제로 마지막까지 쌓인 지점"으로
      * 잡아야 한다 — 그래야 기동 직후 첫 폴링부터 [findNewUnresolvedErrors]의 `anal_id > baseline`
-     * 범위가 항상 좁게 유지된다(개발 DB에서 최근 anal_id 기준 EXPLAIN 시 rows=1).
+     * 범위가 항상 좁게 유지된다(문서 정정, 2026-09-01 DB 점검 — 원래 이름 `IDX_ANAL_ERR3_SCAN`은
+     * [V2__fix_dashboard_query_indexes.sql]이 대체한 뒤로 존재하지 않음. 이 쿼리는
+     * `idx_anal_err3_tp_date`를 `ref` 접근으로 타 개발 DB에서 실측 수 ms대로 확인됨).
      */
     @Query(
         """

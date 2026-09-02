@@ -57,14 +57,13 @@
           <div th:if="${location.locMap == null}" class="text-center text-muted py-5">
             아직 배치도 이미지가 없습니다. 왼쪽에서 이미지를 업로드하세요.
           </div>
-          <!-- 버그 수정: locMapWidth/locMapHeight가 없는 레거시 배치도(마이그레이션 당시 크기 정보가
-               기록되지 않은 데이터)에서, 이미 좌표가 저장된 그룹 마커를 아래 th:styleappend가
-               "grp.grpX * 100.0 / location.locMapWidth"로 null 나눗셈을 시도해 SpelEvaluationException이
-               나면서 지도 이미지를 포함한 화면 전체 렌더링이 실패했다(게이트 관리 팝업에서 "지도"
-               클릭 시 이미지가 표시되지 않던 원인). 크기 정보가 없으면 좌표 계산 대신 안내 배너를
-               띄우고 드래그도 비활성화한다. -->
+          <!-- 버그 수정(Opus 리뷰 지적, 2026-09-02): 이 배너·아래 좌표 계산 삼항식·JS mapSizeValid
+               세 곳이 "크기 정보 없음"을 서로 다른 기준(여기는 == null만, JS는 > 0까지)으로 판단하고
+               있었다 — loc_map_w/h가 0인 데이터(정상 이미지에서는 사실상 나오지 않지만)에서는 배너가
+               안 뜬 채 조용히 좌표 계산만 "grpX * 100.0 / 0" → Infinity가 되어 깨진 CSS가 생성됐다.
+               세 곳 모두 "null이거나 0 이하"로 통일한다. -->
           <div class="alert alert-warning py-2 mb-2"
-               th:if="${location.locMap != null and (location.locMapWidth == null or location.locMapHeight == null)}">
+               th:if="${location.locMap != null and (location.locMapWidth == null or location.locMapHeight == null or location.locMapWidth <= 0 or location.locMapHeight <= 0)}">
             이미지 크기 정보가 없는 레거시 배치도입니다. 좌표가 부정확하게 저장되는 것을 막기 위해 그룹 위치 드래그가
             비활성화되어 있습니다. 이미지를 다시 업로드하면 활성화됩니다.
           </div>
@@ -76,7 +75,7 @@
             <div th:each="grp, iter : ${groups}"
                  class="group-marker"
                  th:attr="data-grp-id=${grp.grpId},data-grp-name=${grp.grpName}"
-                 th:styleappend="${grp.grpX != null and location.locMapWidth != null and location.locMapHeight != null ? ('left:' + (grp.grpX * 100.0 / location.locMapWidth) + '%;top:' + (grp.grpY * 100.0 / location.locMapHeight) + '%;') : ('left:' + (5 + iter.index * 8) + '%;top:8%;')}"
+                 th:styleappend="${grp.grpX != null and location.locMapWidth != null and location.locMapHeight != null and location.locMapWidth > 0 and location.locMapHeight > 0 ? ('left:' + (grp.grpX * 100.0 / location.locMapWidth) + '%;top:' + (grp.grpY * 100.0 / location.locMapHeight) + '%;') : ('left:' + (5 + iter.index * 8) + '%;top:8%;')}"
                  style="position:absolute; width:32px; height:32px; margin-left:-16px; margin-top:-16px;
                         border-radius:50%; background:#0d6efd; color:#fff; display:flex; align-items:center;
                         justify-content:center; font-size:.7rem; cursor:grab; box-shadow:0 1px 3px rgba(0,0,0,.4);"
@@ -100,10 +99,10 @@
     const container = document.getElementById('mapContainer');
     const locMapWidth = /*[[${location.locMapWidth}]]*/ 0;
     const locMapHeight = /*[[${location.locMapHeight}]]*/ 0;
-    // 버그 수정: locMapWidth/Height가 null인 레거시 배치도는 위 th:if로 화면 자체는 살려두되(폴백
-    // 위치 표시), 드래그 저장까지 허용하면 JS의 null 산술 규칙상 "null * 100 / null"이 예외가 아니라
-    // 0으로 계산되어 기존에 저장돼 있던 그룹 좌표가 조용히 (0,0)으로 덮어써진다. 크기 정보가 없으면
-    // 드래그 자체를 시작하지 못하게 막는다.
+    // Codex adversarial 리뷰 지적(2026-08-25): locMapWidth/Height가 null인 레거시 배치도는 500 방지를
+    // 위해 화면 렌더링은 허용하되(위 폴백 위치 표시), 드래그 저장은 여기서 막아야 한다 — 막지 않으면
+    // null * 100 / null이 아니라 JS의 null 산술 규칙상 0으로 계산되어 기존 좌표를 조용히 (0,0)으로
+    // 덮어쓰게 된다.
     const mapSizeValid = typeof locMapWidth === 'number' && typeof locMapHeight === 'number'
       && locMapWidth > 0 && locMapHeight > 0;
     let dragging = null;
@@ -123,8 +122,8 @@
     const csrfHeader = document.querySelector('meta[name="_csrf_header"]')?.content;
 
     function savePosition(marker, leftPercent, topPercent) {
-      // pointerdown 단계에서 이미 mapSizeValid가 false면 리스너 자체를 등록하지 않지만, 향후 호출
-      // 경로가 바뀌어도 크기 정보 없이 좌표가 저장되는 일이 없도록 한 번 더 방어한다.
+      // 방어적 재확인 — pointerdown에서 이미 mapSizeValid가 false면 dragging을 세팅하지 않지만,
+      // 향후 호출부가 바뀌어도 null 크기로 좌표가 (0,0) 저장되는 일이 없도록 한 번 더 막는다.
       if (!mapSizeValid) return;
       const grpId = marker.dataset.grpId;
       const x = Math.round((leftPercent / 100) * locMapWidth);

@@ -124,7 +124,7 @@ class LocationMapRenderingTest {
         // DB(loc_map)는 정상이지만 실제 파일은 이 서버에 없는 상태(공유 개발 DB + 서버별 로컬
         // 디스크 조합에서 다른 환경이 업로드한 위치를 열람하는 시나리오) 재현.
         val location = GateLocation(locId = 1L, locName = "테스트위치", locMap = "missing.png", locMapWidth = 800, locMapHeight = 600)
-        val group = GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", gateTypeCode = 1, grpX = 100, grpY = 50)
+        val group = GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", grpX = 100, grpY = 50)
 
         `when`(menuProvider.menu()).thenReturn(emptyList())
         `when`(locationService.findByIdOrNull(1L)).thenReturn(location)

@@ -166,4 +166,34 @@ describe('팝업(게이트 관리 하위 메뉴) 클릭 시 사이드바 강조 
     expect(popupLink.classList.contains('active')).toBe(false);
     expect(document.querySelectorAll('.app-sidebar .nav-link.active').length).toBe(0);
   });
+
+  test('[Codex 리뷰 반영] 활성 메뉴가 없는 페이지에서 모달을 닫지 않고 다른 팝업으로 전환해도 닫으면 계속 강조가 없다', () => {
+    // 버그: savedActiveLink(원래 활성 링크 저장소)가 null인 이유가 "아직 저장 안 함"인지 "원래부터
+    // 활성 링크가 없었음"인지 구분하지 못하면, 첫 팝업 오픈 때 저장된 값이 null이라 두 번째 팝업
+    // 오픈(모달을 닫지 않고 전환) 시 "아직 저장 안 함"으로 오판해 이미 강조해 둔 첫 번째 팝업 링크를
+    // 원래 활성 링크로 잘못 저장한다 — 이후 닫으면 원래는 강조가 없어야 하는데 첫 번째 팝업 링크가
+    // 다시 강조되는 회귀가 생긴다.
+    document.querySelector('a[href="/dashboard"]').classList.remove('active');
+    document.querySelector('.app-sidebar').insertAdjacentHTML(
+      'beforeend',
+      '<a href="/gates/locations" class="nav-link" data-popup="true" data-popup-title="위치">위치</a>',
+    );
+    loadGatePopupModal();
+    var groupLink = document.querySelector('a[href="/gates/groups"]');
+    var locationLink = document.querySelector('a[href="/gates/locations"]');
+
+    clickPopupLink(groupLink);
+    expect(groupLink.classList.contains('active')).toBe(true);
+
+    clickPopupLink(locationLink);
+    expect(groupLink.classList.contains('active')).toBe(false);
+    expect(locationLink.classList.contains('active')).toBe(true);
+
+    document.getElementById('gate-popup-modal')
+      .dispatchEvent(new Event('hidden.bs.modal'));
+
+    expect(locationLink.classList.contains('active')).toBe(false);
+    expect(groupLink.classList.contains('active')).toBe(false);
+    expect(document.querySelectorAll('.app-sidebar .nav-link.active').length).toBe(0);
+  });
 });

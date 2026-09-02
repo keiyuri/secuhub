@@ -63,6 +63,19 @@
     .app-sidebar .sidebar-menu > .nav-item.menu-open > .nav-link:not(.active) {
       background-color: rgba(255, 255, 255, 0.04);
     }
+
+    /* 버그 수정: AdminLTE(adminlte.min.js)는 자체 접근성 기능(initModalFocusManagement)으로 모달을
+       열기 직전의 포커스 엘리먼트를 저장해 두었다가, 모달이 닫히면(hidden.bs.modal) 그 엘리먼트로
+       포커스를 되돌린다. gate-popup-modal.js가 사이드바 강조(.active)를 원래 메뉴로 정상적으로
+       되돌려도(hidden.bs.modal 리스너 실행 순서상 AdminLTE의 document 레벨 리스너가 항상 나중에
+       실행되어) 방금 닫은 게이트 관리 팝업 링크가 다시 포커스를 받는다. 다크 사이드바 테마는
+       하위 메뉴의 :focus 배경색(--lte-sidebar-submenu-hover-bg)과 실제 선택된 메뉴의 :active 배경색
+       (--lte-sidebar-submenu-active-bg)이 완전히 같은 값이라, 방금 닫은 팝업 메뉴가 실제 선택된
+       다른 메뉴와 구분 없이 계속 같은 색으로 강조돼 보였다. 키보드 포커스 아웃라인 자체는
+       유지하되(접근성 유지), 실제 선택 상태(.active)와는 배경색으로 구분되게 낮춘다. */
+    .app-sidebar .nav-treeview > .nav-item > .nav-link:focus:not(.active) {
+      background-color: rgba(255, 255, 255, 0.04);
+    }
   </style>
 </head>
 <body class="layout-fixed sidebar-expand-lg fixed-header fixed-sidebar bg-body-tertiary">

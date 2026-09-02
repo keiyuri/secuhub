@@ -29,14 +29,22 @@ document.addEventListener("DOMContentLoaded", function () {
   // 여는 동안 이전 페이지(예: 대시보드)의 사이드바 강조색이 계속 남아 있고, 클릭한 항목은 강조되지
   // 않는 문제가 있었다. 팝업을 열 때 클라이언트에서 강조를 직접 옮기고, 닫으면 원래 상태로 되돌린다.
   var savedActiveLink = null;
+  // [코드리뷰 반영, Codex P2] savedActiveLink가 null인 이유가 "아직 저장 안 함"인지 "원래부터
+  // 활성 링크가 없었음"인지 구분이 안 되면, 활성 메뉴가 없는 페이지에서 팝업을 연 뒤(모달을 닫지
+  // 않은 채) 다른 팝업으로 전환할 때 두 번째 호출이 "아직 저장 안 함"으로 오판해 이미 강조해 둔
+  // 첫 번째 팝업 링크를 원래 활성 링크로 잘못 저장해버린다 — 이후 모달을 닫으면 원래는 활성 링크가
+  // 없어야 하는데 첫 번째 팝업 링크가 다시 강조되는 회귀가 생긴다. 저장 "여부" 자체를 별도 플래그로
+  // 추적해 null도 유효한 저장값으로 다룬다.
+  var hasSavedActiveLink = false;
 
   function highlightPopupLink(link) {
     var sidebar = document.querySelector(".app-sidebar");
     if (!sidebar) return;
-    if (!savedActiveLink) {
+    if (!hasSavedActiveLink) {
       // 모달이 열려 있는 동안 이미 강조를 옮겨 놓은 이전 링크가 이번 것이면 원래 상태를 덮어쓰지
-      // 않도록, 최초 1회만(savedActiveLink가 비어 있을 때만) 현재 강조 링크를 저장해 둔다.
+      // 않도록, 최초 1회만(아직 저장하지 않았을 때만) 현재 강조 링크를 저장해 둔다.
       savedActiveLink = sidebar.querySelector(".nav-link.active");
+      hasSavedActiveLink = true;
     }
     Array.prototype.forEach.call(sidebar.querySelectorAll(".nav-link.active"), function (el) {
       el.classList.remove("active");
@@ -53,6 +61,7 @@ document.addEventListener("DOMContentLoaded", function () {
       if (savedActiveLink) savedActiveLink.classList.add("active");
     }
     savedActiveLink = null;
+    hasSavedActiveLink = false;
   }
 
   function openPopup(url, title, sourceLink) {

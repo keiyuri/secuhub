@@ -467,10 +467,15 @@ describe('setupContextMenu', () => {
 
   function makeDtlNode() {
     const attrs = { 'data-dtl-id': '42', 'data-dtl-ip': '10.0.0.5', 'data-dtl-lane': '1', 'data-gate-type': '1' };
+    const classes = new Set(['gt-dtl']);
     return {
-      classList: { contains: (cls) => cls === 'gt-dtl' },
+      // [mains 병합 시 보완] showContextMenuForNode가 selectNode(node)를 먼저 호출하도록
+      // 바뀌었다(모바일 터치 선택 지원, 69a1c37) — selectNode는 node.closest()/classList.add()를
+      // 쓰므로, 이 목(mock)도 최소한의 형태로 지원해야 한다.
+      classList: { contains: (cls) => classes.has(cls), add: (cls) => classes.add(cls), remove: (cls) => classes.delete(cls) },
       getAttribute: (name) => attrs[name],
       querySelectorAll: () => [],
+      closest: () => null,
     };
   }
 

@@ -414,12 +414,12 @@
       // 모드 변경/모터 설정은 페이지 이동(단일 dtlId 필요)이라 GRP/LOC 범위에서는 메뉴 자체가
       // 숨겨지지만, 방어적으로 한 번 더 확인한다.
       if (action === 'mode-change') {
-        if (selected.scope !== 'dtl') return;
+        if (selected.type !== 'dtl') return;
         window.location.href = '/gates/details/' + selected.dtlId + '/mode';
         return;
       }
       if (action === 'motor-setup') {
-        if (selected.scope !== 'dtl') return;
+        if (selected.type !== 'dtl') return;
         window.location.href = '/gates/details/' + selected.dtlId + '/motor';
         return;
       }
@@ -607,6 +607,7 @@
       sendBulkOperationCommand: sendBulkOperationCommand,
       sendCommandWithReauth: sendCommandWithReauth,
       sendResetWithReauth: sendResetWithReauth,
+      setupContextMenu: setupContextMenu,
       __setPostGateControl: function (fn) { postGateControl = fn; },
     };
     return;

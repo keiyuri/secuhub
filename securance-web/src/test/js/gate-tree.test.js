@@ -442,3 +442,69 @@ describe('reportBulkCommandResult', () => {
     expect(el.className).toContain('gate-tree-toast-error');
   });
 });
+
+describe('setupContextMenu', () => {
+  // 회귀 방지(2026-09-02) — showContextMenuForNode가 만드는 target/selected 객체는 `scope`가
+  // 아니라 `type` 필드를 쓰는데, 모드 변경/모터 설정 클릭 핸들러는 `selected.scope !== 'dtl'`로
+  // 검사하고 있었다. selected.scope는 항상 undefined라 조건이 항상 참이 되어 DTL 노드를 우클릭해도
+  // window.location.href 이동이 전혀 일어나지 않았다(2026-08-19 커밋에서 도입된 버그).
+  //
+  // 이 파일의 다른 describe 블록들이 global.document/global.window를 plain mock 객체로 덮어쓴 채
+  // 복원하지 않아 jsdom 환경에 기대기 어렵다 — 그래서 나머지 테스트들과 같은 방식으로, DOM을
+  // 최소한의 수동 mock으로 직접 구성해 setupContextMenu의 이벤트 핸들러만 떼어내 검증한다.
+  function makeMenu() {
+    const handlers = {};
+    return {
+      style: {},
+      offsetWidth: 100,
+      offsetHeight: 100,
+      addEventListener: (type, handler) => { handlers[type] = handler; },
+      querySelector: () => null, // .gate-tree-context-target — 헤더 갱신은 이 테스트와 무관.
+      querySelectorAll: () => [], // data-requires-* 필터링 — 항목 표시 여부는 이 테스트와 무관.
+      __handlers: handlers,
+    };
+  }
+
+  function makeDtlNode() {
+    const attrs = { 'data-dtl-id': '42', 'data-dtl-ip': '10.0.0.5', 'data-dtl-lane': '1', 'data-gate-type': '1' };
+    return {
+      classList: { contains: (cls) => cls === 'gt-dtl' },
+      getAttribute: (name) => attrs[name],
+      querySelectorAll: () => [],
+    };
+  }
+
+  function triggerAction(action) {
+    global.window = { location: { href: '' }, addEventListener: () => {} };
+    const menu = makeMenu();
+    global.document = { getElementById: () => menu, addEventListener: () => {} };
+    const gateTree = loadGateTree();
+
+    const containerHandlers = {};
+    const container = { addEventListener: (type, handler) => { containerHandlers[type] = handler; } };
+    gateTree.setupContextMenu(container);
+
+    const dtlNode = makeDtlNode();
+    containerHandlers['contextmenu']({
+      target: { closest: () => dtlNode },
+      preventDefault: () => {},
+      clientX: 10,
+      clientY: 10,
+    });
+
+    menu.__handlers['click']({
+      target: { closest: () => ({ getAttribute: () => action }) },
+      preventDefault: () => {},
+    });
+
+    return global.window.location.href;
+  }
+
+  test('DTL 노드에서 모드 변경을 클릭하면 selected.type을 기준으로 판단해 상세 페이지로 이동한다', () => {
+    expect(triggerAction('mode-change')).toBe('/gates/details/42/mode');
+  });
+
+  test('DTL 노드에서 모터 설정을 클릭하면 selected.type을 기준으로 판단해 상세 페이지로 이동한다', () => {
+    expect(triggerAction('motor-setup')).toBe('/gates/details/42/motor');
+  });
+});

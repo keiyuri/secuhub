@@ -258,6 +258,149 @@ describe('sendCommandWithReauth/sendResetWithReauth', () => {
   });
 });
 
+// 모바일 터치 선택 지원 회귀 방지 — 이전에는 노드를 선택했는지 화면에서 확인할 방법이 전혀
+// 없었고(우클릭 메뉴만 내부 변수로 대상을 들고 있었다), 터치 기기는 우클릭 자체가 없어 선택할
+// 방법도 없었다. selectNode/nodeKeyOf(선택 표시)와 render()의 재렌더링 후 선택 유지를 검증한다.
+describe('selectNode / nodeKeyOf — 선택 표시', () => {
+  test('nodeKeyOf는 노드 종류별로 dtl-/grp-/loc- 접두사를 붙인 키를 반환한다', () => {
+    const { nodeKeyOf } = loadGateTree();
+    const dtl = document.createElement('li');
+    dtl.className = 'gt-dtl';
+    dtl.setAttribute('data-dtl-id', '7');
+    expect(nodeKeyOf(dtl)).toBe('dtl-7');
+
+    const grp = document.createElement('details');
+    grp.className = 'gt-grp';
+    grp.setAttribute('data-grp-id', '3');
+    expect(nodeKeyOf(grp)).toBe('grp-3');
+
+    const loc = document.createElement('details');
+    loc.className = 'gt-loc';
+    loc.setAttribute('data-loc-id', '1');
+    expect(nodeKeyOf(loc)).toBe('loc-1');
+  });
+
+  test('선택하면 gt-selected 클래스가 붙고, 다른 노드를 선택하면 이전 선택은 해제된다', () => {
+    const { selectNode } = loadGateTree();
+    const container = document.createElement('div');
+    container.className = 'gate-tree';
+    const nodeA = document.createElement('li');
+    nodeA.className = 'gt-dtl';
+    nodeA.setAttribute('data-dtl-id', '1');
+    const nodeB = document.createElement('li');
+    nodeB.className = 'gt-dtl';
+    nodeB.setAttribute('data-dtl-id', '2');
+    container.appendChild(nodeA);
+    container.appendChild(nodeB);
+
+    selectNode(nodeA);
+    expect(nodeA.classList.contains('gt-selected')).toBe(true);
+
+    selectNode(nodeB);
+    expect(nodeA.classList.contains('gt-selected')).toBe(false);
+    expect(nodeB.classList.contains('gt-selected')).toBe(true);
+  });
+
+  test('render()로 트리를 다시 그려도 이전에 선택한 노드의 표시가 유지된다(폴링 재렌더링 대응)', () => {
+    const { render, selectNode } = loadGateTree();
+    const container = document.createElement('div');
+    container.className = 'gate-tree';
+    const tree = [{
+      locId: 1, locName: '본관',
+      groups: [{
+        grpId: 10, grpName: '1층', gateTypeCode: 1,
+        details: [{ dtlId: 100, dtlIp: '192.168.0.1', dtlLaneNo: 1, online: true }],
+      }],
+    }];
+
+    render(container, tree);
+    const dtlNode = container.querySelector('[data-node-key="dtl-100"]');
+    selectNode(dtlNode);
+    expect(dtlNode.classList.contains('gt-selected')).toBe(true);
+
+    // 폴링 주기마다 트리 전체를 다시 그리므로, 동일한 노드가 새 DOM으로 교체된 뒤에도
+    // 선택 표시가 이어져야 한다.
+    render(container, tree);
+    const reRenderedDtlNode = container.querySelector('[data-node-key="dtl-100"]');
+    expect(reRenderedDtlNode).not.toBe(dtlNode); // 실제로 새 DOM 노드로 교체됐는지 먼저 확인.
+    expect(reRenderedDtlNode.classList.contains('gt-selected')).toBe(true);
+  });
+});
+
+// Codex 적대적 리뷰 회귀 방지(2026-09-02, medium) — 롱프레스 타이머가 진행 중일 때 두 번째
+// 손가락이 닿아 멀티터치(스크롤/핀치)로 전환돼도 타이머가 취소되지 않아, 두 손가락 제스처
+// 도중에 최초 노드의 제어 메뉴가 열리고 그 노드가 선택돼버렸다.
+describe('롱프레스 중 멀티터치 전환 — 취소되어야 한다', () => {
+  function buildTreeContainer(gateTree) {
+    const container = document.createElement('div');
+    container.className = 'gate-tree';
+    document.body.appendChild(container);
+    const tree = [{
+      locId: 1, locName: '본관',
+      groups: [{
+        grpId: 10, grpName: '1층', gateTypeCode: 1,
+        details: [{ dtlId: 100, dtlIp: '192.168.0.1', dtlLaneNo: 1, online: true }],
+      }],
+    }];
+    gateTree.render(container, tree);
+    return container;
+  }
+
+  function touchEvent(type, touches) {
+    const e = new Event(type, { bubbles: true, cancelable: true });
+    e.touches = touches;
+    return e;
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test('단일 터치로 시작한 롱프레스 중 두 번째 손가락이 닿으면 메뉴가 열리지 않는다', () => {
+    const gateTree = loadGateTree();
+    const container = buildTreeContainer(gateTree);
+    const menu = document.createElement('ul');
+    menu.id = 'gate-tree-context-menu';
+    menu.style.display = 'none'; // 실제 마크업(dashboard.html)과 동일한 초기 상태.
+    document.body.appendChild(menu);
+
+    gateTree.setupContextMenu(container);
+    const node = container.querySelector('.gt-dtl');
+
+    node.dispatchEvent(touchEvent('touchstart', [{ clientX: 10, clientY: 10 }]));
+    // 두 번째 손가락이 닿아 멀티터치로 전환(스크롤/핀치 등) — touches.length가 더 이상 1이 아니다.
+    node.dispatchEvent(touchEvent('touchstart', [{ clientX: 10, clientY: 10 }, { clientX: 50, clientY: 50 }]));
+
+    vi.advanceTimersByTime(600); // 롱프레스 인식 시간(500ms)을 넘겨도.
+
+    expect(node.classList.contains('gt-selected')).toBe(false);
+    expect(menu.style.display).toBe('none');
+  });
+
+  test('단일 터치를 유지하면 그대로 롱프레스가 인식되어 메뉴가 열린다(회귀 확인)', () => {
+    const gateTree = loadGateTree();
+    const container = buildTreeContainer(gateTree);
+    const menu = document.createElement('ul');
+    menu.id = 'gate-tree-context-menu';
+    menu.style.display = 'none'; // 실제 마크업(dashboard.html)과 동일한 초기 상태.
+    document.body.appendChild(menu);
+
+    gateTree.setupContextMenu(container);
+    const node = container.querySelector('.gt-dtl');
+
+    node.dispatchEvent(touchEvent('touchstart', [{ clientX: 10, clientY: 10 }]));
+    vi.advanceTimersByTime(600);
+
+    expect(node.classList.contains('gt-selected')).toBe(true);
+    expect(menu.style.display).toBe('block');
+  });
+});
+
 describe('reportBulkCommandResult', () => {
   test('전부 성공하면 N/N대 성공만 표시한다', async () => {
     const { reportBulkCommandResult } = loadGateTree();

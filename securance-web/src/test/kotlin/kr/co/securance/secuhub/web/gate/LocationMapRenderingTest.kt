@@ -141,6 +141,9 @@ class LocationMapRenderingTest {
                         // 마커만 떠 있으면 이번에 조사한 것과 똑같이 원인 불명의 화면이 된다.
                         not(containsString("/loc-images/missing.png")),
                         not(containsString("group-marker")),
+                        // 자체 리뷰 지적: "현재 이미지 크기: 800 x 600px"처럼 마치 이미지가 멀쩡히
+                        // 있는 것처럼 보이는 문구가 위험 배너와 동시에 뜨면 안 된다(모순되는 안내).
+                        not(containsString("현재 이미지 크기")),
                     ),
                 )
             }

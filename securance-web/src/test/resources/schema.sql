@@ -159,3 +159,18 @@ CREATE TABLE tb_gate_log (
     reg_date        TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_gate_log_natural UNIQUE (dtl_ip, dtl_lane_no, event_time, event_type, code, err_code, function_code)
 );
+
+-- GateLocationServiceUploadMapTest(@DataJpaTest) 전용 최소 스키마 — securance-domain/src/test/resources/
+-- schema.sql의 tb_gate_loc 정의와 동일(위 안내와 같은 이유로 모듈 간 공유 불가).
+CREATE TABLE tb_gate_loc (
+    loc_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    loc_nm      VARCHAR(200) NOT NULL,
+    use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
+    loc_x       INT NULL,
+    loc_y       INT NULL,
+    loc_map     VARCHAR(200) NULL,
+    loc_map_w   INT NULL,
+    loc_map_h   INT NULL,
+    reg_date    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    mod_date    TIMESTAMP NULL
+);

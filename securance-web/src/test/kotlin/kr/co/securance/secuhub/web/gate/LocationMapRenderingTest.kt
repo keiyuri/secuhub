@@ -3,6 +3,9 @@ package kr.co.securance.secuhub.web.gate
 import kr.co.securance.secuhub.domain.entity.GateGroup
 import kr.co.securance.secuhub.domain.entity.GateLocation
 import kr.co.securance.secuhub.web.menu.MenuProvider
+import org.hamcrest.Matchers.allOf
+import org.hamcrest.Matchers.containsString
+import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
@@ -27,6 +30,12 @@ import org.springframework.test.web.servlet.get
  * 크기 정보가 없을 때는 경고 배너를 노출하고 드래그 저장을 비활성화(JS mapSizeValid 가드)했다.
  * 드래그 활성화 여부는 클라이언트 JS라 MockMvc로 직접 검증할 수 없으므로, 서버가 렌더링하는
  * 경고 배너의 노출/비노출로 그 전제 조건을 고정한다.
+ *
+ * 버그 수정(Opus 리뷰 지적, 2026-09-02): 기존 두 테스트는 500이 안 나는지·경고 배너 유무만
+ * 확인해서, 정작 사용자가 보고한 증상인 "`<img>`가 실제로 렌더링되는지"와 "좌표 계산이 다시
+ * 리터럴로 퇴화해도(즉 삼항식이 문자열 그대로 출력돼도) 잡아내는지"를 검증하지 못했다.
+ * `<img src="/loc-images/...">` 존재 여부와, 크기 정보가 있을 때 마커 좌표(`left:12.5%;
+ * top:8.333...%`)가 실제로 환산돼 출력되는지를 추가로 고정한다.
  */
 @WebMvcTest(LocationMapController::class)
 @Import(LocationMapController::class)
@@ -57,13 +66,23 @@ class LocationMapRenderingTest {
 
         mockMvc.get("/gates/locations/1/map") { with(csrf()) }.andExpect {
             status { isOk() }
-            content { string(org.hamcrest.Matchers.containsString("이미지 크기 정보가 없는 레거시 배치도입니다")) }
+            content {
+                string(
+                    allOf(
+                        containsString("이미지 크기 정보가 없는 레거시 배치도입니다"),
+                        // 크기 정보가 없어도 이미지 자체는 계속 표시돼야 한다(사용자가 보고한 증상은
+                        // "지도 이미지가 안 보인다"였다 — 경고 배너만 확인하면 <img>가 통째로 사라져도
+                        // 이 테스트는 통과해버린다).
+                        containsString("/loc-images/map.png"),
+                    ),
+                )
+            }
         }
     }
 
     @Test
     @WithMockUser
-    fun `배치도 크기와 그룹 좌표가 모두 있으면 500 없이 렌더링된다`() {
+    fun `배치도 크기와 그룹 좌표가 모두 있으면 500 없이 렌더링되고 좌표가 실제로 환산된다`() {
         val location = GateLocation(locId = 1L, locName = "테스트위치", locMap = "map.png", locMapWidth = 800, locMapHeight = 600)
         val group = GateGroup(grpId = 1L, location = location, grpName = "테스트그룹", grpX = 100, grpY = 50)
 
@@ -73,7 +92,19 @@ class LocationMapRenderingTest {
 
         mockMvc.get("/gates/locations/1/map") { with(csrf()) }.andExpect {
             status { isOk() }
-            content { string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("이미지 크기 정보가 없는 레거시 배치도입니다"))) }
+            content {
+                string(
+                    allOf(
+                        not(containsString("이미지 크기 정보가 없는 레거시 배치도입니다")),
+                        containsString("/loc-images/map.png"),
+                        // grpX=100/locMapWidth=800 -> 12.5%, grpY=50/locMapHeight=600 -> 8.333...% —
+                        // 삼항식이 다시 리터럴 토큰으로 퇴화해 파싱/평가가 실패하는 회귀를 좌표
+                        // 출력값으로 직접 고정한다(경고 배너 부재만으로는 이 회귀를 잡지 못한다).
+                        containsString("left:12.5%"),
+                        containsString("top:8.333333333333334%"),
+                    ),
+                )
+            }
         }
     }
 }

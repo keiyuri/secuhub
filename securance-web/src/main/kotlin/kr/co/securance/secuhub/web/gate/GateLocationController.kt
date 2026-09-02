@@ -10,6 +10,8 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Controller
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.ui.Model
 import org.springframework.validation.BindingResult
 import org.springframework.validation.annotation.Validated
@@ -114,15 +116,27 @@ class GateLocationService(
             throw e
         }
 
-        // 기존 이미지 파일은 새 이미지로 교체된 뒤에는 더 이상 참조되지 않으므로 정리한다.
-        // 주의: 이 파일시스템 쓰기는 DB 트랜잭션과 원자적으로 묶이지 않는다 — 이 메서드가 트랜잭션의
-        // 마지막 단계라 현재는 위험이 낮지만, 이후 같은 트랜잭션에 로직이 더 붙는다면 DB 롤백 시
-        // 파일 상태와 어긋날 수 있음을 유의한다.
-        location.locMap?.let { old -> File(dir, old).takeIf { it.exists() }?.delete() }
+        // 버그 수정(Opus 리뷰 지적, 2026-09-02): 기존 이미지 파일 삭제는 파일시스템에 대한
+        // 즉시·비가역 부수효과라 DB 트랜잭션과 원자적으로 묶이지 않는다 — 엔티티 필드 갱신 "전에"
+        // 여기서 바로 지우면, 이후(같은 트랜잭션 안에서 이 메서드 뒤에 붙는 로직 실패, 커밋 시점의
+        // 제약조건 위반 등 어떤 이유로든) 트랜잭션이 롤백될 때 DB는 옛 파일명을 계속 가리키는데
+        // 실제 파일은 이미 사라진 "유령 참조" 상태가 된다 — 배치도를 다시 열어도 이미지가 표시되지
+        // 않는, 이번에 조사한 증상과 정확히 같은 결과를 만든다. 트랜잭션이 실제로 커밋된 뒤에만
+        // 옛 파일을 지우도록 삭제를 afterCommit으로 미룬다(커밋 전에는 옛 파일이 그대로 남아 있어
+        // 롤백돼도 DB와 파일 상태가 계속 일치한다).
+        val oldFileName = location.locMap
 
         location.locMap = fileName
         location.locMapWidth = image.width
         location.locMapHeight = image.height
+
+        if (oldFileName != null) {
+            TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+                override fun afterCommit() {
+                    File(dir, oldFileName).takeIf { it.exists() }?.delete()
+                }
+            })
+        }
     }
 
     companion object {

@@ -11,6 +11,13 @@
 // 일괄 전송하도록 확장했다(2026-08-19 두 번째 요청 — 레거시가 노드 계층과 무관하게 항상 같은
 // 메뉴를 띄우고 FullPath 하위 전체에 broadcast하는 것과 동일하게 "완전 교체"; dashboard.html의
 // 우클릭 메뉴 마크업 주석 참고).
+// [모바일 터치 선택 지원, 2026-09-02] 지금까지는 노드 선택/제어 메뉴 진입이 전부 마우스 우클릭
+// (contextmenu 이벤트)에만 의존해, 모바일에서는 어떤 노드를 선택했는지 확인할 방법도(선택 표시
+// 없음) 제어 메뉴를 열 방법도(iOS Safari는 일반 요소에 contextmenu를 보내지 않고, Android도
+// 기종마다 신뢰할 수 없다) 없었다. 탭으로 노드를 선택·시각적으로 표시(.gt-selected, 폴링
+// 재렌더링 후에도 유지)하고, 롱프레스(500ms)로 우클릭과 동일한 제어 메뉴를 열도록 보완했다
+// (아래 selectNode/showContextMenuForNode/touchstart 핸들러 참고). 데스크톱 우클릭 동작은
+// 그대로 유지한다.
 (function () {
   'use strict';
 
@@ -22,6 +29,38 @@
 
   function isExpanded(key, defaultValue) {
     return Object.prototype.hasOwnProperty.call(expandState, key) ? expandState[key] : defaultValue;
+  }
+
+  // [모바일 터치 선택 지원] 이전에는 노드 선택 상태를 표시하는 방법이 전혀 없었다 — 우클릭
+  // 메뉴(setupContextMenu)만 선택 대상을 내부 변수(target)로 들고 있을 뿐 화면에는 아무 표시도
+  // 없었고, 터치 기기에는 우클릭 자체가 없어(iOS Safari는 일반 요소에 contextmenu 이벤트를 아예
+  // 보내지 않는다) 어떤 노드를 선택했는지 확인할 방법도, 선택할 방법도 없었다. 선택된 노드의
+  // data-node-key를 기억해두고(폴링 재렌더링 후에도 유지 — expandState와 동일한 이유),
+  // 렌더링마다 해당 노드에 .gt-selected 클래스를 다시 입혀 시각적으로 표시한다.
+  var selectedNodeKey = null;
+
+  function nodeKeyOf(node) {
+    if (node.classList.contains('gt-dtl')) return 'dtl-' + node.getAttribute('data-dtl-id');
+    if (node.classList.contains('gt-grp')) return 'grp-' + node.getAttribute('data-grp-id');
+    return 'loc-' + node.getAttribute('data-loc-id');
+  }
+
+  function selectNode(node) {
+    if (!node) return;
+    var container = node.closest('.gate-tree') || node.parentElement;
+    if (container) {
+      var prev = container.querySelector('.gt-selected');
+      if (prev && prev !== node) prev.classList.remove('gt-selected');
+    }
+    node.classList.add('gt-selected');
+    selectedNodeKey = nodeKeyOf(node);
+  }
+
+  // 폴링마다 트리를 통째로 다시 그리므로(render), 선택 표시도 매번 새 DOM에 다시 입혀야 유지된다.
+  function applySelectionHighlight(container) {
+    if (!selectedNodeKey) return;
+    var el = container.querySelector('[data-node-key="' + selectedNodeKey + '"]');
+    if (el) el.classList.add('gt-selected');
   }
 
   function escapeHtml(value) {
@@ -44,7 +83,12 @@
     // 모든 하위 레인에 그대로 썼다 — 레인이 실제로 그룹과 다른 타입일 수 있는데도(그룹 전체가
     // 항상 같은 타입이라는 보장이 없다) 그룹값을 대신 쓰는 것 자체가 부정확했다. 레인 자신의
     // 실제 dtlType(GateTreeDetailNode.dtlType, GateDetail.dtlType 원본)을 쓴다.
-    return '<li class="gt-dtl" data-dtl-id="' + d.dtlId + '" data-dtl-ip="' + escapeHtml(d.dtlIp) +
+    //
+    // data-node-key: 모바일 터치 선택 상태(gt-selected)를 폴링 재렌더링 후에도 복원하는 데 쓴다
+    // (아래 applySelectionHighlight 참고 — <details> open/close를 expandState로 기억하는 것과
+    // 같은 이유).
+    return '<li class="gt-dtl" data-node-key="dtl-' + d.dtlId + '" data-dtl-id="' + d.dtlId +
+      '" data-dtl-ip="' + escapeHtml(d.dtlIp) +
       '" data-dtl-lane="' + d.dtlLaneNo + '" data-online="' + d.online +
       '" data-gate-type="' + d.dtlType + '">' +
       statusIcon(d.online) +
@@ -65,7 +109,8 @@
     // 타입일 수 있어 그룹 대표값 하나로 요약할 수 없다. 타입은 각 레인 항목에서 확인한다.
     // data-loc-id/data-grp-id/data-*-name: 우클릭 메뉴(setupContextMenu)가 그룹 노드 클릭 시
     // target.grpId/grpName과 표시 문구를 이 속성에서 그대로 읽는다.
-    return '<details class="gt-grp" data-key="' + key + '" data-loc-id="' + loc.locId +
+    return '<details class="gt-grp" data-key="' + key + '" data-node-key="grp-' + grp.grpId +
+      '" data-loc-id="' + loc.locId +
       '" data-grp-id="' + grp.grpId + '" data-loc-name="' + escapeHtml(loc.locName) +
       '" data-grp-name="' + escapeHtml(grp.grpName) + '"' + (open ? ' open' : '') + '>' +
       '<summary><i class="bi bi-diagram-3"></i> ' + escapeHtml(grp.grpName) +
@@ -81,7 +126,8 @@
       : '<div class="text-muted small ms-4">등록된 그룹이 없습니다.</div>';
     // data-loc-id/data-loc-name: 우클릭 메뉴(setupContextMenu)가 위치 노드 클릭 시
     // target.locId/locName과 표시 문구를 이 속성에서 그대로 읽는다.
-    return '<details class="gt-loc" data-key="' + key + '" data-loc-id="' + loc.locId +
+    return '<details class="gt-loc" data-key="' + key + '" data-node-key="loc-' + loc.locId +
+      '" data-loc-id="' + loc.locId +
       '" data-loc-name="' + escapeHtml(loc.locName) + '"' + (open ? ' open' : '') + '>' +
       '<summary><i class="bi bi-geo-alt"></i> ' + escapeHtml(loc.locName) + '</summary>' +
       groupsHtml + '</details>';
@@ -99,6 +145,7 @@
         expandState[el.getAttribute('data-key')] = el.open;
       });
     });
+    applySelectionHighlight(container);
   }
 
   function loadTree(container) {
@@ -312,17 +359,23 @@
     var menu = document.getElementById('gate-tree-context-menu');
     if (!menu) return;
     var target = null; // 우클릭한 노드(DTL/GRP/LOC)로부터 계산한 대상 정보
+    // 롱프레스로 메뉴를 연 직후 touchend가 발생시키는 합성 click(ghost click)을 걸러내는 플래그.
+    // touchstart는 passive 리스너라 그 안에서 preventDefault를 호출해도 효과가 없고, 타이머
+    // 콜백(비동기) 안에서 호출하는 것은 애초에 원본 이벤트 스코프를 벗어나 아무 의미가 없다 —
+    // 그래서 합성 click을 막는 대신, 짧은 시간 동안만 무시하도록 플래그로 처리한다. 이 플래그가
+    // 없으면 메뉴를 연 직후의 ghost click이 아래 document 클릭 리스너(메뉴 바깥 클릭 시 hideMenu)에
+    // 걸려 메뉴가 뜨자마자 다시 닫혀버린다.
+    var suppressNextClick = false;
 
     function hideMenu() { menu.style.display = 'none'; target = null; }
 
-    container.addEventListener('contextmenu', function (e) {
-      // [버그 수정: 2026-08-19] 이전에는 '.gt-dtl'만 찾아, 위치(.gt-loc)/그룹(.gt-grp) 노드를
-      // 우클릭하면 li가 항상 null이라 메뉴 자체가 뜨지 않고(브라우저 기본 메뉴만 표시) "게이트
-      // 관리 팝업" 진입 방법도 없었다. 세 계층 셀렉터를 함께 찾아 가장 가까운 노드를 판별한다
-      // (DOM이 loc > grp > dtl로 중첩돼 있어 closest()가 항상 가장 안쪽 노드부터 매칭한다).
-      var node = e.target.closest('.gt-dtl, .gt-grp, .gt-loc');
-      if (!node) return;
-      e.preventDefault();
+    // [모바일 터치 선택 지원] 이전에는 이 로직 전체가 'contextmenu' 이벤트 핸들러 안에만 있어서
+    // 마우스 우클릭에서만 동작했다. iOS Safari는 일반 요소에서 contextmenu 이벤트를 아예 보내지
+    // 않고, Android Chrome도 길게 눌러야만(그리고 기종에 따라 신뢰할 수 없게) 보내므로 모바일에서는
+    // 사실상 게이트 제어 메뉴에 진입할 방법이 없었다. 메뉴를 열고 위치를 계산하는 로직을 노드/좌표를
+    // 받는 함수로 뽑아, 아래 touchstart 롱프레스 핸들러에서도 그대로 재사용한다.
+    function showContextMenuForNode(node, clientX, clientY) {
+      selectNode(node); // 메뉴를 여는 시점에 선택 표시도 함께 갱신한다 — 어떤 노드를 조작 중인지 확인할 수 있게.
 
       var header = menu.querySelector('.gate-tree-context-target');
       var nodeType;
@@ -398,12 +451,99 @@
       menu.style.display = 'block';
       var menuWidth = menu.offsetWidth || 200;
       var menuHeight = menu.offsetHeight || 200;
-      var x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
-      var y = Math.min(e.clientY, window.innerHeight - menuHeight - 8);
+      var x = Math.min(clientX, window.innerWidth - menuWidth - 8);
+      var y = Math.min(clientY, window.innerHeight - menuHeight - 8);
       menu.style.left = Math.max(0, x) + 'px';
       menu.style.top = Math.max(0, y) + 'px';
       menu.style.visibility = 'visible';
+    }
+
+    // [버그 수정: 2026-08-19] 이전에는 '.gt-dtl'만 찾아, 위치(.gt-loc)/그룹(.gt-grp) 노드를
+    // 우클릭하면 li가 항상 null이라 메뉴 자체가 뜨지 않고(브라우저 기본 메뉴만 표시) "게이트
+    // 관리 팝업" 진입 방법도 없었다. 세 계층 셀렉터를 함께 찾아 가장 가까운 노드를 판별한다
+    // (DOM이 loc > grp > dtl로 중첩돼 있어 closest()가 항상 가장 안쪽 노드부터 매칭한다).
+    container.addEventListener('contextmenu', function (e) {
+      var node = e.target.closest('.gt-dtl, .gt-grp, .gt-loc');
+      if (!node) return;
+      e.preventDefault();
+      showContextMenuForNode(node, e.clientX, e.clientY);
     });
+
+    // [모바일 터치 선택 지원] 짧게 탭하면 노드를 "선택"만 하고(선택 표시 갱신 — LOC/GRP는 <summary>
+    // 클릭의 기본 펼침/접힘 동작도 그대로 유지된다), 일정 시간 이상 눌러 유지하면(롱프레스) 우클릭과
+    // 동일한 게이트 제어 메뉴를 연다. 데스크톱 우클릭 동작(위 contextmenu 리스너)은 그대로 두고
+    // 터치 전용 보완 경로로 추가한다.
+    container.addEventListener('click', function (e) {
+      if (suppressNextClick) return;
+      var node = e.target.closest('.gt-dtl, .gt-grp, .gt-loc');
+      if (!node) return;
+      selectNode(node);
+    });
+
+    var LONG_PRESS_MS = 500; // 롱프레스로 인식할 최소 유지 시간.
+    var TOUCH_MOVE_TOLERANCE_PX = 10; // 이 이상 손가락이 움직이면 스크롤 의도로 보고 롱프레스를 취소한다.
+    var longPressTimer = null;
+    var touchStartPos = null;
+
+    function clearLongPressTimer() {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    }
+
+    container.addEventListener('touchstart', function (e) {
+      // [Codex 적대적 리뷰 수정: medium, 2026-09-02] 이전에는 손가락이 1개가 아니면(멀티터치)
+      // 아무 것도 하지 않고 그냥 return했다 — 첫 손가락으로 이미 시작된 롱프레스 타이머는 그대로
+      // 살아 있어, 두 번째 손가락이 닿아 두 손가락 스크롤/핀치로 전환한 뒤에도 500ms 뒤 최초
+      // 노드의 제어 메뉴가 열리고 그 노드가 선택돼버렸다. 손가락이 1개가 아닌 순간 진행 중이던
+      // 롱프레스를 즉시 취소한다.
+      if (!e.touches || e.touches.length !== 1) {
+        clearLongPressTimer();
+        touchStartPos = null;
+        return;
+      }
+      var node = e.target.closest('.gt-dtl, .gt-grp, .gt-loc');
+      if (!node) return;
+      var touch = e.touches[0];
+      touchStartPos = { x: touch.clientX, y: touch.clientY };
+      clearLongPressTimer();
+      longPressTimer = setTimeout(function () {
+        longPressTimer = null;
+        suppressNextClick = true; // 곧 뒤따라올 ghost click을 한 번 무시한다(위 선언부 설명 참고).
+        showContextMenuForNode(node, touchStartPos.x, touchStartPos.y);
+      }, LONG_PRESS_MS);
+    }, { passive: true });
+
+    container.addEventListener('touchmove', function (e) {
+      // 위 touchstart와 동일한 이유 — 이동 중 두 번째 손가락이 닿아 멀티터치로 전환되면 즉시
+      // 취소한다(단일 터치 상태에서 진입했더라도 그 이후 멀티터치로 바뀔 수 있다).
+      if (!e.touches || e.touches.length !== 1) {
+        clearLongPressTimer();
+        return;
+      }
+      if (!longPressTimer || !touchStartPos) return;
+      var touch = e.touches[0];
+      var dx = touch.clientX - touchStartPos.x;
+      var dy = touch.clientY - touchStartPos.y;
+      if (Math.sqrt(dx * dx + dy * dy) > TOUCH_MOVE_TOLERANCE_PX) clearLongPressTimer();
+    }, { passive: true });
+
+    // [Codex 리뷰 수정: P2, 2026-09-02] 이전에는 롱프레스가 fire된 시점부터 350ms 뒤에 억제
+    // 플래그를 무조건 해제했다 — 사용자가 메뉴가 열린 뒤에도 손가락을 350ms 이상 더 누르고 있으면
+    // (즉 총 850ms 이상 누르는, 흔한 롱프레스) touchend 시점에 이미 플래그가 풀려 있어 뒤따르는
+    // ghost click이 그대로 통과해 방금 연 메뉴를 즉시 닫아버렸다. 손가락을 얼마나 오래 누르고
+    // 있었는지와 무관하게 항상 안전하도록, 리셋 타이머를 "롱프레스가 fire된 시점"이 아니라
+    // "손가락을 뗀 시점(touchend)"을 기준으로 잡는다 — ghost click은 항상 touchend 직후에 발생하므로
+    // 이렇게 하면 몇 초를 누르고 있어도 안전하다.
+    function onTouchEnd() {
+      clearLongPressTimer();
+      if (suppressNextClick) {
+        setTimeout(function () { suppressNextClick = false; }, 350);
+      }
+    }
+    container.addEventListener('touchend', onTouchEnd);
+    container.addEventListener('touchcancel', onTouchEnd);
 
     menu.addEventListener('click', function (e) {
       var item = e.target.closest('[data-action]');
@@ -511,6 +651,9 @@
     });
 
     document.addEventListener('click', function (e) {
+      // 롱프레스로 메뉴를 막 연 직후의 ghost click까지 "메뉴 바깥 클릭"으로 처리되면 메뉴가 뜨자마자
+      // 다시 닫혀버리므로, 같은 플래그로 걸러낸다(위 suppressNextClick 선언부 설명 참고).
+      if (suppressNextClick) return;
       if (menu.style.display !== 'none' && !menu.contains(e.target)) hideMenu();
     });
     document.addEventListener('keydown', function (e) {
@@ -527,8 +670,21 @@
       '.gate-tree .gt-grp{margin-left:1.25rem}' +
       '.gate-tree .gt-grp>summary{cursor:context-menu;padding:.15rem 0}' +
       '.gate-tree .gt-dtl-list{list-style:none;margin:0;padding-left:1.5rem}' +
-      '.gate-tree .gt-dtl{padding:.1rem 0;cursor:context-menu}' +
+      '.gate-tree .gt-dtl{padding:.1rem .25rem;cursor:context-menu;border-radius:.25rem}' +
       '.gate-tree .gt-status{font-size:.6rem;margin-right:.25rem}' +
+      // [모바일 터치 선택 지원] 롱프레스(500ms)로 우리 JS가 제어 메뉴를 여는데, 그 사이 iOS/Android
+      // 기본 동작(텍스트 선택 말풍선, iOS 콜아웃 메뉴)이 먼저 끼어들면 두 UI가 동시에 뜨는 충돌이
+      // 생긴다. 노드 한 줄 영역에서는 텍스트 선택/콜아웃을 꺼서 우리 메뉴만 뜨도록 한다.
+      '.gate-tree .gt-dtl,.gate-tree .gt-loc>summary,.gate-tree .gt-grp>summary{' +
+      '-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}' +
+      // [모바일 터치 선택 지원] 탭/롱프레스로 선택한 노드를 시각적으로 표시한다 — 이전에는 어떤
+      // 노드를 선택(우클릭 대상으로 지정)했는지 화면에서 전혀 확인할 수 없었다. LOC/GRP는
+      // <summary>에, DTL은 <li> 자신에 직접 강조 스타일을 준다.
+      // <details>(gt-loc/gt-grp) 자신에 강조를 주면 펼쳐진 하위 트리 전체가 감싸여 보이므로,
+      // LOC/GRP는 <summary> 헤더 줄에만 강조를 준다 — DTL(<li>)은 자신이 한 줄이라 그대로 적용한다.
+      '.gate-tree .gt-dtl.gt-selected{background:rgba(13,110,253,.15);outline:1px solid rgba(13,110,253,.4)}' +
+      '.gate-tree .gt-loc.gt-selected>summary,.gate-tree .gt-grp.gt-selected>summary{' +
+      'background:rgba(13,110,253,.15);outline:1px solid rgba(13,110,253,.4);border-radius:.25rem}' +
       '.gate-tree-context-menu{min-width:200px;z-index:1080}' +
       // 우클릭 메뉴로 보낸 명령의 성공/실패를 표시하는 토스트(2026-08-19 Codex 적대적 리뷰 대응).
       '#gate-tree-toast{display:none;position:fixed;right:1rem;bottom:1rem;max-width:360px;' +
@@ -606,6 +762,9 @@
       renderGroup: renderGroup,
       renderLocation: renderLocation,
       render: render,
+      selectNode: selectNode,
+      nodeKeyOf: nodeKeyOf,
+      setupContextMenu: setupContextMenu,
       describeResult: describeResult,
       sendBulkSequentialByIp: sendBulkSequentialByIp,
       reportBulkCommandResult: reportBulkCommandResult,

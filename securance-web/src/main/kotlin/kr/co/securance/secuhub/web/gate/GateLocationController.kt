@@ -60,6 +60,18 @@ class GateLocationService(
 
     fun findByIdOrNull(locId: Long): GateLocation? = locationRepository.findById(locId).orElse(null)
 
+    /**
+     * 버그 수정(2026-09-02): [GateLocation.locMap]에 파일명이 채워져 있어도, 그 참조가 가리키는
+     * 파일이 실제로 이 서버의 [imageDir]에 존재한다는 보장은 없다 — 공유 개발 DB(여러 환경이
+     * 같은 DB에 접속)와 로컬 디스크(환경마다 별도)를 함께 쓰는 구성에서는, 다른 환경에서 업로드된
+     * 위치를 이 환경에서 열면 DB의 loc_map은 정상이지만 그 파일은 이 서버 디스크에 아예 없다.
+     * 이전에는 이 경우를 구분하지 않고 `<img>`를 그대로 렌더링해, 브라우저가 이미지 로드에 실패한
+     * 채(깨진 아이콘/빈 화면) 그 위의 그룹 마커만 눈에 띄는 상태로 보였다 — 게이트 관리 위치 팝업의
+     * "지도"를 눌렀을 때 "그룹 아이콘만 보이고 지도 이미지는 안 보인다"는 증상의 실제 원인이었다.
+     * 파일 존재 여부를 서버에서 미리 확인해, 없으면 원인이 분명한 안내로 대체한다.
+     */
+    fun mapImageFileExists(fileName: String): Boolean = File(File(imageDir).absoluteFile, fileName).exists()
+
     @Transactional
     fun create(form: GateLocationForm) {
         locationRepository.save(GateLocation(locName = form.locName, useYn = form.useYn))

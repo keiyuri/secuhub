@@ -38,6 +38,14 @@ class LocationMapController(
         model.addAttribute("pageTitle", "위치 배치도 — ${location.locName}")
         model.addAttribute("location", location)
         model.addAttribute("groups", groupService.findAllActiveByLocation(locId))
+        // 버그 수정(2026-09-02): DB의 loc_map은 채워져 있는데 실제 이미지 파일이 이 서버 디스크에
+        // 없는 경우(GateLocationService.mapImageFileExists KDoc 참고) — 뷰가 <img>를 그대로 렌더링해
+        // 그룹 마커만 보이고 지도 이미지가 안 보이는 원인 불명의 화면이 되지 않도록, 여기서 미리
+        // 확인해 뷰가 명확한 안내로 대체할 수 있게 한다.
+        model.addAttribute(
+            "mapImageMissing",
+            location.locMap != null && !locationService.mapImageFileExists(location.locMap!!),
+        )
         return "gates/location-map"
     }
 

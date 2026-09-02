@@ -52,6 +52,17 @@
     .gp-embed .app-content-header { display: none !important; }
     .gp-embed .app-main { margin-inline-start: 0 !important; }
     .gp-embed body { padding-block-start: 0 !important; }
+
+    /* 버그 수정: 사이드바(fragments/sidebar.html)는 항상 data-bs-theme="dark"로 고정돼 있는데,
+       AdminLTE 기본 다크 테마는 "펼쳐진(menu-open) 그룹 헤더" 배경색(--lte-sidebar-hover-bg)과
+       "실제로 선택된(active) 메뉴" 배경색(--lte-sidebar-menu-active-bg)을 완전히 같은 값
+       (rgba(255,255,255,0.1))으로 정의한다. 그 결과 "게이트 관리"를 펼치기만 해도 — 실제로는
+       그 하위 화면이 열려 있지 않고 대시보드 등 전혀 다른 메뉴가 선택된 상태라도 — 두 항목이
+       완전히 같은 강조색으로 표시되어 마치 게이트 관리도 함께 선택된 것처럼 보였다. 실제 선택
+       상태(.active)와는 구분되도록, "펼쳐졌지만 선택되지는 않은" 상태만 더 옅은 배경으로 낮춘다. */
+    .app-sidebar .sidebar-menu > .nav-item.menu-open > .nav-link:not(.active) {
+      background-color: rgba(255, 255, 255, 0.04);
+    }
   </style>
 </head>
 <body class="layout-fixed sidebar-expand-lg fixed-header fixed-sidebar bg-body-tertiary">

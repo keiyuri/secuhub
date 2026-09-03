@@ -27,6 +27,13 @@ data class NetStateId(
 /**
  * `tb_net_state` — 게이트(레인)별 현재 연결 상태. `usp_net_check_data`/`NetCheckJob`이 갱신한다.
  * `dtlState`가 "Y"면 온라인, "N"이면 오프라인(계획서 3.7절 NetCheckJob 참고).
+ *
+ * **두 쓰기 경로**: 신규 서버는 [kr.co.securance.secuhub.domain.repository.NetStateRepository.upsertIfNewer]
+ * 로, 레거시 저장 프로시저 `usp_net_check_data`는 직접 SQL로 이 테이블을 쓴다. 개발 DB
+ * (192.168.0.26:28031) 진단(2026-09-04)에서 `usp_net_check_data`가 `applied_seq` 순서 보장을
+ * 전혀 모르는 무조건 UPSERT라는 것이 확인돼, V33 마이그레이션으로 해당 프로시저도 동일한 전역
+ * 시퀀스(`tb_net_state_seq`)/조건부 갱신 규칙을 쓰도록 고쳤다 — 두 경로 중 실제로 더 최신인
+ * 쪽만 반영된다.
  */
 @Entity
 @Table(name = "tb_net_state")

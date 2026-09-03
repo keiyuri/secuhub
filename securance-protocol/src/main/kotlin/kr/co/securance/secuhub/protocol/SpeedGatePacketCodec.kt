@@ -150,21 +150,13 @@ object SpeedGatePacketCodec {
         require(dataCount in 0..0xFFFF) { "dataCount는 0~65535 범위여야 합니다(2바이트 필드): $dataCount" }
         require(dataLength in 0..0xFFFF) { "dataLength는 0~65535 범위여야 합니다(2바이트 필드): $dataLength" }
 
+        // Header의 PACKET_LENGTH/DATA_COUNT/DATA_LENGTH는 2바이트(0~65535) 필드다. 이 상한을
+        // 넘는 값을 그대로 잘라 넣으면(랩어라운드) 헤더에 기록된 길이가 실제 패킷 크기와 달라져
+        // 수신측(재조립기/실장비) 프레이밍이 깨진다 — 조용히 잘리기 전에 명시적으로 막는다.
         val totalLength = SpeedGateProtocolConstants.HEADER_LENGTH + payload.size + SpeedGateProtocolConstants.TAIL_LENGTH
-        require(totalLength <= 0xFFFF) {
-            "패킷 전체 길이가 Packet Length 필드 범위(0~65535)를 벗어납니다: $totalLength"
-        }
-
-        // Header의 PACKET_LENGTH/DATA_COUNT/DATA_LENGTH는 2바이트(0~65535), DATA_INFO_LENGTH는
-        // 1바이트(0~255) 필드다. 이 상한을 넘는 값을 그대로 잘라 넣으면(랩어라운드) 헤더에 기록된
-        // 길이가 실제 패킷 크기와 달라져 수신측(재조립기/실장비) 프레이밍이 깨진다 — 조용히
-        // 잘리기 전에 명시적으로 막는다.
         require(totalLength in 0..0xFFFF) {
             "패킷 전체 길이가 헤더 필드(2바이트) 표현 범위를 벗어났습니다: $totalLength (payload=${payload.size}바이트)"
         }
-        require(dataInfoLength in 0..0xFF) { "dataInfoLength는 0~255 범위여야 합니다: $dataInfoLength" }
-        require(dataCount in 0..0xFFFF) { "dataCount는 0~65535 범위여야 합니다: $dataCount" }
-        require(dataLength in 0..0xFFFF) { "dataLength는 0~65535 범위여야 합니다: $dataLength" }
 
         val header = ByteArray(SpeedGateProtocolConstants.HEADER_LENGTH)
         header[HeaderOffset.STX] = SpeedGateProtocolConstants.STX

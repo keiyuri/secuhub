@@ -148,4 +148,21 @@ class UserManagementServiceTest {
             service.update("ghost", UserForm(userId = "ghost", password = "", userName = "유령"))
         }
     }
+
+    @Test
+    fun `아직 BCrypt로 승격되지 않은(레거시 평문) 계정만 개수에 포함한다`() {
+        // upgradeEncoding은 LegacyAwarePasswordEncoder가 "평문이라 다음 로그인 시 재해시가
+        // 필요하다"고 알릴 때 true를 반환한다(2026-09-03 코드 리뷰 지적: 휴면 계정은 평문으로
+        // 무기한 남을 수 있어 관리 화면에 개수를 노출한다).
+        val userRepository = mock(AppUserRepository::class.java)
+        val passwordEncoder = mock(PasswordEncoder::class.java)
+        val service = UserManagementService(userRepository, passwordEncoder)
+        val legacy = user(userId = "legacy", passwordHash = "plain-text")
+        val upgraded = user(userId = "upgraded", passwordHash = "\$2a\$10\$hashed")
+        `when`(userRepository.findAll()).thenReturn(listOf(legacy, upgraded))
+        `when`(passwordEncoder.upgradeEncoding("plain-text")).thenReturn(true)
+        `when`(passwordEncoder.upgradeEncoding("\$2a\$10\$hashed")).thenReturn(false)
+
+        assertEquals(1L, service.legacyPlaintextCount())
+    }
 }

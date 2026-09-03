@@ -68,7 +68,7 @@
           </tr>
           <tr th:each="row : ${result.content}">
             <td th:text="${#temporals.format(row.eventTime, 'yyyy-MM-dd HH:mm:ss')}">일시</td>
-            <td th:text="${row.dtlIp}">IP</td>
+            <td th:text="${@ipDisplay.mask(row.dtlIp)}">IP</td>
             <td th:text="${row.dtlLaneNo}">0</td>
             <td th:text="${T(kr.co.securance.secuhub.web.report.GateLogEventTypeLabels).label(row.eventType)}">유형</td>
             <td th:text="${row.code}">0</td>

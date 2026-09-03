@@ -47,6 +47,15 @@ class UserManagementService(
 
     fun findByIdOrNull(userId: String): AppUser? = userRepository.findById(userId).orElse(null)
 
+    /**
+     * 레거시 평문 비밀번호가 아직 BCrypt로 승격되지 않은 계정 수(2026-09-03 코드 리뷰 지적).
+     * [passwordEncoder].upgradeEncoding은 [LegacyAwarePasswordEncoder]가 저장된 값이 BCrypt
+     * 해시 형태가 아닐 때 true를 반환한다 — 즉 로그인 성공 시에만 자동 승격되므로, 오래 로그인하지
+     * 않는(휴면) 계정은 평문 상태로 무기한 남을 수 있다. 관리 화면에 노출해 운영자가 인지하고
+     * 필요 시 비밀번호를 직접 재설정하도록 안내한다(강제 재설정 배치는 별도 결정 필요라 범위 밖).
+     */
+    fun legacyPlaintextCount(): Long = userRepository.findAll().count { passwordEncoder.upgradeEncoding(it.passwordHash) }.toLong()
+
     @Transactional
     fun create(form: UserForm) {
         require(!userRepository.existsById(form.userId)) { "이미 존재하는 아이디입니다: ${form.userId}" }
@@ -215,5 +224,6 @@ class UserController(
         model.addAttribute("pageTitle", "사용자 관리")
         model.addAttribute("users", userManagementService.findAll(showInactive))
         model.addAttribute("showInactive", showInactive)
+        model.addAttribute("legacyPlaintextCount", userManagementService.legacyPlaintextCount())
     }
 }

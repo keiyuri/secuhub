@@ -52,7 +52,7 @@
     // escapeHtml()로 모든 값을 이스케이프한 뒤에만 innerHTML에 대입한다(서버가 DB에서 읽어온
     // dtlIp/description 등은 신뢰할 수 없는 입력으로 취급).
     body.innerHTML = rows.map(function (row) {
-      return '<tr><td>' + escapeHtml(row.dtlIp) + '</td><td>' + escapeHtml(row.description) +
+      return '<tr><td>' + escapeHtml(maskIp(row.dtlIp)) + '</td><td>' + escapeHtml(row.description) +
         '</td><td>' + escapeHtml(row.analDate) + '</td><td>' + escapeHtml(row.resolveYn) + '</td></tr>';
     }).join('');
   }
@@ -68,7 +68,7 @@
     if (!modalEl) return;
     modalEl.querySelector('.modal-title').textContent = isFire ? '화재 경고' : '게이트 장애 알림';
     modalEl.querySelector('.modal-header').className = 'modal-header ' + (isFire ? 'bg-danger text-white' : 'bg-warning');
-    modalEl.querySelector('.rt-alert-ip').textContent = payload.dtlIp || '-';
+    modalEl.querySelector('.rt-alert-ip').textContent = maskIp(payload.dtlIp) || '-';
     modalEl.querySelector('.rt-alert-desc').textContent = payload.description || '-';
     modalEl.querySelector('.rt-alert-date').textContent = payload.analDate || '-';
 
@@ -139,6 +139,15 @@
     if (value === null || value === undefined) return '';
     return String(value)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // 대시보드 표시 전용 IP 마스킹(gate-tree.js maskIp/securance-common IpMaskingUtil.leftMask(hide=1)과
+  // 동일한 규칙) — 대역(앞 옥텟)을 가리고 장비 식별용 뒤 옥텟은 남긴다. sendResetCommand는 payload.dtlIp
+  // 원본을 그대로 쓰므로 마스킹은 화면 표시(테이블/모달 텍스트)에만 영향을 준다.
+  var IP_MASK_REGEX = /^\d{1,3}\.((?:\d{1,3}\.){2}\d{1,3})$/;
+  function maskIp(ip) {
+    if (!ip) return ip;
+    return String(ip).replace(IP_MASK_REGEX, '*.$1');
   }
 
   if (document.getElementById('rt-alert-modal')) {

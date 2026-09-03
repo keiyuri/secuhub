@@ -31,21 +31,31 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // 트리뷰 표시 전용 IP 마스킹(securance-common IpMaskingUtil.leftMask(hide=1)과 동일한 규칙) —
+  // 대역(앞 옥텟)을 가려 화면 노출을 줄이되, 장비 식별에 쓰는 뒤 옥텟은 남긴다. 제어 요청은
+  // data-dtl-ip 속성의 원본 IP를 그대로 쓰므로(postGateControl 등) 마스킹은 표시에만 영향을 준다.
+  var IP_MASK_REGEX = /^\d{1,3}\.((?:\d{1,3}\.){2}\d{1,3})$/;
+  function maskIp(ip) {
+    if (!ip) return ip;
+    return String(ip).replace(IP_MASK_REGEX, '*.$1');
+  }
+
   function statusIcon(online) {
     return '<i class="bi bi-circle-fill gt-status ' + (online ? 'text-success' : 'text-danger') + '"' +
       ' title="' + (online ? '온라인' : '오프라인') + '"></i>';
   }
 
   function renderDetail(loc, grp, d) {
-    var label = d.dtlName ? escapeHtml(d.dtlName) : escapeHtml(d.dtlIp);
+    var label = d.dtlName ? escapeHtml(d.dtlName) : escapeHtml(maskIp(d.dtlIp));
     // data-gate-type: 우클릭 메뉴가 "역방향 개방" 항목의 표시 여부를 판단하는 데 쓴다(Flap=2에서만
     // 표시 — SR_Speed_Client ContextMenu_Init의 iGateType==2 분기와 동일).
+    // data-dtl-ip는 제어 요청에 쓰이는 원본 IP이므로 마스킹하지 않는다 — 화면에 보이는 텍스트만 가린다.
     return '<li class="gt-dtl" data-dtl-id="' + d.dtlId + '" data-dtl-ip="' + escapeHtml(d.dtlIp) +
       '" data-dtl-lane="' + d.dtlLaneNo + '" data-online="' + d.online +
       '" data-gate-type="' + grp.gateTypeCode + '">' +
       statusIcon(d.online) +
       ' <span class="gt-dtl-label">' + label + '</span>' +
-      ' <span class="text-muted small">(' + escapeHtml(d.dtlIp) + ' / 레인 ' + d.dtlLaneNo + ')</span>' +
+      ' <span class="text-muted small">(' + escapeHtml(maskIp(d.dtlIp)) + ' / 레인 ' + d.dtlLaneNo + ')</span>' +
       '</li>';
   }
 
@@ -597,6 +607,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       escapeHtml: escapeHtml,
+      maskIp: maskIp,
       renderDetail: renderDetail,
       renderGroup: renderGroup,
       renderLocation: renderLocation,

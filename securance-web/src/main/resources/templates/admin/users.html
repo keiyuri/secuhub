@@ -9,6 +9,14 @@
 
   <div class="alert alert-success py-2" th:if="${message}" th:text="${message}"></div>
   <div class="alert alert-danger py-2" th:if="${error}" th:text="${error}"></div>
+  <!-- 2026-09-03 코드 리뷰 지적: 레거시 평문 비밀번호는 다음 로그인 성공 시에만 BCrypt로 자동
+       승격되므로, 휴면 계정은 평문 상태로 무기한 남을 수 있다. 강제 배치 대신 운영자가 인지하고
+       직접 비밀번호를 재설정하도록 안내만 한다. -->
+  <div class="alert alert-warning py-2" th:if="${legacyPlaintextCount > 0}">
+    아직 BCrypt로 승격되지 않은(레거시 평문 비밀번호) 계정이 <strong th:text="${legacyPlaintextCount}">0</strong>개 있습니다.
+    아래 목록의 <span class="badge bg-warning text-dark">평문</span> 표시 계정은 오래 로그인하지 않으면 평문 상태로 남으니,
+    필요 시 비밀번호를 직접 재설정해 주세요.
+  </div>
 
   <div class="row">
     <div class="col-lg-7">
@@ -23,14 +31,18 @@
         </div>
         <div class="table-responsive">
           <table class="table table-sm table-striped mb-0">
-            <thead><tr><th>아이디</th><th>이름</th><th>사용</th><th>조회</th><th>제어</th><th>관리</th><th></th></tr></thead>
+            <thead><tr><th>아이디</th><th>이름</th><th>비밀번호</th><th>사용</th><th>조회</th><th>제어</th><th>관리</th><th></th></tr></thead>
             <tbody>
               <tr th:if="${#lists.isEmpty(users)}">
-                <td colspan="7" class="text-center text-muted">등록된 사용자가 없습니다.</td>
+                <td colspan="8" class="text-center text-muted">등록된 사용자가 없습니다.</td>
               </tr>
               <tr th:each="user : ${users}">
                 <td th:text="${user.userId}">아이디</td>
                 <td th:text="${user.userName}">이름</td>
+                <td>
+                  <span class="badge bg-warning text-dark" th:if="${@passwordEncoder.upgradeEncoding(user.passwordHash)}">평문</span>
+                  <span class="badge bg-success" th:unless="${@passwordEncoder.upgradeEncoding(user.passwordHash)}">BCrypt</span>
+                </td>
                 <td th:text="${user.useYn} ? '사용' : '미사용'">사용</td>
                 <td th:text="${user.authView} ? 'Y' : 'N'">Y</td>
                 <td th:text="${user.authControl} ? 'Y' : 'N'">N</td>

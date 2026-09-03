@@ -279,6 +279,49 @@ class GateTcpClientTest {
     }
 
     @Test
+    fun `연결이 끊기면 다음 재확인 주기에 자동으로 재연결한다`() {
+        // 2026-09-03 코드 리뷰 지적: 이 클래스는 도입 이후 재연결(끊김 → 다음 monitorJob 사이클에서
+        // 다시 접속) 경로를 검증하는 테스트가 없었다. 백오프 없이 고정 주기(clientReconnectIntervalSeconds)로
+        // connectToAllDevices()를 재실행하는 것이 이 구현의 실제 "재연결" 전략이므로(클래스 KDoc
+        // 참고), 그 전략이 실제로 동작하는지 — 끊긴 뒤 registry에서 빠지고, 다음 사이클에 다시
+        // 등록되는지 — 를 실제 TCP 라운드트립으로 검증한다.
+        val fakeGate = ServerSocket(0).also { fakeGateServer = it }
+        val acceptedSockets = java.util.concurrent.CopyOnWriteArrayList<Socket>()
+        val firstAccepted = CountDownLatch(1)
+        val secondAccepted = CountDownLatch(2)
+        Thread {
+            while (!fakeGate.isClosed) {
+                val socket = runCatching { fakeGate.accept() }.getOrNull() ?: break
+                acceptedSockets += socket
+                firstAccepted.countDown()
+                secondAccepted.countDown()
+            }
+        }.apply { isDaemon = true; start() }
+
+        val gateDetailRepository = mock(GateDetailRepository::class.java)
+        `when`(gateDetailRepository.findByUseYnTrueOrderByDtlIp())
+            .thenReturn(listOf(gateDetail("127.0.0.1", 1)))
+        `when`(gateDetailRepository.findLaneInfoByDtlIp(eqOf("127.0.0.1"))).thenReturn(
+            listOf(GateLaneInfo(locId = 1L, grpId = 1L, dtlId = 1L, dtlLaneNo = 1, dtlType = 1, analysisYn = true)),
+        )
+
+        val registry = newRegistry(gateDetailRepository)
+        newClient(gateDetailRepository, fakeGate.localPort, registry = registry, reconnectIntervalSeconds = 1).start()
+
+        assertTrue(firstAccepted.await(5, TimeUnit.SECONDS), "최초 연결을 시도하지 않았습니다.")
+        assertTrue(waitUntil { registry.findConnection("127.0.0.1") != null }, "최초 연결이 registry에 등록되지 않았습니다.")
+
+        // 게이트 쪽에서 소켓을 끊는다 — 원격 종료를 시뮬레이션.
+        acceptedSockets[0].close()
+        assertTrue(waitUntil { registry.findConnection("127.0.0.1") == null }, "연결 종료가 registry에 반영되지 않았습니다.")
+
+        assertTrue(secondAccepted.await(5, TimeUnit.SECONDS), "다음 재확인 주기에 재연결을 시도하지 않았습니다.")
+        assertTrue(waitUntil { registry.findConnection("127.0.0.1") != null }, "재연결이 registry에 다시 등록되지 않았습니다.")
+
+        acceptedSockets.forEach { runCatching { it.close() } }
+    }
+
+    @Test
     fun `지원하지 않는 게이트 타입이면 연결을 시도하지 않는다`() {
         val fakeGate = ServerSocket(0).also { fakeGateServer = it }
         val accepted = CountDownLatch(1)

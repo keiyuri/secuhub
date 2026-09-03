@@ -13,7 +13,6 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 
 /** 폴링 1회의 처리 결과 요약. 잡 로그와 테스트 단언에 쓴다. */
@@ -162,7 +161,7 @@ class GateControlDispatcher(
     private fun expireStalePending(): Int {
         val cutoff = LocalDateTime.now(clock)
             .minusSeconds(properties.pendingExpirySeconds)
-            .format(SEND_DATE_FORMAT)
+            .format(GateControlDateFormats.SEND_DATE)
         val expired = dataSendRepository.expireStalePending(cutoff)
         if (expired > 0) {
             logger.warn(
@@ -447,8 +446,5 @@ class GateControlDispatcher(
         /** `snd_server` 기본값 — 다중 인스턴스 배포 시 어느 서버가 보냈는지 구분하는 용도. */
         private val LOCAL_SERVER: String =
             runCatching { java.net.InetAddress.getLocalHost().hostAddress }.getOrDefault("unknown")
-
-        /** `tb_data_snd.snd_date` 포맷 — [QueuedGateControlService]/[DirectGateControlService]와 동일. */
-        private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
     }
 }

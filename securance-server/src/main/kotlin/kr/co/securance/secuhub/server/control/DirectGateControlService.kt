@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Service
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 /**
  * DIRECT 방식 제어 명령 구현 — 커넥션의 액터 체인에 즉시 태워 보낸다(계획서 5.5절).
@@ -71,7 +70,7 @@ class DirectGateControlService(
 
     /** 전송 성공/거부 여부와 무관하게 이력을 남긴다 — 거부된 명령도 감사 대상이다. */
     private fun recordHistory(request: GateControlRequest, packet: ByteArray, accepted: Boolean) {
-        val sndDate = LocalDateTime.now().format(SEND_DATE_FORMAT)
+        val sndDate = LocalDateTime.now().format(GateControlDateFormats.SEND_DATE)
         val hex = HexCodec.toHex(packet)
         val laneInfo = registry.findConnection(request.dtlIp)?.laneInfoOf(request.dtlLaneNo)
 
@@ -102,8 +101,4 @@ class DirectGateControlService(
         )
     }
 
-    companion object {
-        /** `tb_data_snd.snd_date` — 스키마 주석 규정 포맷(초 단위). */
-        private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
-    }
 }

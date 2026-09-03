@@ -13,7 +13,6 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -184,7 +183,7 @@ class GateControlDispatcher(
     private fun expireStalePending(): Int {
         val cutoff = LocalDateTime.now(clock)
             .minusSeconds(properties.pendingExpirySeconds)
-            .format(SEND_DATE_FORMAT)
+            .format(GateControlDateFormats.SEND_DATE)
         val expired = dataSendRepository.expireStalePending(cutoff)
         if (expired > 0) {
             logger.warn(
@@ -465,8 +464,4 @@ class GateControlDispatcher(
             false
         }
 
-    companion object {
-        /** `tb_data_snd.snd_date` 포맷 — [QueuedGateControlService]/[DirectGateControlService]와 동일. */
-        private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
-    }
 }

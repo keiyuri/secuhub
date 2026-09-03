@@ -80,7 +80,7 @@
           <tr th:each="row : ${result.content}">
             <td th:text="${row.analDate}">일시</td>
             <td th:text="${row.analType}">유형</td>
-            <td th:text="${row.dtlIp}">IP</td>
+            <td th:text="${@ipDisplay.mask(row.dtlIp)}">IP</td>
             <td th:text="${row.dtlLaneNo}">0</td>
             <td th:text="${row.description}">-</td>
           </tr>

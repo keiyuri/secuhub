@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Service
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 /**
  * QUEUED 방식 제어 명령 구현(계획서 5.5절) — `tb_data_snd`에 INSERT만 하고 실제 전송은
@@ -57,7 +56,7 @@ class QueuedGateControlService(
 
         dataSendRepository.save(
             DataSend(
-                sndDate = LocalDateTime.now().format(SEND_DATE_FORMAT),
+                sndDate = LocalDateTime.now().format(GateControlDateFormats.SEND_DATE),
                 sndYn = DataSend.NO,
                 chkYn = DataSend.NO,
                 dtlIp = request.dtlIp,
@@ -84,7 +83,7 @@ class QueuedGateControlService(
     }
 
     companion object {
-        /** `tb_data_snd.snd_date` — 스키마 주석 규정 포맷(초 단위). */
-        private val SEND_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
+        /** 게이트 타입을 알 수 없을 때의 기본값(Speed Gate). */
+        private const val DEFAULT_GATE_TYPE = 1
     }
 }

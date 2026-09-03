@@ -120,7 +120,7 @@
                   <td colspan="4" class="text-center text-muted">최근 미해결 오류가 없습니다.</td>
                 </tr>
                 <tr th:each="err : ${recentErrors}">
-                  <td th:text="${err.dtlIp}">IP</td>
+                  <td th:text="${@ipDisplay.mask(err.dtlIp)}">IP</td>
                   <td th:text="${err.description}">오류 설명</td>
                   <td th:text="${err.analDate}">일시</td>
                   <td th:text="${err.resolveYn}">N</td>

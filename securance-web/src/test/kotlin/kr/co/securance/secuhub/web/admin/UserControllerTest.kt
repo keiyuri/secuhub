@@ -11,6 +11,7 @@ import org.springframework.boot.SpringBootConfiguration
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.context.annotation.Import
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.test.context.support.WithMockUser
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf
 import org.springframework.test.context.bean.override.mockito.MockitoBean
@@ -42,6 +43,14 @@ class UserControllerTest {
 
     @MockitoBean
     private lateinit var menuProvider: MenuProvider
+
+    // admin/users.html이 @passwordEncoder.upgradeEncoding(...)을 직접 빈 참조로 호출한다
+    // (2026-09-03 병합 후 재발견 — @WebMvcTest 슬라이스에는 실제 PasswordEncoder 빈이 없어
+    // NoSuchBeanDefinitionException으로 렌더링이 깨졌었다). upgradeEncoding은 스텁하지 않아도
+    // Mockito 기본값 false로 충분하다(평문/BCrypt 배지 분기 자체는 UserManagementServiceTest가
+    // 이미 커버).
+    @MockitoBean(name = "passwordEncoder")
+    private lateinit var passwordEncoder: PasswordEncoder
 
     private fun sampleUser(userId: String) = AppUser(
         userId = userId,

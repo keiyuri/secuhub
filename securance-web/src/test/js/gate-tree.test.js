@@ -35,8 +35,22 @@ describe('escapeHtml', () => {
   });
 });
 
+describe('maskIp', () => {
+  test('대역(앞 옥텟)만 가리고 장비 식별용 뒤 옥텟은 남긴다', () => {
+    const { maskIp } = loadGateTree();
+    expect(maskIp('192.168.0.120')).toBe('*.168.0.120');
+  });
+
+  test('null/undefined/빈 문자열은 그대로 반환한다', () => {
+    const { maskIp } = loadGateTree();
+    expect(maskIp(null)).toBe(null);
+    expect(maskIp(undefined)).toBe(undefined);
+    expect(maskIp('')).toBe('');
+  });
+});
+
 describe('renderDetail/renderGroup/renderLocation', () => {
-  test('레인 이름이 없으면 dtlIp를 라벨로 쓰고, 게이트 이름은 이스케이프한다', () => {
+  test('레인 이름이 없으면 마스킹된 dtlIp를 라벨로 쓰고, 게이트 이름은 이스케이프한다', () => {
     const { renderDetail } = loadGateTree();
     // 코드 리뷰 지적(2026-08-28): 게이트 타입은 이제 그룹이 아니라 레인(dtl) 자신의 값이다
     // (GateGroup.gateTypeCode 삭제) — data-gate-type은 d.dtlType에서 나와야 한다.
@@ -49,6 +63,18 @@ describe('renderDetail/renderGroup/renderLocation', () => {
     expect(html).toContain('data-online="true"');
     expect(html).toContain('data-gate-type="1"');
     expect(html).toContain('text-success'); // online=true → 초록 상태 아이콘
+  });
+
+  test('제어 요청에 쓰이는 data-dtl-ip 속성은 마스킹하지 않고 원본 IP를 유지한다', () => {
+    const { renderDetail } = loadGateTree();
+    const html = renderDetail(
+      {},
+      { gateTypeCode: 1 },
+      { dtlId: 1, dtlIp: '192.168.0.1', dtlLaneNo: 1, online: true },
+    );
+    expect(html).toContain('data-dtl-ip="192.168.0.1"');
+    // 화면 표시용 라벨/괄호 부분은 마스킹된 IP를 쓴다.
+    expect(html).toContain('*.168.0.1');
   });
 
   test('오프라인 레인은 빨간 상태 아이콘을 쓴다', () => {

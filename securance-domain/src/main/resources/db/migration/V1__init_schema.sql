@@ -27,6 +27,15 @@
 -- **이미 한 번이라도 배포된 환경이 생긴 뒤에는 이런 병합을 다시 해서는 안 된다** — Flyway
 -- 체크섬이 파일 내용을 검증하므로 기존 배포가 깨진다.
 --
+-- [2026-09-04 추가 수정] `tb_data_rcv_anal`의 `desc_data_info_length`/`desc_gate_lane_count`/
+-- `desc_gate_lane_number`/`desc_inout_time`/`desc_user_count`/`desc_total_count`/
+-- `desc_master_in_total`/`desc_motor_count` 8개 컬럼을 개발 DB(`192.168.0.26:28031`) 실측
+-- 타입(TINYINT/INT/BIGINT, 전부 unsigned 계열)에 맞춰 VARCHAR/INT(signed)에서 변경했다 —
+-- 사용자 지시로 "BASELINE DB 자동 ALTER 금지 원칙"(위 참고)의 예외로 처리, 신규 DB(V1)와
+-- 레거시 DB(BASELINE) 양쪽을 실측 기준으로 통일했다. 엔티티([DataReceiveAnalysis.kt])와
+-- H2 테스트 스키마도 함께 Int/Long으로 수정했다. `flyway_schema_history`는 checksum 재계산이
+-- 필요해 별도로 정리한다(작업일지 참고).
+--
 -- 레거시 대비 변경점(원래 V1 KDoc):
 --   1) FOREIGN_KEY_CHECKS=0으로 운영되던 논리적 관계에 실제 FK를 추가했다.
 --   2) tb_data_rcv_anal_evt/_plm/_state 샤드 3종은 통합하지 않고 단일 tb_data_rcv_anal +
@@ -110,19 +119,19 @@ CREATE TABLE `tb_data_rcv_anal` (
   `anal_header` varchar(100) DEFAULT NULL,
   `anal_data` longtext DEFAULT NULL,
   `anal_tail` varchar(20) DEFAULT NULL,
-  `desc_data_info_length` varchar(10) NOT NULL DEFAULT '',
+  `desc_data_info_length` tinyint(3) unsigned NOT NULL DEFAULT 0,
   `desc_gate_name` varchar(80) NOT NULL DEFAULT '',
   `desc_gate_ip` varchar(20) NOT NULL DEFAULT '',
-  `desc_gate_lane_count` varchar(20) NOT NULL DEFAULT '',
-  `desc_gate_lane_number` varchar(20) NOT NULL DEFAULT '',
+  `desc_gate_lane_count` tinyint(3) unsigned NOT NULL DEFAULT 0,
+  `desc_gate_lane_number` tinyint(3) unsigned NOT NULL DEFAULT 0,
   `desc_gate_type` varchar(50) NOT NULL DEFAULT '',
   `desc_user_mode` varchar(30) NOT NULL DEFAULT '',
   `user_mode_cd` varchar(10) DEFAULT NULL,
   `desc_security_mode` varchar(20) NOT NULL DEFAULT '',
   `security_mode_cd` varchar(10) DEFAULT NULL,
-  `desc_inout_time` varchar(20) NOT NULL DEFAULT '',
-  `desc_user_count` varchar(20) NOT NULL DEFAULT '',
-  `desc_total_count` varchar(20) NOT NULL DEFAULT '',
+  `desc_inout_time` int(10) unsigned NOT NULL DEFAULT 0,
+  `desc_user_count` bigint(20) NOT NULL DEFAULT 0,
+  `desc_total_count` bigint(20) NOT NULL DEFAULT 0,
   `desc_operation01` varchar(20) DEFAULT NULL COMMENT 'S00: BACK RUSH 등 운영 센서 이상',
   `desc_operation02` varchar(20) DEFAULT NULL,
   `desc_operation03` varchar(20) DEFAULT NULL,
@@ -131,8 +140,8 @@ CREATE TABLE `tb_data_rcv_anal` (
   `desc_operation06` varchar(20) DEFAULT NULL,
   `desc_operation07` varchar(20) DEFAULT NULL,
   `desc_operation08` varchar(20) DEFAULT NULL,
-  `desc_motor_count` int(11) NOT NULL DEFAULT 0,
-  `desc_master_in_total` int(11) NOT NULL DEFAULT 0,
+  `desc_motor_count` int(10) unsigned NOT NULL DEFAULT 0,
+  `desc_master_in_total` bigint(20) NOT NULL DEFAULT 0,
   `desc_safety01` varchar(20) DEFAULT NULL COMMENT 'S04~S07: 안전 센서 이상',
   `desc_safety02` varchar(20) DEFAULT NULL,
   `desc_safety03` varchar(20) DEFAULT NULL,

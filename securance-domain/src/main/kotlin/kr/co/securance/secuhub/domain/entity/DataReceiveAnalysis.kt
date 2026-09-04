@@ -136,8 +136,13 @@ class DataReceiveAnalysis(
     var analDataMasterInTotalCount: String = "",
 
     // ── 헤더/정보 영역 해석값 ────────────────────────────────────────
-    @Column(name = "desc_data_info_length", nullable = false, length = 10)
-    var descDataInfoLength: String = "",
+    // 2026-09-04: 개발 DB(192.168.0.26:28031) 실측 기준으로 desc_data_info_length/
+    // desc_gate_lane_count/desc_gate_lane_number/desc_inout_time/desc_user_count/
+    // desc_total_count/desc_master_in_total/desc_motor_count를 VARCHAR/INT에서
+    // TINYINT/INT/BIGINT(unsigned 계열)로 정합화(hibernate.ddl-auto=validate가 매핑 불일치 시
+    // 기동을 막으므로 엔티티도 함께 수정).
+    @Column(name = "desc_data_info_length", nullable = false)
+    var descDataInfoLength: Int = 0,
 
     @Column(name = "desc_gate_name", nullable = false, length = 80)
     var descGateName: String = "",
@@ -145,11 +150,11 @@ class DataReceiveAnalysis(
     @Column(name = "desc_gate_ip", nullable = false, length = 20)
     var descGateIp: String = "",
 
-    @Column(name = "desc_gate_lane_count", nullable = false, length = 20)
-    var descGateLaneCount: String = "",
+    @Column(name = "desc_gate_lane_count", nullable = false)
+    var descGateLaneCount: Int = 0,
 
-    @Column(name = "desc_gate_lane_number", nullable = false, length = 20)
-    var descGateLaneNumber: String = "",
+    @Column(name = "desc_gate_lane_number", nullable = false)
+    var descGateLaneNumber: Int = 0,
 
     @Column(name = "desc_gate_type", nullable = false, length = 50)
     var descGateType: String = "",
@@ -173,14 +178,14 @@ class DataReceiveAnalysis(
     @Column(name = "security_mode_cd", length = 10)
     var securityModeCd: String? = null,
 
-    @Column(name = "desc_inout_time", nullable = false, length = 20)
-    var descInoutTime: String = "",
+    @Column(name = "desc_inout_time", nullable = false)
+    var descInoutTime: Long = 0,
 
-    @Column(name = "desc_user_count", nullable = false, length = 20)
-    var descUserCount: String = "",
+    @Column(name = "desc_user_count", nullable = false)
+    var descUserCount: Long = 0,
 
-    @Column(name = "desc_total_count", nullable = false, length = 20)
-    var descTotalCount: String = "",
+    @Column(name = "desc_total_count", nullable = false)
+    var descTotalCount: Long = 0,
 
     // ── 센서 장애 12채널(S00~S11) ────────────────────────────────────
     @Column(name = "desc_operation01", nullable = false, length = 20)
@@ -223,7 +228,7 @@ class DataReceiveAnalysis(
     var descMotorCount: Int = 0,
 
     @Column(name = "desc_master_in_total", nullable = false)
-    var descMasterInTotal: Int = 0,
+    var descMasterInTotal: Long = 0,
 
     // ── 게이트 동작 상태 12항목 ──────────────────────────────────────
     /** 역방향 진입(BACK RUSH). */

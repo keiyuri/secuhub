@@ -110,7 +110,7 @@ class GatePacketPersisterTest {
         val captor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
         verify(analysisRepository, timeout(5_000)).save(captor.capture())
         assertEquals("NOR", captor.value.analTp)
-        assertEquals("100", captor.value.descTotalCount)
+        assertEquals(100L, captor.value.descTotalCount)
     }
 
     @Test
@@ -479,7 +479,7 @@ class GatePacketPersisterTest {
         val allCaptor = ArgumentCaptor.forClass(DataReceiveAnalysis::class.java)
         verify(analysisRepository, timeout(5_000).times(2)).save(allCaptor.capture())
         assertNotSame(firstSaved, allCaptor.allValues[1])
-        assertEquals("101", allCaptor.allValues[1].descTotalCount)
+        assertEquals(101L, allCaptor.allValues[1].descTotalCount)
     }
 
     @Test

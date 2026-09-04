@@ -64,8 +64,13 @@ DEALLOCATE PREPARE v2_alter_stmt;
 -- BASELINE 환경인데 8개 컬럼이 전부 목표 타입은 아닌 경우(=드리프트) — 조용히 넘어가지 않고
 -- 마이그레이션을 실패시켜 DBA가 알아채게 한다. SIGNAL은 최상위 SQL에서 바로 쓸 수 없어
 -- 임시 프로시저로 감싼다.
+--
+-- CREATE PROCEDURE(단순)가 아니라 CREATE OR REPLACE PROCEDURE를 쓴다 — DDL은 암묵적 커밋이라
+-- SIGNAL로 마이그레이션이 실패해도 방금 만든 프로시저는 롤백되지 않고 DB에 남는다. DBA가
+-- 드리프트를 완전히 고치지 못한 채 재시도하면 CREATE PROCEDURE가 "already exists"로 실패해
+-- 정작 원래 알려주려던 "타입 불일치" 메시지를 가려버리는 것을 실측으로 확인해 방지한다.
 SET @v2_guard_create_sql = IF(@is_baseline_env > 0 AND @matched_columns < 8,
-    'CREATE PROCEDURE `_v2_fail_on_baseline_drift`()
+    'CREATE OR REPLACE PROCEDURE `_v2_fail_on_baseline_drift`()
        SIGNAL SQLSTATE ''45000''
        SET MESSAGE_TEXT = ''V2: tb_data_rcv_anal 8개 컬럼 중 일부가 기대 타입(TINYINT/INT/BIGINT unsigned)과 다릅니다 - BASELINE DB 드리프트로 보입니다. DBA가 information_schema.columns로 실측 후 수동 조치하세요.''',
     'DO 0'

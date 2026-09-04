@@ -24,6 +24,18 @@
 -- 적용된다.
 -- ============================================================================
 
+-- Codex 적대적 리뷰 지적(critical): 이 저장소의 V1 스키마에는 `tb_net_state.snd_raw` 컬럼이
+-- 없다 — V1은 Flyway BASELINE이라 실제로 실행되어 만들어진 적이 없고(다른 마이그레이션 파일의
+-- `snd_raw`는 전혀 다른 테이블 `tb_data_snd`의 것), 실측한 개발 DB(192.168.0.26)에만 레거시
+-- 프로시저가 채워온 이 컬럼이 실존한다(V8/V36과 같은 종류의 "baseline에는 있지만 마이그레이션
+-- 파일엔 없는" 드리프트). 이 사실을 모른 채 바로 아래 프로시저가 `snd_raw`를 참조하면, V1부터
+-- 새로 적용하는 환경(CI, 신규 로컬 DB 등)에서는 컬럼이 없어 CREATE PROCEDURE가 실패하고 —
+-- 그마저도 DROP PROCEDURE가 이미 커밋된 뒤라 기존 프로시저까지 사라진 채로 남는다. V8/V36과
+-- 동일한 방식(`ADD COLUMN IF NOT EXISTS`)으로 먼저 정합화해, 어느 환경에서 실행하든 컬럼이
+-- 확실히 있는 상태에서 프로시저를 만든다.
+ALTER TABLE tb_net_state
+    ADD COLUMN IF NOT EXISTS snd_raw LONGTEXT NULL COMMENT '레거시 usp_net_check_data가 채우는 원시 수신 패킷 16진 문자열';
+
 DROP PROCEDURE IF EXISTS usp_net_check_data;
 
 -- Codex 리뷰 지적(P1): DEFINER를 개발 DB 계정(`dba`@`%`)으로 고정하면, 그 계정이 없거나

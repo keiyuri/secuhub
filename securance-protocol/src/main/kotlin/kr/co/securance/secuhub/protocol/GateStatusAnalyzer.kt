@@ -110,8 +110,8 @@ object GateStatusAnalyzer {
         val inoutTime: Int,
         val userCount: Int,
         val totalCount: Long,
-        val motorCount: Int,
-        val masterInTotal: Int,
+        val motorCount: Long,
+        val masterInTotal: Long,
         val errType: Int,
         val analysisType: AnalysisType,
         /** 운영 센서1 4채널 장애(S00~S03). */
@@ -252,8 +252,10 @@ object GateStatusAnalyzer {
             inoutTime = u8(StatusOffset.INOUT_TIME),
             userCount = u8(StatusOffset.USER_COUNT),
             totalCount = u32(StatusOffset.TOTAL_COUNT),
-            motorCount = u32(StatusOffset.MOTOR_COUNT).toInt(),
-            masterInTotal = u32(StatusOffset.MASTER_IN_COUNT).toInt(),
+            // unsigned 32비트 카운터(최대 4,294,967,295)라 Int로 좁히면 값이 음수로 래핑될 수
+            // 있다(Codex 리뷰 P2, 2026-09-04) — u32()가 이미 Long이므로 그대로 보존한다.
+            motorCount = u32(StatusOffset.MOTOR_COUNT),
+            masterInTotal = u32(StatusOffset.MASTER_IN_COUNT),
             errType = u8(StatusOffset.ERROR_CHECK),
             analysisType = classify(packet, blockOffset),
             descOperation = descOperation,

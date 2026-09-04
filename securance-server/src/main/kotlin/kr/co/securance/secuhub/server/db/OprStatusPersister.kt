@@ -116,8 +116,8 @@ class OprStatusPersister(
             }
 
             val currTotal = analysis.totalCount
-            val currDoor = analysis.motorCount.toLong()
-            val currIn = analysis.masterInTotal.toLong()
+            val currDoor = analysis.motorCount
+            val currIn = analysis.masterInTotal
 
             dbWriteQueue.enqueue(
                 GateDbWriteTask(

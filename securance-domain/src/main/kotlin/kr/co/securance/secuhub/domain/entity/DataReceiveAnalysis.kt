@@ -224,8 +224,10 @@ class DataReceiveAnalysis(
     @Column(name = "desc_operation08", nullable = false, length = 20)
     var descOperation08: String = "",
 
+    // unsigned 32비트 카운터(최대 4,294,967,295)라 Int로는 범위를 다 담지 못한다(Codex 리뷰 P2,
+    // 2026-09-04) — Long으로 매핑한다. DB 컬럼 자체는 dev DB 실측대로 int(10) unsigned 그대로 둔다.
     @Column(name = "desc_motor_count", nullable = false)
-    var descMotorCount: Int = 0,
+    var descMotorCount: Long = 0,
 
     @Column(name = "desc_master_in_total", nullable = false)
     var descMasterInTotal: Long = 0,

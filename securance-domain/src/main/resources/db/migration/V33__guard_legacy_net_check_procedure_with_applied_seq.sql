@@ -26,8 +26,13 @@
 
 DROP PROCEDURE IF EXISTS usp_net_check_data;
 
+-- Codex 리뷰 지적(P1): DEFINER를 개발 DB 계정(`dba`@`%`)으로 고정하면, 그 계정이 없거나
+-- 마이그레이션 실행 계정에 임의 DEFINER를 지정할 SUPER/SET USER 권한이 없는 환경(운영/신규
+-- 환경 등)에서 이 CREATE가 실패한다 — 그것도 바로 위 DROP PROCEDURE가 이미 커밋된 뒤라, 실패
+-- 시 기존 프로시저까지 사라진 채로 남는다. DEFINER 절을 아예 생략해 "이 문장을 실행하는 계정"을
+-- 그대로 쓰도록 한다(Flyway가 어떤 DB 계정으로 접속하든 동작).
 DELIMITER $$
-CREATE DEFINER=`dba`@`%` PROCEDURE usp_net_check_data(
+CREATE PROCEDURE usp_net_check_data(
     IN vSvrIP VARCHAR(20),
     IN vDtlIP VARCHAR(20),
     IN vRcvData MEDIUMTEXT,

@@ -1,23 +1,31 @@
 -- ============================================================================
--- secuhub(securance) V1 초기 스키마 (2026-09-03 스쿼시 — 코드 리뷰 지적)
+-- secuhub(securance) V1 초기 스키마 (2026-09-03 1차 스쿼시 / 2026-09-04 2차 스쿼시)
 --
--- 기존 V1~V32(32개 마이그레이션)를 하나로 병합했다. 이 저장소는 아직 실제 운영 MariaDB에
--- 한 번도 적용된 적이 없다(README "검증한 것/검증하지 않은 것" 참고 — 사용자 확인 완료,
--- 2026-09-03) — 이미 적용된 환경이 있다면 이런 병합은 절대 해서는 안 된다(Flyway 체크섬이
--- 파일 내용을 검증하므로 기존 배포가 깨진다).
+-- [1차 스쿼시, 2026-09-03] 기존 V1~V32(32개 마이그레이션)를 하나로 병합했다. 병합 방법: 32개
+-- 마이그레이션 파일을 실제 MariaDB 10.11 컨테이너에 처음부터 순서대로 전부 적용한 뒤
+-- `mysqldump --no-data`로 최종 스키마를 그대로 떠서 이 파일의 CREATE TABLE 구문으로 삼았다.
+-- 이 과정에서 마이그레이션 체인 자체의 버그 2건(V23의 컬럼 참조 순서 오류, V26의
+-- ALGORITHM=INPLACE 강제)도 함께 드러나 해소됐다.
 --
--- 병합 방법: 32개 마이그레이션 파일을 실제 MariaDB 10.11 컨테이너에 처음부터 순서대로 전부
--- 적용한 뒤 `mysqldump --no-data`로 최종 스키마를 그대로 떠서 이 파일의 CREATE TABLE 구문으로
--- 삼았다(레거시 컬럼 코멘트/타입까지 실 DB 검증을 거쳤으므로 수작업 병합보다 안전하다). 이
--- 과정에서 기존 마이그레이션 체인 자체의 버그 2건을 발견했다(둘 다 이 병합으로 해소됨 — "신선한"
--- 배포에서만 드러나고 기존 운영 DB에는 원래 문제없던 경로였다):
---   1) V23이 anal_data_* 14개 컬럼에 MODIFY COLUMN을 실행하는데, 그 컬럼들은 V26에서야
---      ADD COLUMN IF NOT EXISTS로 생성된다 — 신선한 DB에 V1부터 재생하면 V23에서
---      "Unknown column 'anal_data_stx'"로 실패한다(운영 DB는 Flyway 이전부터 레거시
---      저장 프로시저가 이미 그 컬럼들을 갖고 있어 문제가 드러나지 않았을 뿐).
---   2) V26이 ALGORITHM=INPLACE를 강제하는데, tb_data_rcv_anal에는 V1의 VIRTUAL 생성 컬럼
---      (has_status_event/has_error_event)이 있어 "다른 ALTER 동작과 결합된 가상 컬럼
---      추가/삭제는 INPLACE를 지원하지 않는다"로 실패한다.
+-- [2차 스쿼시, 2026-09-04] 이후 쌓인 V33~V39(7개, 데이터 시드 V34 제외 6개 DDL)를 다시 이
+-- 파일로 병합했다 — 같은 방법(신선한 스크래치 DB에 V1 + V33/V35/V36/V37/V38/V39를 그대로
+-- 순서대로 적용한 뒤 `mysqldump --no-data --routines`로 결과를 그대로 캡처)으로 검증했다.
+-- V34(GATE_TYPE 코드 재시딩)는 별도 DDL이 없고 이 파일 하단의 시드 INSERT와 완전히
+-- 동일한 내용이라 병합 후 자연히 흡수된다.
+--
+-- 계기: 로컬 개발 DB(`localhost:28031` = `192.168.0.26:28031`, 작업일지 0106/0107 참고)에서
+-- V37이 `flyway_schema_history`상 `success`로 기록돼 있는데도 실제 컬럼 타입이 며칠 뒤 다시
+-- 레거시 TINYINT로 돌아가 있는 드리프트가 재확인됐다(작업일지 0109 참고) — 이 DB는 여러
+-- 워크트리 세션과 별도 저장소(GateControl/SR_Speed_Server, V33/V36/V38 코멘트 참고)가 동시에
+-- 접속·수정하는 공유 개발 DB라, Flyway 이력만으로는 실제 스키마 상태를 신뢰할 수 없다는 것이
+-- 반복 확인된 셈이다. V34/V36/V37/V38처럼 "실측 후 반영"하는 사후 보정 마이그레이션을 계속
+-- 쌓는 대신, 그 시점까지의 최종 상태를 다시 한번 V1로 눌러 담아 이력을 단순화했다 — 이
+-- 스쿼시 이후에는 BASELINE 이력을 가진 레거시 DB에 대한 자동 ALTER를 새로 추가하지 않는다는
+-- 원칙을 [flyway-migration-recovery.md](../../../../../docs/flyway-migration-recovery.md)에
+-- 명문화했다(레거시 DB는 수동/문서화된 조율 대상으로 남긴다).
+--
+-- **이미 한 번이라도 배포된 환경이 생긴 뒤에는 이런 병합을 다시 해서는 안 된다** — Flyway
+-- 체크섬이 파일 내용을 검증하므로 기존 배포가 깨진다.
 --
 -- 레거시 대비 변경점(원래 V1 KDoc):
 --   1) FOREIGN_KEY_CHECKS=0으로 운영되던 논리적 관계에 실제 FK를 추가했다.
@@ -62,7 +70,9 @@ CREATE TABLE `tb_data_rcv` (
   `mod_date` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
   PRIMARY KEY (`rcv_id`),
   KEY `idx_data_rcv_date_ip_lane` (`rcv_date`,`dtl_ip`,`dtl_lane_no`),
-  KEY `idx_data_rcv_mod_date` (`mod_date`)
+  KEY `idx_data_rcv_mod_date` (`mod_date`),
+  KEY `IDX_DATA_RCV_01` (`rcv_date`,`dtl_ip`,`dtl_lane_no`),
+  KEY `IDX_DATA_RCV_02` (`mod_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='원시 수신 패킷';
 CREATE TABLE `tb_data_rcv_ack` (
   `ack_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -93,39 +103,9 @@ CREATE TABLE `tb_data_rcv_anal` (
   `loc_id` bigint(20) unsigned DEFAULT NULL,
   `grp_id` bigint(20) unsigned DEFAULT NULL,
   `obj_cd` varchar(10) NOT NULL DEFAULT '' COMMENT '패킷 오브젝트 코드(4D/4E/4C 등)',
-  `anal_data_stx` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_packet_len` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_protocol_ver` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_frame_option` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_address` varchar(40) NOT NULL DEFAULT '',
-  `anal_data_command` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_subcommand` varchar(10) NOT NULL DEFAULT '',
   `anal_data_object_code` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_info_length` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_count` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_length` varchar(10) NOT NULL DEFAULT '',
-  `anal_data_gate_name` varchar(80) NOT NULL DEFAULT '',
-  `anal_data_ip` varchar(20) NOT NULL DEFAULT '',
-  `anal_data_mac` varchar(20) NOT NULL DEFAULT '',
-  `anal_data_gate_lane_number` char(2) NOT NULL DEFAULT '',
-  `anal_data_gate_lane_count` char(2) NOT NULL DEFAULT '',
-  `anal_data_gate_type` char(2) NOT NULL DEFAULT '',
-  `anal_data_user_mode` char(2) NOT NULL DEFAULT '',
-  `anal_data_security_mode` char(2) NOT NULL DEFAULT '',
-  `anal_data_inout_time` char(2) NOT NULL DEFAULT '',
-  `anal_data_user_count` char(2) NOT NULL DEFAULT '',
-  `anal_data_total_count` char(8) NOT NULL DEFAULT '',
-  `anal_data_operation_sensor_status1` char(8) NOT NULL DEFAULT '',
-  `anal_data_safety_sensor_status` char(8) NOT NULL DEFAULT '',
-  `anal_data_operation_sensor_status2` char(8) NOT NULL DEFAULT '',
-  `anal_data_optical_sensor_status` varchar(50) NOT NULL DEFAULT '',
-  `anal_data_output_status` varchar(40) NOT NULL DEFAULT '',
   `anal_data_motor_operation_count` varchar(20) NOT NULL DEFAULT '',
   `anal_data_master_in_total_count` varchar(20) NOT NULL DEFAULT '',
-  `anal_data_gate_operation_status` varchar(50) NOT NULL DEFAULT '',
-  `anal_data_check_sum` char(4) NOT NULL DEFAULT '',
-  `anal_data_packet_checksum` char(2) NOT NULL DEFAULT '',
-  `anal_data_etx` char(2) NOT NULL DEFAULT '',
   `rcv_raw` longtext DEFAULT NULL COMMENT '원본 수신 패킷 16진 문자열',
   `anal_header` varchar(100) DEFAULT NULL,
   `anal_data` longtext DEFAULT NULL,
@@ -137,7 +117,9 @@ CREATE TABLE `tb_data_rcv_anal` (
   `desc_gate_lane_number` varchar(20) NOT NULL DEFAULT '',
   `desc_gate_type` varchar(50) NOT NULL DEFAULT '',
   `desc_user_mode` varchar(30) NOT NULL DEFAULT '',
+  `user_mode_cd` varchar(10) DEFAULT NULL,
   `desc_security_mode` varchar(20) NOT NULL DEFAULT '',
+  `security_mode_cd` varchar(10) DEFAULT NULL,
   `desc_inout_time` varchar(20) NOT NULL DEFAULT '',
   `desc_user_count` varchar(20) NOT NULL DEFAULT '',
   `desc_total_count` varchar(20) NOT NULL DEFAULT '',
@@ -181,7 +163,14 @@ CREATE TABLE `tb_data_rcv_anal` (
   KEY `idx_anal_err3_scan` (`err_type`,`has_error_event`,`anal_id`),
   KEY `idx_anal_tp_date` (`anal_tp`,`anal_date`),
   KEY `idx_anal_err3_tp_date` (`err_type`,`has_error_event`,`resolve_yn`,`anal_tp`,`anal_date`),
-  KEY `IDX_ANAL_LANE_LATEST` (`dtl_ip`,`dtl_lane_no`,`anal_id`)
+  KEY `IDX_ANAL_LANE_LATEST` (`dtl_ip`,`dtl_lane_no`,`anal_id`),
+  KEY `IDX_DATA_ANAL_ERR` (`dtl_ip`,`dtl_lane_no`,`anal_date`,`err_type`,`resolve_yn`),
+  KEY `IDX_DATA_ANAL_DATE` (`anal_date`,`dtl_ip`,`dtl_lane_no`),
+  KEY `IDX_QUERY_OPTIMIZED` (`dtl_ip`,`dtl_lane_no`,`anal_date`,`anal_tp`,`err_type`),
+  KEY `IDX_ERROR_RESOLVE` (`err_type`,`resolve_yn`,`anal_date`),
+  KEY `IDX_TYPE_CODE` (`dtl_type_cd`),
+  KEY `IDX_USER_MODE` (`user_mode_cd`),
+  KEY `IDX_SECURITY_MODE` (`security_mode_cd`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='수신 데이터 분석(통합, 계획서 4.2절)';
 CREATE TABLE `tb_data_rcv_fail` (
   `fail_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -248,7 +237,7 @@ CREATE TABLE `tb_gate_grp` (
   `loc_id` bigint(20) unsigned NOT NULL,
   `grp_nm` varchar(200) NOT NULL COMMENT '게이트 그룹명',
   `lane_cnt` int(10) unsigned NOT NULL DEFAULT 1,
-  `dtl_type` int(11) NOT NULL,
+  `dtl_type` int(11) DEFAULT NULL,
   `link_type` int(11) NOT NULL DEFAULT 1,
   `use_yn` char(1) NOT NULL DEFAULT 'Y',
   `grp_x` int(11) DEFAULT NULL,
@@ -319,8 +308,11 @@ CREATE TABLE `tb_net_state` (
   `server_cd` varchar(20) DEFAULT NULL,
   `reg_date` timestamp NOT NULL DEFAULT current_timestamp(),
   `mod_date` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `snd_raw` longtext DEFAULT NULL COMMENT '레거시 usp_net_check_data가 채우는 원시 수신 패킷 16진 문자열',
   PRIMARY KEY (`dtl_ip`,`dtl_lane_no`,`loc_id`,`grp_id`),
-  KEY `idx_net_state_loc_grp_state` (`loc_id`,`grp_id`,`dtl_state`)
+  KEY `idx_net_state_loc_grp_state` (`loc_id`,`grp_id`,`dtl_state`),
+  KEY `idx_net_state_grp` (`grp_id`),
+  KEY `idx_net_state_state` (`dtl_state`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='게이트 연결 상태';
 CREATE TABLE `tb_opr_status` (
   `opr_date` varchar(20) NOT NULL COMMENT 'yyyyMMddHHmm',
@@ -355,7 +347,11 @@ CREATE TABLE `tb_opr_status` (
   PRIMARY KEY (`opr_date`,`opr_seq`,`dtl_ip`,`dtl_lane_no`),
   KEY `idx_opr_status_date_loc_grp` (`opr_date`,`loc_id`,`grp_id`),
   KEY `idx_opr_status_loc_grp_date` (`loc_id`,`grp_id`,`opr_date`),
-  KEY `idx_opr_status_dtl_ip_lane_date` (`dtl_ip`,`dtl_lane_no`,`opr_date`,`opr_seq`)
+  KEY `idx_opr_status_dtl_ip_lane_date` (`dtl_ip`,`dtl_lane_no`,`opr_date`,`opr_seq`),
+  KEY `IDX_OPR_DATE_LOC` (`opr_date`,`loc_id`,`grp_id`),
+  KEY `IDX_OPR_DATE_DTL` (`opr_date`,`dtl_ip`,`dtl_lane_no`),
+  KEY `IDX_OPR_STATUS_DAILY` (`use_yn`,`opr_date`,`loc_id`,`grp_id`,`dtl_ip`),
+  KEY `IDX_OPR_DTL_DATE` (`dtl_id`,`dtl_ip`,`dtl_lane_no`,`use_yn`,`opr_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='분단위 운영 카운터';
 CREATE TABLE `tb_opr_status_outbox` (
   `outbox_id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -422,12 +418,77 @@ CREATE TABLE `tb_users` (
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='시스템 사용자';
 
+-- 레거시 저장 프로시저(usp_net_check_data): GateControl 등 레거시 호출자가 여전히 쓰는
+-- 시그니처를 유지한 채, tb_net_state 쓰기를 신규 서버(GateConnectionRegistryImpl)와 동일한
+-- tb_net_state_seq 기반 조건부 UPSERT로 통일한다(작업일지 0107, V38 참고) — 두 쓰기 경로가
+-- 같은 전역 시퀀스를 공유해야 어느 쪽이 나중에 실행됐든 실제로 더 최신인 쪽이 항상 이긴다.
+-- DEFINER 절은 의도적으로 생략한다 — 이 문장을 실행하는 계정을 그대로 쓰도록 해, 마이그레이션
+-- 실행 계정에 임의 DEFINER를 지정할 SUPER/SET USER 권한이 없는 환경에서도 동작한다.
+DROP PROCEDURE IF EXISTS `usp_net_check_data`;
+DELIMITER $$
+CREATE PROCEDURE `usp_net_check_data`(
+    IN vSvrIP VARCHAR(20),
+    IN vDtlIP VARCHAR(20),
+    IN vRcvData MEDIUMTEXT,
+    IN vState VARCHAR(1)
+)
+    SQL SECURITY INVOKER
+BEGIN
+    DECLARE vDtlNo   INT UNSIGNED DEFAULT 1;
+    DECLARE vLaneNo  TINYINT UNSIGNED DEFAULT 1;
+    DECLARE vDtlId   BIGINT UNSIGNED DEFAULT 0;
+    DECLARE vLocId   BIGINT UNSIGNED DEFAULT 0;
+    DECLARE vGrpId   BIGINT UNSIGNED DEFAULT 0;
+    DECLARE vCheckTime VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+
+    DECLARE vSeq     BIGINT UNSIGNED;
+    DECLARE done     INT DEFAULT 0;
+
+    DECLARE cur CURSOR FOR
+        SELECT a.dtl_no, a.dtl_lane_no, a.dtl_id, a.loc_id, a.grp_id
+          FROM tb_gate_dtl a
+         INNER JOIN tb_gate_loc b ON a.loc_id = b.loc_id AND b.use_yn = 'Y'
+         INNER JOIN tb_gate_grp c ON a.loc_id = c.loc_id AND a.grp_id = c.grp_id AND c.use_yn = 'Y'
+         WHERE a.use_yn = 'Y'
+           AND a.dtl_ip = vDtlIP;
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+
+    SET vCheckTime = DATE_FORMAT(NOW(), '%Y%m%d%H%i%s');
+
+    START TRANSACTION;
+
+    OPEN cur;
+    lane_loop: LOOP
+        FETCH cur INTO vDtlNo, vLaneNo, vDtlId, vLocId, vGrpId;
+        IF done THEN LEAVE lane_loop; END IF;
+
+        
+        SET vSeq = NEXT VALUE FOR tb_net_state_seq;
+
+        INSERT INTO tb_net_state
+            (dtl_ip, dtl_no, dtl_lane_no, dtl_state, dtl_id, loc_id, grp_id,
+             snd_raw, check_time, server_ip, applied_seq, reg_date, mod_date)
+        VALUES
+            (vDtlIP, vDtlNo, vLaneNo, vState, vDtlId, vLocId, vGrpId,
+             vRcvData, vCheckTime, vSvrIP, vSeq, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+
+            dtl_state   = IF(applied_seq <= vSeq, vState, dtl_state),
+            snd_raw     = IF(applied_seq <= vSeq, vRcvData, snd_raw),
+            server_ip   = IF(applied_seq <= vSeq, vSvrIP, server_ip),
+            check_time  = IF(applied_seq <= vSeq, vCheckTime, check_time),
+            mod_date    = IF(applied_seq <= vSeq, NOW(), mod_date),
+            applied_seq = IF(applied_seq <= vSeq, vSeq, applied_seq);
+    END LOOP;
+    CLOSE cur;
+
+    COMMIT;
+END$$
+DELIMITER ;
+
+
 -- ── 시드 데이터: 게이트 타입 코드 (계획서 4.3절 "게이트 타입 — 확장 가능한 코드값") ─
--- [P1] 스쿼시 검증용 mysqldump --no-data는 정의상 DDL만 캡처하므로, 원래 V1이 갖고 있던 이
--- INSERT를 놓쳤었다(2026-09-03 Codex 적대적 리뷰 재지적 — 32개 마이그레이션 전체를 확인한 결과
--- 시드/참조 데이터 INSERT는 원래 V1의 이 4행이 유일했고, V18/V21의 UPDATE는 전부 기존 운영
--- 데이터를 새 컬럼 제약에 맞추는 백필이라 빈 DB에는 애초에 적용 대상이 없다). 새로 추가한
--- 이 INSERT 블록만 별도로 재검증(빈 MariaDB에 V1 적용 후 4행 존재 확인)했다.
 INSERT INTO tb_code (code_grp, code_cd, code_nm, code_val, code_desc, disp_order, use_yn) VALUES
     ('GATE_TYPE', '1', 'Speed Gate', 'SR-1400', 'Speed/Flap Gate 공유 프로토콜', 1, 1),
     ('GATE_TYPE', '2', 'Flap Gate', 'FLAP', 'Speed/Flap Gate 공유 프로토콜', 2, 1),

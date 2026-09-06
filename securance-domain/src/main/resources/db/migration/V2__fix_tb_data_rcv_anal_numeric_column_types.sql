@@ -20,6 +20,12 @@
 -- (no-op), 목표 타입과 다르면(=드리프트) 자동으로 고치는 대신 마이그레이션을 명시적으로
 -- 실패시켜 DBA가 실측 후 수동 조치하도록 한다 — "자동 ALTER 금지"이지 "불일치를 조용히
 -- 통과시킨다"는 뜻이 아니다.
+--
+-- [2026-09-07 수정] desc_user_count/desc_total_count의 목표 타입이 `bigint(20)`(signed)로
+-- 잘못 기록돼 있었다 — 로컬 DB(localhost:28031)와 개발 DB(192.168.0.26:28031) 양쪽 모두
+-- 실측 결과 이 두 컬럼은 `bigint(20) unsigned`였다(작업일지 0113 참고). 즉 이 DB들은
+-- 드리프트가 아니라 애초 이 마이그레이션의 목표 타입 자체가 틀렸던 것 — 두 컬럼의 매칭 조건과
+-- ALTER 문을 unsigned로 수정한다.
 -- ============================================================================
 
 SET @is_baseline_env = (
@@ -37,8 +43,8 @@ SET @matched_columns = (
         (column_name = 'desc_gate_lane_count'  AND column_type = 'tinyint(3) unsigned') OR
         (column_name = 'desc_gate_lane_number' AND column_type = 'tinyint(3) unsigned') OR
         (column_name = 'desc_inout_time'       AND column_type = 'int(10) unsigned') OR
-        (column_name = 'desc_user_count'       AND column_type = 'bigint(20)') OR
-        (column_name = 'desc_total_count'      AND column_type = 'bigint(20)') OR
+        (column_name = 'desc_user_count'       AND column_type = 'bigint(20) unsigned') OR
+        (column_name = 'desc_total_count'      AND column_type = 'bigint(20) unsigned') OR
         (column_name = 'desc_master_in_total'  AND column_type = 'bigint(20)') OR
         (column_name = 'desc_motor_count'      AND column_type = 'int(10) unsigned')
       )
@@ -51,8 +57,8 @@ SET @v2_alter_sql = IF(@is_baseline_env = 0,
        MODIFY COLUMN `desc_gate_lane_count` tinyint(3) unsigned NOT NULL DEFAULT 0,
        MODIFY COLUMN `desc_gate_lane_number` tinyint(3) unsigned NOT NULL DEFAULT 0,
        MODIFY COLUMN `desc_inout_time` int(10) unsigned NOT NULL DEFAULT 0,
-       MODIFY COLUMN `desc_user_count` bigint(20) NOT NULL DEFAULT 0,
-       MODIFY COLUMN `desc_total_count` bigint(20) NOT NULL DEFAULT 0,
+       MODIFY COLUMN `desc_user_count` bigint(20) unsigned NOT NULL DEFAULT 0,
+       MODIFY COLUMN `desc_total_count` bigint(20) unsigned NOT NULL DEFAULT 0,
        MODIFY COLUMN `desc_master_in_total` bigint(20) NOT NULL DEFAULT 0,
        MODIFY COLUMN `desc_motor_count` int(10) unsigned NOT NULL DEFAULT 0',
     'DO 0'

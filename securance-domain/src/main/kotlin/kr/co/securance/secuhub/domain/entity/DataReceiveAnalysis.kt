@@ -7,6 +7,8 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Lob
 import jakarta.persistence.Table
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.LocalDateTime
 
 /**
@@ -141,6 +143,14 @@ class DataReceiveAnalysis(
     // desc_total_count/desc_master_in_total/desc_motor_count를 VARCHAR/INT에서
     // TINYINT/INT/BIGINT(unsigned 계열)로 정합화(hibernate.ddl-auto=validate가 매핑 불일치 시
     // 기동을 막으므로 엔티티도 함께 수정).
+    //
+    // 2026-09-07: 위 정합화가 타입 "종류"만 맞추고 폭은 안 맞았던 결함 발견(작업일지 0113) —
+    // Kotlin Int/Long은 Hibernate 기본 매핑상 각각 SQL INTEGER/BIGINT로 스키마 검증되는데, 실제
+    // 컬럼은 그보다 좁은 TINYINT/INT라 hibernate.ddl-auto=validate가 계속 기동을 막았다. DB
+    // 컬럼(BASELINE 자동 ALTER 금지 원칙 대상)은 그대로 두고, @JdbcTypeCode로 검증/바인딩에
+    // 쓰일 JDBC 타입만 실제 컬럼과 일치시킨다 — Java 타입(Int/Long)은 유지되므로 값 범위 계산
+    // 로직(예: unsigned 오버플로 방지)에는 영향 없다.
+    @JdbcTypeCode(SqlTypes.TINYINT)
     @Column(name = "desc_data_info_length", nullable = false)
     var descDataInfoLength: Int = 0,
 
@@ -150,9 +160,11 @@ class DataReceiveAnalysis(
     @Column(name = "desc_gate_ip", nullable = false, length = 20)
     var descGateIp: String = "",
 
+    @JdbcTypeCode(SqlTypes.TINYINT)
     @Column(name = "desc_gate_lane_count", nullable = false)
     var descGateLaneCount: Int = 0,
 
+    @JdbcTypeCode(SqlTypes.TINYINT)
     @Column(name = "desc_gate_lane_number", nullable = false)
     var descGateLaneNumber: Int = 0,
 
@@ -178,6 +190,7 @@ class DataReceiveAnalysis(
     @Column(name = "security_mode_cd", length = 10)
     var securityModeCd: String? = null,
 
+    @JdbcTypeCode(SqlTypes.INTEGER)
     @Column(name = "desc_inout_time", nullable = false)
     var descInoutTime: Long = 0,
 
@@ -226,6 +239,7 @@ class DataReceiveAnalysis(
 
     // unsigned 32비트 카운터(최대 4,294,967,295)라 Int로는 범위를 다 담지 못한다(Codex 리뷰 P2,
     // 2026-09-04) — Long으로 매핑한다. DB 컬럼 자체는 dev DB 실측대로 int(10) unsigned 그대로 둔다.
+    @JdbcTypeCode(SqlTypes.INTEGER)
     @Column(name = "desc_motor_count", nullable = false)
     var descMotorCount: Long = 0,
 

@@ -85,7 +85,14 @@ CREATE TABLE tb_data_rcv_anal (
     desc_operation06        VARCHAR(20) NOT NULL DEFAULT '',
     desc_operation07        VARCHAR(20) NOT NULL DEFAULT '',
     desc_operation08        VARCHAR(20) NOT NULL DEFAULT '',
-    desc_motor_count        INT         NOT NULL DEFAULT 0,
+    -- 실제 컬럼은 int(10) unsigned(최대 4,294,967,295)이지만, 이 @DataJpaTest가 쓰는 기본(비 MySQL
+    -- 호환 모드) H2는 "INT UNSIGNED" 문법 자체를 파싱하지 못한다(SecuranceApplicationTests처럼
+    -- MODE=MySQL URL을 쓰는 컨텍스트에서만 지원됨 — @DataJpaTest는 커스텀 URL을 무시하고 임베디드
+    -- DB로 치환한다). Int.MAX_VALUE(약 21억)를 넘는 값의 오버플로 회귀 테스트
+    -- (DataReceiveAnalysisRepositoryMotorCountTest 참고)가 의미를 가지려면 컬럼이 그 값을 저장할
+    -- 수는 있어야 하므로, 폭이 더 넓은 BIGINT로 대체한다(운영 스키마와 100% 동일하지 않음 — 이
+    -- 파일 상단 주석대로 원래도 최소 재현일 뿐이다).
+    desc_motor_count        BIGINT      NOT NULL DEFAULT 0,
     desc_master_in_total    BIGINT      NOT NULL DEFAULT 0,
     desc_gate_status01      VARCHAR(50) NOT NULL DEFAULT '',
     desc_gate_status02      VARCHAR(50) NOT NULL DEFAULT '',

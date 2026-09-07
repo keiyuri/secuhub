@@ -60,9 +60,16 @@ class GateDetail(
      * 적재하는 원본 값이다(2026-09-08 운영 DB 실측 — [kr.co.securance.secuhub.server.db.OprStatusPersister]가
      * 이 컬럼을 조회할 방법이 없어 항상 0을 하드코딩했었다). 레거시 `usp_rcv_data_raw`는
      * `SELECT dtl_no FROM tb_gate_dtl ...`로 이 값을 그대로 조회해 넘긴다.
+     *
+     * **nullable로 두는 이유(Codex 리뷰 지적, 2026-09-08)**: 이 저장소의 `V1__init_schema.sql`은
+     * `dtl_no`를 `DEFAULT NULL`로 정의한다(운영 DB 실측은 `NOT NULL DEFAULT 1`이지만, V3/V4가
+     * 이미 확인했듯 BASELINE 환경의 실제 스키마는 V1 문서와 다를 수 있다 — 신규 DB 기준으로는
+     * NULL이 가능하다고 봐야 한다). non-null `Int`로 매핑하면 NULL 행을 읽을 때 Hibernate가
+     * 프로젝션 생성 자체에 실패해 그 게이트의 커넥션 초기화가 통째로 막힌다 — `Int?`로 두고
+     * 소비 측([kr.co.securance.secuhub.server.db.OprStatusPersister])에서 안전한 기본값을 적용한다.
      */
     @Column(name = "dtl_no")
-    var dtlNo: Int = 1,
+    var dtlNo: Int? = null,
 
     @Convert(converter = YnConverter::class)
     @Column(name = "use_yn", nullable = false)

@@ -294,7 +294,9 @@ CREATE TABLE tb_gate_dtl (
     connect_type    INT NOT NULL DEFAULT 1,
     dtl_nm          VARCHAR(200) NULL,
     -- [GateDetail.dtlNo] 매핑 대상(2026-09-08 tb_opr_status.dtl_no 데이터 누락 점검 — 운영 DB 실측).
-    dtl_no          INT NOT NULL DEFAULT 1,
+    -- 운영 실측은 NOT NULL DEFAULT 1이지만 이 저장소 V1__init_schema.sql은 DEFAULT NULL로 문서화돼
+    -- 있다(Codex 리뷰 지적) — 신규 DB 기준(NULL 허용)으로 맞춘다.
+    dtl_no          INT NULL,
     use_yn          VARCHAR(1) NOT NULL DEFAULT 'Y',
     analysis_yn     VARCHAR(1) NOT NULL DEFAULT 'Y',
     CONSTRAINT uq_gate_dtl_ip_lane UNIQUE (dtl_ip, dtl_lane_no)

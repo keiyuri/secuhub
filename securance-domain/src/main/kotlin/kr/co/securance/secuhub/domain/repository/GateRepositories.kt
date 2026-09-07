@@ -29,8 +29,10 @@ data class GateLaneInfo(
      * `tb_gate_dtl.dtl_no`("Serial 연결 번호") — [kr.co.securance.secuhub.server.db.OprStatusPersister]가
      * `tb_opr_status.dtl_no`에 그대로 싣는다(2026-09-08 운영 DB 실측 — 이 필드가 없어 항상 하드코딩된
      * 0을 썼는데, 레거시 `usp_rcv_data_raw`는 실제로 `tb_gate_dtl.dtl_no`를 조회해서 넘겼다).
+     * [GateDetail.dtlNo]와 동일한 이유(Codex 리뷰 지적)로 `Int?`로 둔다 — DB 컬럼이 NULL을 허용해
+     * NULL 행을 조회하면 이 프로젝션 생성 자체가 실패할 수 있다.
      */
-    val dtlNo: Int = 0,
+    val dtlNo: Int? = null,
 )
 
 interface GateLocationRepository : JpaRepository<GateLocation, Long> {

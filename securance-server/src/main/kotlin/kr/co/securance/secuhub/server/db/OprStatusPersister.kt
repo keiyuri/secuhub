@@ -131,6 +131,10 @@ class OprStatusPersister(
             val currTotal = analysis.totalCount
             val currDoor = analysis.motorCount
             val currIn = analysis.masterInTotal
+            // Codex 리뷰 지적(2026-09-08): tb_gate_dtl.dtl_no는 NULL을 허용하는 컬럼이라
+            // GateLaneInfo.dtlNo도 Int?다 — 레거시 SP의 선언 기본값(`DECLARE vDtlNo INT UNSIGNED
+            // DEFAULT 1`)과 동일하게 NULL이면 1로 대체한다.
+            val dtlNo = info.dtlNo ?: DEFAULT_DTL_NO
 
             dbWriteQueue.enqueue(
                 GateDbWriteTask(
@@ -138,14 +142,14 @@ class OprStatusPersister(
                     operationName = "UpsertOprStatus(${state.dtlIp},$laneNo)",
                     onDropOrFinalFailure = {
                         saveOutboxFallback(
-                            state.dtlIp, laneNo, dtlId, info.dtlType, info.dtlNo, info.locId, info.grpId,
+                            state.dtlIp, laneNo, dtlId, info.dtlType, dtlNo, info.locId, info.grpId,
                             dateKey, sinceDateKey, currTotal, currDoor, currIn,
                             analysis.gateType, analysis.userMode, analysis.securityMode, analysis.inoutTime,
                         )
                     },
                 ) {
                     upsert(
-                        state.dtlIp, laneNo, dtlId, info.dtlType, info.dtlNo, info.locId, info.grpId, dateKey, sinceDateKey,
+                        state.dtlIp, laneNo, dtlId, info.dtlType, dtlNo, info.locId, info.grpId, dateKey, sinceDateKey,
                         currTotal, currDoor, currIn, analysis.gateType, analysis.userMode, analysis.securityMode, analysis.inoutTime,
                     )
                     Unit
@@ -365,5 +369,11 @@ class OprStatusPersister(
     private companion object {
         /** `tb_opr_status.opr_date` — 분 단위 버킷 키(레거시 SP `DATE_FORMAT(NOW(),'%Y%m%d%H%i')`). */
         val MINUTE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmm")
+
+        /**
+         * `tb_gate_dtl.dtl_no`가 NULL인 행의 대체값 — 레거시 SP `usp_process_status`의 선언 기본값
+         * (`DECLARE vDtlNo INT UNSIGNED DEFAULT 1`)과 동일하다(Codex 리뷰 지적, 2026-09-08).
+         */
+        const val DEFAULT_DTL_NO = 1
     }
 }

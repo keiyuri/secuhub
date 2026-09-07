@@ -29,8 +29,8 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
 
     /**
      * 코드 리뷰 지적 R-8(2026-08-20) 대응 — `applied_seq`가 [seq] 이하인 행에만(=더 최신 쓰기가
-     * 아직 적용되지 않았을 때만) [dtlState]/[checkTime]/[serverIp]/[applied_seq]를 반영하는 조건부
-     * UPSERT.
+     * 아직 적용되지 않았을 때만) [dtlState]/[dtlType]/[dtlId]/[checkTime]/[serverIp]/[serverCd]/
+     * [sndRaw]/[applied_seq]를 반영하는 조건부 UPSERT.
      *
      * **컬럼 누락 수정(2026-08-26 dev DB 실측 검증)**: [NetState.serverIp]("이 상태를 보고한 백엔드
      * 인스턴스 IP")는 엔티티에 매핑돼 있었지만 이 메서드가 이 컬럼을 INSERT/UPDATE 절 어디에도
@@ -39,6 +39,17 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
      * `applied_seq`가 최근에 갱신된 행조차 `server_ip`가 실제 접속 서버와 무관하게 고정돼 있었음).
      * 다중 인스턴스 배포에서 "어느 인스턴스가 이 레인의 연결 상태를 마지막으로 관측했는지" 추적할
      * 유일한 컬럼이므로, `dtl_state`/`check_time`과 동일한 `applied_seq` 가드로 함께 갱신한다.
+     *
+     * **컬럼 누락 수정 2(2026-09-07, `tb_net_state` 재점검 요청)**: 이 메서드가 `dtl_type`/`dtl_id`도
+     * INSERT/UPDATE 절에 전혀 담지 않아, 신규 서버 경로가 최초로 만든 행은 두 컬럼이 영구히 NULL로
+     * 남아 있었다 — 호출부([kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl])는
+     * 이미 `GateLaneInfo`/`GateDetail`에서 값을 캐시해 들고 있었으므로, 그저 이 쿼리에 실어 보내지
+     * 않은 것이 원인이었다. `server_cd`(이 값을 기록한 인스턴스가 SERVER/CLIENT 중 어느 연결
+     * 방향으로 동작 중이었는지, [kr.co.securance.secuhub.server.config.GatewayMode].name)와
+     * `snd_raw`(그 시점의 원시 수신 패킷 16진 문자열, 커넥션 종료로 인한 오프라인 전이처럼 관련
+     * 패킷이 없으면 null)도 이번에 함께 채운다 — 레거시 `usp_net_check_data`가 이미 `snd_raw`는
+     * 채우고 있었으므로(V1), 두 쓰기 경로의 컬럼 커버리지를 맞췄다(V3 마이그레이션에서 레거시
+     * 프로시저에도 `dtl_type`/`server_cd`를 동일하게 추가).
      *
      * [kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl]이 예전에 쓰던
      * 인메모리 시퀀스 맵 + 락([ReentrantLock])을 이 한 문장으로 대체한다 — DB가 `INSERT ...
@@ -65,12 +76,20 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
     @Transactional
     @Query(
         value = """
-        INSERT INTO tb_net_state (dtl_ip, dtl_lane_no, loc_id, grp_id, dtl_state, check_time, applied_seq, server_ip)
-        VALUES (:dtlIp, :dtlLaneNo, :locId, :grpId, :dtlState, :checkTime, :seq, :serverIp)
+        INSERT INTO tb_net_state
+            (dtl_ip, dtl_lane_no, loc_id, grp_id, dtl_state, dtl_type, dtl_id, check_time, applied_seq,
+             server_ip, server_cd, snd_raw)
+        VALUES
+            (:dtlIp, :dtlLaneNo, :locId, :grpId, :dtlState, :dtlType, :dtlId, :checkTime, :seq,
+             :serverIp, :serverCd, :sndRaw)
         ON DUPLICATE KEY UPDATE
             dtl_state = IF(applied_seq <= VALUES(applied_seq), VALUES(dtl_state), dtl_state),
+            dtl_type = IF(applied_seq <= VALUES(applied_seq), VALUES(dtl_type), dtl_type),
+            dtl_id = IF(applied_seq <= VALUES(applied_seq), VALUES(dtl_id), dtl_id),
             check_time = IF(applied_seq <= VALUES(applied_seq), VALUES(check_time), check_time),
             server_ip = IF(applied_seq <= VALUES(applied_seq), VALUES(server_ip), server_ip),
+            server_cd = IF(applied_seq <= VALUES(applied_seq), VALUES(server_cd), server_cd),
+            snd_raw = IF(applied_seq <= VALUES(applied_seq), VALUES(snd_raw), snd_raw),
             applied_seq = IF(applied_seq <= VALUES(applied_seq), VALUES(applied_seq), applied_seq)
         """,
         nativeQuery = true,
@@ -81,9 +100,13 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
         @Param("locId") locId: Long,
         @Param("grpId") grpId: Long,
         @Param("dtlState") dtlState: String,
+        @Param("dtlType") dtlType: Int?,
+        @Param("dtlId") dtlId: Long?,
         @Param("checkTime") checkTime: String,
         @Param("seq") seq: Long,
         @Param("serverIp") serverIp: String,
+        @Param("serverCd") serverCd: String,
+        @Param("sndRaw") sndRaw: String?,
     )
 
     /**

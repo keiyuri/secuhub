@@ -145,10 +145,13 @@ class DefaultGatePacketHandler(
                 // state를 이미 들고 있으므로 캐시 조회 오버로드로 넘긴다 — dtlIp만 넘기면 매 레인마다
                 // tb_gate_dtl을 재조회하는 오버로드로 빠져, 캐시를 만든 취지(레거시 M-8 N+1 제거)가
                 // 무색해진다(2026-08-13 Opus 전체 리뷰 지적).
-                newlyOnlineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = true) }
+                // 이 전이를 유발한 원본 상태 패킷(packet.raw)을 tb_net_state.snd_raw에 함께 남긴다
+                // (2026-09-07 사용자 요청 — 레거시 usp_net_check_data는 항상 채웠지만 신규 서버
+                // 경로는 원시 바이트를 넘기지 않아 이 컬럼이 항상 NULL이었다).
+                newlyOnlineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = true, rawPacket = packet.raw) }
             }
             if (newlyOfflineLanes.isNotEmpty()) {
-                newlyOfflineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = false) }
+                newlyOfflineLanes.forEach { lane -> registry.enqueueNetStateUpdate(state, lane, online = false, rawPacket = packet.raw) }
             }
             if (newlyOnlineLanes.isNotEmpty() || newlyOfflineLanes.isNotEmpty()) {
                 state.onlineLanesRecorded = currentLaneSet

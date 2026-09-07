@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.reactive.awaitFirstOrNull
 import kotlinx.coroutines.withContext
 import kr.co.securance.secuhub.common.exception.GateTaskRejectedException
+import kr.co.securance.secuhub.common.util.HexCodec
 import kr.co.securance.secuhub.domain.entity.NetStateId
 import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.NetStateRepository
@@ -230,13 +231,13 @@ class GateConnectionRegistryImpl(
      * 등록된 실제 loc_id/grp_id로 채워야 한다(loc_id=0/grp_id=0으로 고정하면 위치/그룹별로
      * `tb_net_state`를 조회·집계하는 화면이 항상 빈 결과를 받는다).
      */
-    suspend fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean) {
+    suspend fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean, rawPacket: ByteArray? = null) {
         // 실행 시점이 아니라 "이 이벤트가 실제로 발생한 순서"를 반영해야 하므로 큐에 넣기 전,
         // 즉 호출 시점에 시퀀스를 발급한다(GateDbWriteQueue의 타임아웃/버려진 실행 재시도로 인한
         // 순서 역전 방지 — 클래스 상단 주석 참고). DB가 발급하는 전역 시퀀스라 블로킹 JDBC 호출을
         // Dispatchers.IO로 옮긴다(GateTcpServer/GateTcpClient의 다른 DB 조회 호출과 동일한 패턴).
         val seq = withContext(Dispatchers.IO) { netStateRepository.nextSeq() }
-        enqueueGuardedNetStateWrite(dtlIp, dtlLaneNo, online, seq) {
+        enqueueGuardedNetStateWrite(dtlIp, dtlLaneNo, online, seq, rawPacket) {
             val gateDetail = gateDetailRepository.findByDtlIpAndDtlLaneNo(dtlIp, dtlLaneNo)
             if (gateDetail == null) {
                 // tb_gate_dtl에 없는 레인 — 접속은 됐지만 아직(혹은 더 이상) 등록되지 않은
@@ -248,11 +249,15 @@ class GateConnectionRegistryImpl(
                 )
                 null
             } else {
-                NetStateId(
-                    dtlIp = dtlIp,
-                    dtlLaneNo = dtlLaneNo,
-                    locId = requireNotNull(gateDetail.location.locId),
-                    grpId = requireNotNull(gateDetail.group.grpId),
+                NetStateWriteTarget(
+                    id = NetStateId(
+                        dtlIp = dtlIp,
+                        dtlLaneNo = dtlLaneNo,
+                        locId = requireNotNull(gateDetail.location.locId),
+                        grpId = requireNotNull(gateDetail.group.grpId),
+                    ),
+                    dtlType = gateDetail.dtlType,
+                    dtlId = gateDetail.dtlId,
                 )
             }
         }
@@ -265,16 +270,22 @@ class GateConnectionRegistryImpl(
      * (레거시 M-8: 패킷마다 `tb_gate_dtl`을 재조회하던 N+1 제거). 캐시에 해당 레인이 없고 대표
      * 레인 정보조차 없을 때만 DB 조회 경로([enqueueNetStateUpdate])로 위임한다.
      */
-    suspend fun enqueueNetStateUpdate(state: GateConnectionState, dtlLaneNo: Int, online: Boolean) {
+    suspend fun enqueueNetStateUpdate(
+        state: GateConnectionState,
+        dtlLaneNo: Int,
+        online: Boolean,
+        rawPacket: ByteArray? = null,
+    ) {
         val info = state.laneInfoOf(dtlLaneNo) ?: state.primaryLaneInfo
         if (info == null) {
             // 캐시가 비어 있는 커넥션(연결 수립 직후 등) — DB에서 직접 확인하는 경로로 넘긴다.
-            enqueueNetStateUpdate(state.dtlIp, dtlLaneNo, online)
+            enqueueNetStateUpdate(state.dtlIp, dtlLaneNo, online, rawPacket)
             return
         }
         val seq = withContext(Dispatchers.IO) { netStateRepository.nextSeq() }
         val id = NetStateId(dtlIp = state.dtlIp, dtlLaneNo = dtlLaneNo, locId = info.locId, grpId = info.grpId)
-        enqueueGuardedNetStateWrite(state.dtlIp, dtlLaneNo, online, seq) { id }
+        val target = NetStateWriteTarget(id = id, dtlType = info.dtlType, dtlId = info.dtlId)
+        enqueueGuardedNetStateWrite(state.dtlIp, dtlLaneNo, online, seq, rawPacket) { target }
     }
 
     /**
@@ -285,19 +296,24 @@ class GateConnectionRegistryImpl(
      * 장치가 그룹/위치를 재배정받아 locId/grpId가 바뀔 때마다 시퀀스 기준선이 리셋돼 순서 역전
      * 가드가 무력화된다(클래스 상단 3차 리뷰 지적 주석 참고).
      */
+    /** [enqueueGuardedNetStateWrite]가 실제 UPSERT에 필요한 식별 정보를 한데 묶은 결과. */
+    private data class NetStateWriteTarget(val id: NetStateId, val dtlType: Int, val dtlId: Long?)
+
     private fun enqueueGuardedNetStateWrite(
         dtlIp: String,
         dtlLaneNo: Int,
         online: Boolean,
         seq: Long,
-        resolveId: () -> NetStateId?,
+        rawPacket: ByteArray?,
+        resolveTarget: () -> NetStateWriteTarget?,
     ) {
         dbWriteQueue.enqueue(
             GateDbWriteTask(
                 partitionKey = dtlIp,
                 operationName = "UpdateNetState($dtlIp,$dtlLaneNo,$online)",
             ) {
-                val id = resolveId() ?: return@GateDbWriteTask
+                val target = resolveTarget() ?: return@GateDbWriteTask
+                val id = target.id
                 // 순서 역전 방지는 이제 DB의 조건부 UPSERT(`applied_seq <= VALUES(applied_seq)`)가
                 // 전담한다 — 인메모리 락/시퀀스 맵 없이도 원자적이다(R-8, NetStateRepository.upsertIfNewer
                 // KDoc 참고). 이미 더 최신 seq가 적용된 뒤라면 이 UPSERT는 조용히 no-op이 된다.
@@ -307,7 +323,15 @@ class GateConnectionRegistryImpl(
                     locId = id.locId,
                     grpId = id.grpId,
                     dtlState = if (online) "Y" else "N",
-                    checkTime = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm")),
+                    // 2026-09-07 tb_net_state 재점검 — 예전에는 이 두 컬럼을 쿼리에 전혀 싣지 않아
+                    // 신규 서버 경로가 만든 행은 영구히 NULL로 남았다. 호출부가 이미 캐시해 둔 값을
+                    // 그대로 전달한다(NetStateRepository.upsertIfNewer KDoc "컬럼 누락 수정 2" 참고).
+                    dtlType = target.dtlType,
+                    dtlId = target.dtlId,
+                    // 레거시 usp_net_check_data와 동일한 포맷(초 단위, yyyyMMddHHmmss)으로 통일한다
+                    // (사용자 확인, 2026-09-07) — 예전엔 이 경로만 분 단위(yyyyMMddHHmm)를 써서 같은
+                    // 컬럼에 어느 쓰기 경로가 마지막으로 갱신했는지에 따라 자릿수가 달라졌다.
+                    checkTime = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")),
                     seq = seq,
                     // `tb_net_state.server_ip`도 `tb_data_snd.snd_server`와 동일하게 VARCHAR(20)이다
                     // (2026-08-26 dev DB 실측 확인). 여기서 InetAddress.getLocalHost().hostAddress를
@@ -316,6 +340,13 @@ class GateConnectionRegistryImpl(
                     // — [GateControlService.localServerId]가 이미 IPv4 우선 탐지 + 20자 강제 절단을
                     // 처리해 두었으므로 새로 만들지 않고 그대로 재사용한다.
                     serverIp = localServerId,
+                    // 2026-09-07 사용자 확인 — server_cd는 이 인스턴스의 연결 방향(SERVER/CLIENT)을
+                    // 담는다. 코드베이스 전체에서 이 컬럼을 쓰는 곳이 전혀 없어 항상 NULL이었다.
+                    serverCd = serverModeConfig.mode.name,
+                    // 커넥션 종료로 인한 오프라인 전이처럼 관련 패킷이 없으면 null — 레거시와 달리
+                    // 매 상태 확인마다가 아니라 온라인/오프라인 "전이" 시에만 기록하므로, 그 전이를
+                    // 유발한 패킷이 있을 때만(주로 GATE_STATUS 패킷) 채운다.
+                    sndRaw = rawPacket?.let { HexCodec.toHex(it) },
                 )
             },
         )

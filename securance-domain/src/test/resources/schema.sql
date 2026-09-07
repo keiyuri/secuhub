@@ -178,6 +178,8 @@ CREATE TABLE tb_net_state (
     check_time   VARCHAR(20) NULL,
     server_ip    VARCHAR(20) NULL,
     server_cd    VARCHAR(20) NULL,
+    -- [NetState.sndRaw] 매핑 대상(2026-09-07 tb_net_state 재점검) — 실제 컬럼은 longtext.
+    snd_raw      CLOB NULL,
     applied_seq  BIGINT NOT NULL DEFAULT 0,
     reg_date     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     mod_date     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

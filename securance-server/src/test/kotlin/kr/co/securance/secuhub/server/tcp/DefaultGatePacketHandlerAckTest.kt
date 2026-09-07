@@ -56,12 +56,17 @@ class DefaultGatePacketHandlerAckTest {
             return true
         }
 
-        override suspend fun enqueueNetStateUpdate(state: GateConnectionState, dtlLaneNo: Int, online: Boolean) {
+        override suspend fun enqueueNetStateUpdate(
+            state: GateConnectionState,
+            dtlLaneNo: Int,
+            online: Boolean,
+            rawPacket: ByteArray?,
+        ) {
             if (online) onlineLanes += dtlLaneNo
         }
 
         // 핸들러는 온라인/오프라인 전이가 있을 때만 IP 기준 오버로드를 호출한다(mains 계열 로직).
-        override suspend fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean) {
+        override suspend fun enqueueNetStateUpdate(dtlIp: String, dtlLaneNo: Int, online: Boolean, rawPacket: ByteArray?) {
             if (online) onlineLanes += dtlLaneNo
         }
     }

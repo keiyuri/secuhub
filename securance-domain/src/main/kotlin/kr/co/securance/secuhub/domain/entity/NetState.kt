@@ -51,6 +51,36 @@ class NetState(
     var checkTime: String? = null,
 
     /**
+     * 게이트 타입 원시값(`tb_gate_dtl.dtl_type`) — 조회 전용. 실제 쓰기는 두 경로(신규 서버의
+     * [kr.co.securance.secuhub.domain.repository.NetStateRepository.upsertIfNewer], 레거시
+     * `usp_net_check_data`) 모두 네이티브 UPSERT를 거치며, 둘 다 한때 이 컬럼을 INSERT/UPDATE
+     * 절에 담지 않아 영구히 NULL로 남는 결함이 있었다(2026-09-07 `tb_net_state` 재점검, V3 마이그레이션).
+     */
+    @Column(name = "dtl_type", insertable = false, updatable = false)
+    val dtlType: Int? = null,
+
+    /** `tb_gate_dtl.dtl_id` — 조회 전용, 위 [dtlType]와 동일한 이유로 네이티브 UPSERT가 채운다. */
+    @Column(name = "dtl_id", insertable = false, updatable = false)
+    val dtlId: Long? = null,
+
+    /**
+     * 이 행을 기록한 인스턴스의 연결 방향(SERVER/CLIENT,
+     * [kr.co.securance.secuhub.server.config.GatewayMode].name) — 조회 전용. 코드베이스 전체에서
+     * 실제로 이 컬럼을 채우는 곳이 전혀 없어 항상 NULL이었다(2026-09-07 확인) — 신규 서버 경로가
+     * 이제 채운다.
+     */
+    @Column(name = "server_cd", insertable = false, updatable = false)
+    val serverCd: String? = null,
+
+    /**
+     * 그 시점의 원시 수신 패킷 16진 문자열 — 조회 전용. 레거시 `usp_net_check_data`는 항상 채웠지만
+     * 신규 서버 경로는 온라인/오프라인 "전이" 이벤트에 원시 패킷이 있을 때만(커넥션 종료로 인한
+     * 오프라인 전이처럼 관련 패킷이 없으면 null) 채운다.
+     */
+    @Column(name = "snd_raw")
+    val sndRaw: String? = null,
+
+    /**
      * 이 행에 마지막으로 반영된 [kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl]
      * 의 `netStateWriteSequence` 값(코드 리뷰 지적 R-8, V31 마이그레이션) — 더 오래된(작은) seq의
      * 지연 쓰기가 이 행을 덮어쓰지 못하게 막는 조건부 UPSERT([NetStateRepository.upsertIfNewer]

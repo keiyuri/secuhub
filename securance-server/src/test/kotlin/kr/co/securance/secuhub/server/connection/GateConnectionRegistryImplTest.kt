@@ -49,9 +49,13 @@ private data class UpsertCall(
     val locId: Long,
     val grpId: Long,
     val dtlState: String,
+    val dtlType: Int?,
+    val dtlId: Long?,
     val checkTime: String,
     val seq: Long,
     val serverIp: String,
+    val serverCd: String,
+    val sndRaw: String?,
 )
 
 /**
@@ -69,9 +73,13 @@ private fun recordUpsertCalls(repository: NetStateRepository, into: MutableList<
             locId = invocation.getArgument(2),
             grpId = invocation.getArgument(3),
             dtlState = invocation.getArgument(4),
-            checkTime = invocation.getArgument(5),
-            seq = invocation.getArgument(6),
-            serverIp = invocation.getArgument(7),
+            dtlType = invocation.getArgument(5),
+            dtlId = invocation.getArgument(6),
+            checkTime = invocation.getArgument(7),
+            seq = invocation.getArgument(8),
+            serverIp = invocation.getArgument(9),
+            serverCd = invocation.getArgument(10),
+            sndRaw = invocation.getArgument(11),
         )
         null
     }.`when`(repository).upsertIfNewer(
@@ -80,9 +88,13 @@ private fun recordUpsertCalls(repository: NetStateRepository, into: MutableList<
         org.mockito.ArgumentMatchers.anyLong(),
         org.mockito.ArgumentMatchers.anyLong(),
         org.mockito.ArgumentMatchers.anyString(),
+        anyKt(),
+        anyKt(),
         org.mockito.ArgumentMatchers.anyString(),
         org.mockito.ArgumentMatchers.anyLong(),
         org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyString(),
+        anyKt(),
     )
 }
 
@@ -323,7 +335,7 @@ class GateConnectionRegistryImplTest {
             gateDetailRepository = gateDetailRepository,
         )
 
-        runBlocking { registry.enqueueNetStateUpdate("192.168.0.20", 1, online = true) }
+        runBlocking { registry.enqueueNetStateUpdate("192.168.0.20", 1, online = true, rawPacket = byteArrayOf(0x02, 0x4D)) }
         runBlocking { capturedTask!!.execute() }
 
         val call = upsertCalls.single()
@@ -336,11 +348,17 @@ class GateConnectionRegistryImplTest {
         // 2026-08-20 — GateConnectionRegistryImpl 클래스 상단 주석 참고). 고정값 대신 "발급됐다"만
         // 검증한다.
         assertTrue(call.seq > 0L, "seq가 발급돼야 한다")
-        assertTrue(call.checkTime.isNotBlank())
+        // 컬럼 누락 회귀 방지(2026-09-07 tb_net_state 재점검) — dtl_type/dtl_id가 예전에는
+        // upsertIfNewer 호출 자체에 전달되지 않아 신규 서버가 만든 행은 항상 NULL이었다.
+        assertEquals(1, call.dtlType)
+        assertEquals(1L, call.dtlId)
+        assertEquals(14, call.checkTime.length, "check_time은 레거시와 동일하게 초 단위(yyyyMMddHHmmss)여야 한다")
         // 컬럼 누락 회귀 방지(2026-08-26 dev DB 실측 검증) — server_ip가 예전에는 upsertIfNewer
         // 호출 자체에 전달되지 않아 DB에 한 번도 쓰인 적이 없었다. 값 자체는 로컬 IP 조회 성공
         // 여부에 따라 환경마다 다를 수 있어 "비어있지 않다"만 검증한다.
         assertTrue(call.serverIp.isNotBlank(), "server_ip가 채워져야 한다")
+        assertEquals("SERVER", call.serverCd)
+        assertEquals("024D", call.sndRaw)
     }
 
     /**

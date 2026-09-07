@@ -237,6 +237,9 @@ class GateControlDispatcher(
             if (sentAt == null || ackedAt.isBefore(sentAt)) continue
 
             command.chkYn = DataSend.YES
+            // 컬럼 누락 수정(2026-09-08, 운영 DB 실측) — mod_user는 ACK 확인 시점에만 채워지는
+            // 값이었다(DataSend.modUser KDoc 참고). sndServer와 동일하게 이 인스턴스 식별자를 쓴다.
+            command.modUser = localServerId
             if (!trySave(command, "ACK확인")) continue
             ackedLanes.remove(key, ackedAt)
             clearTracking(sndId)

@@ -14,6 +14,7 @@ import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.domain.repository.GateTimeZoneRepository
 import kr.co.securance.secuhub.protocol.GateControlCommandBuilder
 import kr.co.securance.secuhub.protocol.TimeZoneCommandBuilder
+import kr.co.securance.secuhub.server.control.SND_SERVER_CD
 import kr.co.securance.secuhub.web.gate.GateDetailService
 import kr.co.securance.secuhub.web.gate.GateGroupService
 import kr.co.securance.secuhub.web.gate.GateLocationService
@@ -120,6 +121,9 @@ class TimeZoneService(
                     dtlIp = detail.dtlIp,
                     dtlLaneNo = detail.dtlLaneNo,
                     sndUser = requestedBy,
+                    // 컬럼 누락 수정(2026-09-08, 운영 DB 실측) — reg_user/snd_server_cd 참고는 DataSend.kt 필드 KDoc.
+                    regUser = requestedBy,
+                    sndServerCd = SND_SERVER_CD,
                     sndTypeCd = "DATA_TIME",
                     sndRaw = hex,
                 )
@@ -287,6 +291,9 @@ class ScheduleApplyService(
                 dtlIp = detail.dtlIp,
                 dtlLaneNo = detail.dtlLaneNo,
                 sndUser = requestedBy,
+                // 컬럼 누락 수정(2026-09-08, 운영 DB 실측) — reg_user/snd_server_cd 참고는 DataSend.kt 필드 KDoc.
+                regUser = requestedBy,
+                sndServerCd = SND_SERVER_CD,
                 sndTypeCd = "MODE_$combined",
                 sndRaw = HexCodec.toHex(packet),
             )

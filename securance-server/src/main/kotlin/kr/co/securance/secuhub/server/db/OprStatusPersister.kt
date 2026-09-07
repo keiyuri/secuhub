@@ -45,6 +45,19 @@ import java.time.format.DateTimeFormatter
  *   레거시에 없던 값이므로 레거시 화면과 대조 검증은 불가능하지만, 델타 자체는 SP와 동일한
  *   `deltaTotal - deltaIn` 공식이라 부정확할 이유가 없다.
  *
+ * ## `dtl_no`/`opr_lane_no`/`opr_user_mode_desc`/`opr_security_mode_desc` 컬럼 누락 수정
+ * (2026-09-08, 사용자 요청 — 운영 DB 실측)
+ * 예전에는 `dtl_no`를 항상 `0`으로 하드코딩했다 — "SP가 `usp_rcv_data_raw`에서 항상 `vDtlNo=0`으로
+ * 호출한다"는 잘못된 가정 때문이었는데, 실제 레거시 `usp_rcv_data_raw`는
+ * `SELECT dtl_no INTO vDtlNo FROM tb_gate_dtl WHERE ...`로 실제 값을 조회해 넘긴다(운영 DB
+ * 실측 확인). [GateLaneInfo.dtlNo]([kr.co.securance.secuhub.domain.repository.GateLaneInfo])로
+ * 실제 값을 받아 그대로 싣는다. `opr_lane_no`도 `dtl_lane_no`와 동일 값을 요구하는 레거시 잔존
+ * 컬럼인데 엔티티에 매핑이 빠져 있었다. `opr_user_mode_desc`/`opr_security_mode_desc`는 레거시
+ * SP가 `ufnc_get_user_mode()`/`ufnc_get_security_mode()` DB 함수로 채우던 설명 문자열인데, 이
+ * 앱은 이미 동일한 매핑을 [GateStatusAnalyzer.describeUserMode]/[GateStatusAnalyzer.describeSecurityMode]로
+ * 갖고 있으면서도(`tb_data_rcv_anal.desc_user_mode`/`desc_security_mode`에는 이미 쓰고 있었다)
+ * `tb_opr_status` 쪽 엔티티에는 매핑이 빠져 있어 항상 NULL로 남아 있었다.
+ *
  * ## 호출 시점
  * [kr.co.securance.secuhub.server.tcp.DefaultGatePacketHandler]가 상태 변경이 감지됐을 때
  * (`PacketDiffer.diff(...).anyChanged`)만 [persistStatusAnalysis][GatePacketPersister.persistStatusAnalysis]와
@@ -125,14 +138,14 @@ class OprStatusPersister(
                     operationName = "UpsertOprStatus(${state.dtlIp},$laneNo)",
                     onDropOrFinalFailure = {
                         saveOutboxFallback(
-                            state.dtlIp, laneNo, dtlId, info.dtlType, info.locId, info.grpId,
+                            state.dtlIp, laneNo, dtlId, info.dtlType, info.dtlNo, info.locId, info.grpId,
                             dateKey, sinceDateKey, currTotal, currDoor, currIn,
                             analysis.gateType, analysis.userMode, analysis.securityMode, analysis.inoutTime,
                         )
                     },
                 ) {
                     upsert(
-                        state.dtlIp, laneNo, dtlId, info.dtlType, info.locId, info.grpId, dateKey, sinceDateKey,
+                        state.dtlIp, laneNo, dtlId, info.dtlType, info.dtlNo, info.locId, info.grpId, dateKey, sinceDateKey,
                         currTotal, currDoor, currIn, analysis.gateType, analysis.userMode, analysis.securityMode, analysis.inoutTime,
                     )
                     Unit
@@ -151,6 +164,7 @@ class OprStatusPersister(
         laneNo: Int,
         dtlId: Long,
         dtlType: Int,
+        dtlNo: Int,
         locId: Long,
         grpId: Long,
         dateKey: String,
@@ -169,6 +183,7 @@ class OprStatusPersister(
                 dtlLaneNo = laneNo,
                 dtlId = dtlId,
                 dtlType = dtlType,
+                dtlNo = dtlNo,
                 locId = locId,
                 grpId = grpId,
                 oprDate = dateKey,
@@ -226,7 +241,7 @@ class OprStatusPersister(
                 onDropOrFinalFailure = { result.complete(false) },
             ) {
                 upsert(
-                    entry.dtlIp, entry.dtlLaneNo, entry.dtlId, entry.dtlType, entry.locId, entry.grpId,
+                    entry.dtlIp, entry.dtlLaneNo, entry.dtlId, entry.dtlType, entry.dtlNo, entry.locId, entry.grpId,
                     entry.oprDate, entry.sinceDate, entry.currTotal, entry.currDoor, entry.currIn,
                     entry.gateTypeRaw, entry.userModeRaw, entry.securityModeRaw, entry.inoutTime,
                 )
@@ -249,6 +264,7 @@ class OprStatusPersister(
         laneNo: Int,
         dtlId: Long,
         dtlType: Int,
+        dtlNo: Int,
         locId: Long,
         grpId: Long,
         dateKey: String,
@@ -264,6 +280,8 @@ class OprStatusPersister(
         val gateType = GateStatusAnalyzer.describeGateType(gateTypeRaw)
         val userMode = userModeRaw.toString()
         val securityMode = securityModeRaw.toString()
+        val userModeDesc = GateStatusAnalyzer.describeUserMode(userModeRaw)
+        val securityModeDesc = GateStatusAnalyzer.describeSecurityMode(securityModeRaw)
 
         val id = OprStatusId(oprDate = dateKey, oprSeq = 1, dtlIp = dtlIp, dtlLaneNo = laneNo)
         val existing = oprStatusRepository.findById(id).orElse(null)
@@ -284,9 +302,13 @@ class OprStatusPersister(
             existing.outCount = deltaOut.toInt()
             // outBefore는 INSERT 시점 값 그대로(위 before류와 동일 원칙) — outTotal만 재수신 시 재계산.
             existing.outTotal = (existing.outBefore ?: 0L) + deltaOut
+            existing.dtlNo = dtlNo
+            existing.oprLaneNo = laneNo
             existing.gateType = gateType
             existing.userMode = userMode
+            existing.userModeDesc = userModeDesc
             existing.securityMode = securityMode
+            existing.securityModeDesc = securityModeDesc
             existing.inoutTime = inoutTime
             oprStatusRepository.save(existing)
             return
@@ -313,12 +335,15 @@ class OprStatusPersister(
                 id = id,
                 dtlId = dtlId,
                 dtlType = dtlType,
-                dtlNo = DTL_NO_DEFAULT,
+                dtlNo = dtlNo,
                 locId = locId,
                 grpId = grpId,
+                oprLaneNo = laneNo,
                 gateType = gateType,
                 userMode = userMode,
+                userModeDesc = userModeDesc,
                 securityMode = securityMode,
+                securityModeDesc = securityModeDesc,
                 inoutTime = inoutTime,
                 userCount = deltaTotal.toInt(),
                 totalCount = currTotal,
@@ -340,8 +365,5 @@ class OprStatusPersister(
     private companion object {
         /** `tb_opr_status.opr_date` — 분 단위 버킷 키(레거시 SP `DATE_FORMAT(NOW(),'%Y%m%d%H%i')`). */
         val MINUTE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmm")
-
-        /** SP가 `usp_rcv_data_raw`에서 항상 `vDtlNo=0`으로 호출한다 — Serial 연결 번호, TCP 경로에선 미사용. */
-        const val DTL_NO_DEFAULT = 0
     }
 }

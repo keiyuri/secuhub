@@ -63,6 +63,16 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
      * 재시도도 정상적으로 반영되어야 하므로(멱등성, [kr.co.securance.secuhub.server.db.GateDbWriteQueue]
      * 클래스 KDoc "주의(멱등성)" 참고) 동일 시퀀스의 재적용은 허용한다.
      *
+     * **`mod_date` 누락 수정(2026-09-08, 사용자 요청 — 운영 DB 실측)**: 이 메서드가 `mod_date`를
+     * INSERT/UPDATE 절 어디에도 담지 않아, 신규 서버 경로가 쓰는 행은 이 컬럼이 영구히 NULL로
+     * 남아 있었다. [NetState.modDate]의 예전 KDoc은 "네이티브 UPSERT가 채운다"고 적어 뒀지만
+     * 이는 잘못된 가정이었다 — 그 문장은 레거시 `usp_net_check_data`(V1)가 `mod_date = NOW()`를
+     * 명시적으로 갱신하는 것만 확인하고, 이 메서드는 다시 검증하지 않은 채 넘어간 결과였다. 또한
+     * 운영 DB(192.168.0.26:28031) 실측 결과 `tb_net_state.mod_date` 컬럼 자체가 이 저장소의 V1
+     * 마이그레이션이 정의한 것과 달리 `ON UPDATE current_timestamp()`가 없는 정의였다 — DB
+     * 트리거에 의존할 수 없으므로 여기서 직접 `NOW()`를 실어 보낸다(레거시 SP와 동일하게
+     * `applied_seq` 가드 하에서만 갱신).
+     *
      * **테스트 커버리지의 한계(2026-08-20)**: `ON DUPLICATE KEY UPDATE`는 MariaDB/MySQL 전용 문법이라
      * 이 프로젝트의 `@DataJpaTest`가 쓰는 H2(2.4.240, `MODE=MySQL` 포함)로는 파싱조차 되지 않는다
      * (실측 확인 — "Syntax error ... ON DUPLICATE KEY UPDATE"). 그래서 [DataSendRepository.claimForSend]
@@ -78,10 +88,10 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
         value = """
         INSERT INTO tb_net_state
             (dtl_ip, dtl_lane_no, loc_id, grp_id, dtl_state, dtl_type, dtl_id, check_time, applied_seq,
-             server_ip, server_cd, snd_raw)
+             server_ip, server_cd, snd_raw, mod_date)
         VALUES
             (:dtlIp, :dtlLaneNo, :locId, :grpId, :dtlState, :dtlType, :dtlId, :checkTime, :seq,
-             :serverIp, :serverCd, :sndRaw)
+             :serverIp, :serverCd, :sndRaw, NOW())
         ON DUPLICATE KEY UPDATE
             dtl_state = IF(applied_seq <= VALUES(applied_seq), VALUES(dtl_state), dtl_state),
             dtl_type = IF(applied_seq <= VALUES(applied_seq), VALUES(dtl_type), dtl_type),
@@ -90,6 +100,7 @@ interface NetStateRepository : JpaRepository<NetState, NetStateId> {
             server_ip = IF(applied_seq <= VALUES(applied_seq), VALUES(server_ip), server_ip),
             server_cd = IF(applied_seq <= VALUES(applied_seq), VALUES(server_cd), server_cd),
             snd_raw = IF(applied_seq <= VALUES(applied_seq), VALUES(snd_raw), snd_raw),
+            mod_date = IF(applied_seq <= VALUES(applied_seq), VALUES(mod_date), mod_date),
             applied_seq = IF(applied_seq <= VALUES(applied_seq), VALUES(applied_seq), applied_seq)
         """,
         nativeQuery = true,

@@ -152,6 +152,10 @@ CREATE TABLE tb_data_snd (
     grp_id          BIGINT      NOT NULL DEFAULT 0,
     snd_user        VARCHAR(20) NOT NULL DEFAULT '',
     snd_server      VARCHAR(20) NOT NULL DEFAULT '',
+    -- 컬럼 누락 수정(2026-09-08 운영 DB 실측) — [DataSend.sndServerCd]/[regUser]/[modUser] 참고.
+    snd_server_cd   VARCHAR(20) NOT NULL DEFAULT '',
+    reg_user        VARCHAR(20) NULL,
+    mod_user        VARCHAR(20) NULL,
     snd_type_cd     VARCHAR(20) NOT NULL DEFAULT '',
     snd_data_tp     VARCHAR(20) NOT NULL DEFAULT '',
     snd_raw         CLOB        NOT NULL,
@@ -199,9 +203,13 @@ CREATE TABLE tb_opr_status (
     dtl_no            INT         NOT NULL DEFAULT 1,
     loc_id            BIGINT NULL,
     grp_id            BIGINT NULL,
-    opr_gate_type     VARCHAR(20) NULL,
-    opr_user_mode     VARCHAR(20) NULL,
-    opr_security_mode VARCHAR(20) NULL,
+    -- 컬럼 누락 수정(2026-09-08 운영 DB 실측) — [OprStatus.oprLaneNo]/[userModeDesc]/[securityModeDesc] 참고.
+    opr_lane_no           INT NULL,
+    opr_gate_type         VARCHAR(20) NULL,
+    opr_user_mode         VARCHAR(20) NULL,
+    opr_user_mode_desc    VARCHAR(50) NULL,
+    opr_security_mode     VARCHAR(20) NULL,
+    opr_security_mode_desc VARCHAR(50) NULL,
     opr_inout_time    INT         NOT NULL DEFAULT 0,
     opr_user_count    INT NULL,
     opr_total_count   BIGINT      NOT NULL,
@@ -285,6 +293,8 @@ CREATE TABLE tb_gate_dtl (
     dtl_type        INT NOT NULL,
     connect_type    INT NOT NULL DEFAULT 1,
     dtl_nm          VARCHAR(200) NULL,
+    -- [GateDetail.dtlNo] 매핑 대상(2026-09-08 tb_opr_status.dtl_no 데이터 누락 점검 — 운영 DB 실측).
+    dtl_no          INT NOT NULL DEFAULT 1,
     use_yn          VARCHAR(1) NOT NULL DEFAULT 'Y',
     analysis_yn     VARCHAR(1) NOT NULL DEFAULT 'Y',
     CONSTRAINT uq_gate_dtl_ip_lane UNIQUE (dtl_ip, dtl_lane_no)

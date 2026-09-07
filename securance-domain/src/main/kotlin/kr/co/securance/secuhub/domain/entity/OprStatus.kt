@@ -54,14 +54,36 @@ class OprStatus(
     @Column(name = "grp_id")
     var grpId: Long? = null,
 
+    /**
+     * `dtl_lane_no`와 동일한 값을 다시 담는 레거시 잔존 컬럼 — 레거시 SP `usp_process_status`가
+     * `opr_lane_no = vRealLaneNo`(= `dtl_lane_no`)로 채운다(2026-09-08 운영 DB 실측). 이 엔티티에
+     * 매핑이 빠져 있어 [OprStatusPersister]가 값을 실은 적이 없었고 항상 NULL로 남아 있었다.
+     */
+    @Column(name = "opr_lane_no")
+    var oprLaneNo: Int? = null,
+
     @Column(name = "opr_gate_type", length = 20)
     var gateType: String? = null,
 
     @Column(name = "opr_user_mode", length = 20)
     var userMode: String? = null,
 
+    /**
+     * `opr_user_mode`(원시 코드 문자열) → 표시용 설명 문자열(예: "IN(CARD)/OUT(CARD)"). 레거시
+     * SP는 `ufnc_get_user_mode()` DB 함수로 채우지만(2026-09-08 운영 DB 실측), 이 앱은 이미
+     * 같은 매핑을 [kr.co.securance.secuhub.protocol.GateStatusAnalyzer.describeUserMode]로
+     * 갖고 있다(`tb_data_rcv_anal.desc_user_mode`에 이미 쓰는 중) — 엔티티에 매핑이 빠져 있어
+     * `tb_opr_status` 쪽은 항상 NULL로 남아 있었다.
+     */
+    @Column(name = "opr_user_mode_desc", length = 50)
+    var userModeDesc: String? = null,
+
     @Column(name = "opr_security_mode", length = 20)
     var securityMode: String? = null,
+
+    /** [userModeDesc]와 동일한 이유로 매핑이 빠져 있던 `opr_security_mode`의 설명 문자열. */
+    @Column(name = "opr_security_mode_desc", length = 50)
+    var securityModeDesc: String? = null,
 
     @Column(name = "opr_inout_time")
     var inoutTime: Int? = null,

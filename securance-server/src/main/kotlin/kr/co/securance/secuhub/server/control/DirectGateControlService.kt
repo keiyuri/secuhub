@@ -105,6 +105,13 @@ class DirectGateControlService(
                         grpId = laneInfo?.grpId ?: 0,
                         sndUser = request.requestedBy ?: "SYSTEM",
                         sndServer = localServerId,
+                        // 컬럼 누락 수정(2026-09-08, 운영 DB 실측) — reg_user/snd_server_cd 참고는
+                        // DataSend.kt 필드 KDoc. DIRECT는 QUEUED의 ACK 확인과 달리 전송 성공 여부를
+                        // 이 자리에서 바로 확정하므로(chkYn), mod_user도 확정과 동시에 채운다 —
+                        // 거부(accepted=false)면 확인 자체가 없었던 것이므로 비워 둔다.
+                        regUser = request.requestedBy ?: "SYSTEM",
+                        sndServerCd = SND_SERVER_CD,
+                        modUser = if (accepted) localServerId else null,
                         sndTypeCd = request.command.legacyCode,
                         sndDataTp = legacyDataTypeOf(request),
                         sndRaw = hex,

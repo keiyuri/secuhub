@@ -13,6 +13,7 @@ import kr.co.securance.secuhub.domain.repository.GateDetailRepository
 import kr.co.securance.secuhub.protocol.FastGateMotorCodec
 import kr.co.securance.secuhub.protocol.GateControlCommandBuilder
 import kr.co.securance.secuhub.protocol.SpeedGateControlCommand
+import kr.co.securance.secuhub.server.control.SND_SERVER_CD
 import kr.co.securance.secuhub.web.menu.MenuProvider
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -124,6 +125,9 @@ class GateControlService(
                 dtlIp = detail.dtlIp,
                 dtlLaneNo = detail.dtlLaneNo,
                 sndUser = requestedBy,
+                // 컬럼 누락 수정(2026-09-08, 운영 DB 실측) — reg_user/snd_server_cd 참고는 DataSend.kt 필드 KDoc.
+                regUser = requestedBy,
+                sndServerCd = SND_SERVER_CD,
                 sndTypeCd = typeCd,
                 sndDataTp = dataTp,
                 sndRaw = HexCodec.toHex(packet),

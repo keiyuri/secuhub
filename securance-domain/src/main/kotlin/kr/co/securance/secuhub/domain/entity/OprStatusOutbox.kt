@@ -37,6 +37,10 @@ class OprStatusOutbox(
     @Column(name = "dtl_type")
     var dtlType: Int,
 
+    /** `tb_gate_dtl.dtl_no`(Serial 연결 번호) — [OprStatusPersister.upsert]가 `tb_opr_status.dtl_no`에 그대로 싣는다. */
+    @Column(name = "dtl_no")
+    var dtlNo: Int = 1,
+
     @Column(name = "loc_id")
     var locId: Long,
 

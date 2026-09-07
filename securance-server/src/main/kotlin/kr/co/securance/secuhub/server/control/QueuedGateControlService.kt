@@ -66,6 +66,9 @@ class QueuedGateControlService(
                 locId = laneInfo?.locId ?: 0,
                 grpId = laneInfo?.grpId ?: 0,
                 sndUser = request.requestedBy ?: "SYSTEM",
+                // 컬럼 누락 수정(2026-09-08, 운영 DB 실측) — reg_user/snd_server_cd 참고는 DataSend.kt 필드 KDoc.
+                regUser = request.requestedBy ?: "SYSTEM",
+                sndServerCd = SND_SERVER_CD,
                 sndTypeCd = request.command.legacyCode,
                 sndDataTp = legacyDataTypeOf(request),
                 sndRaw = hex,

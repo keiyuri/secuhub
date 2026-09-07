@@ -55,6 +55,15 @@ class GateDetail(
     @Column(name = "dtl_nm", length = 200)
     var dtlName: String? = null,
 
+    /**
+     * Serial 연결 번호 — TCP 경로에서는 실질적으로 미사용이지만, `tb_opr_status.dtl_no`에 그대로
+     * 적재하는 원본 값이다(2026-09-08 운영 DB 실측 — [kr.co.securance.secuhub.server.db.OprStatusPersister]가
+     * 이 컬럼을 조회할 방법이 없어 항상 0을 하드코딩했었다). 레거시 `usp_rcv_data_raw`는
+     * `SELECT dtl_no FROM tb_gate_dtl ...`로 이 값을 그대로 조회해 넘긴다.
+     */
+    @Column(name = "dtl_no")
+    var dtlNo: Int = 1,
+
     @Convert(converter = YnConverter::class)
     @Column(name = "use_yn", nullable = false)
     var useYn: Boolean = true,

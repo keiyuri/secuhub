@@ -129,6 +129,10 @@ CREATE TABLE tb_data_snd (
     grp_id          BIGINT      NOT NULL DEFAULT 0,
     snd_user        VARCHAR(20) NOT NULL DEFAULT '',
     snd_server      VARCHAR(20) NOT NULL DEFAULT '',
+    -- 컬럼 누락 수정(2026-09-08 운영 DB 실측) — [DataSend.sndServerCd]/[regUser]/[modUser] 참고.
+    snd_server_cd   VARCHAR(20) NOT NULL DEFAULT '',
+    reg_user        VARCHAR(20) NULL,
+    mod_user        VARCHAR(20) NULL,
     snd_type_cd     VARCHAR(20) NOT NULL DEFAULT '',
     snd_data_tp     VARCHAR(20) NOT NULL DEFAULT '',
     snd_raw         CLOB        NOT NULL,

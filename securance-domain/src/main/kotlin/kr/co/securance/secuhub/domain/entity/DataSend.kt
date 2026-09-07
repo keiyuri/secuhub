@@ -104,6 +104,39 @@ class DataSend(
     var sndServer: String = "",
 
     /**
+     * 컬럼 누락 수정(2026-09-08, 사용자 요청 — 운영 DB 실측): `snd_server_cd`/`reg_user`/`mod_user`
+     * 세 컬럼은 이 저장소의 V1 마이그레이션(BASELINE)이 기록을 놓쳐 엔티티에 매핑돼 있지 않았다.
+     * 그 결과 레거시 화면이 쓰던 행은 이 세 컬럼이 채워져 있는 반면, 이 앱이 새로 쓰는 행은 항상
+     * 비어(NULL/기본값) 있었다(운영 DB 2026-09-08 실측 — 2026-08-19 이후 이 앱이 적재한 행만
+     * 세 컬럼이 비어 있고, 그 이전 레거시 행은 `snd_server_cd='SERVER'`, `reg_user`가 채워져
+     * 있었다). [V4__fix_tb_data_snd_tb_opr_status_missing_columns.sql] 참고.
+     *
+     * `server_cd`는 [kr.co.securance.secuhub.server.connection.GateConnectionRegistryImpl]이
+     * `tb_net_state.server_cd`에 쓰는 것과 같은 개념(연결 방향 코드)이지만, 운영 DB에서 실측된
+     * 값이 전부 `'SERVER'` 고정이라 지금은 상수로 채운다(V3 마이그레이션이 `tb_net_state.server_cd`에
+     * `'SERVER'`를 고정한 것과 동일한 근거 — 이 값을 CLIENT 모드에서 채우는 경로가 없다).
+     */
+    @Column(name = "snd_server_cd", nullable = false, length = 20)
+    var sndServerCd: String = "",
+
+    /**
+     * 명령을 발행(등록)한 사용자 — 운영 DB 실측 결과 값이 [sndUser]와 항상 같다(레거시가 등록 시점
+     * 요청자를 두 컬럼에 동시에 기록). 컬럼 자체는 nullable이라 과거 데이터 조회 호환을 위해
+     * `String?`으로 둔다.
+     */
+    @Column(name = "reg_user", length = 20)
+    var regUser: String? = null,
+
+    /**
+     * 장비 ACK 확인(`chk_yn='Y'`) 시점에 그 확인을 처리한 서버를 기록 — 운영 DB 실측 결과
+     * [sndServer]와 동일한 값이 이 시점에만 채워진다(대기/실패 확정 상태에서는 항상 비어 있었다).
+     * [kr.co.securance.secuhub.server.control.GateControlDispatcher.confirmAckedCommands]가 확인
+     * 처리와 동시에 채운다.
+     */
+    @Column(name = "mod_user", length = 20)
+    var modUser: String? = null,
+
+    /**
      * 제어 명령 종류 코드 — [kr.co.securance.secuhub.common.gate.GateTypeCodes]와 무관하며,
      * `SpeedGateControlCommand.legacyCode`(레거시 `sControlType` 2자 코드)를 저장한다.
      */

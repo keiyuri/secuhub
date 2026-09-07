@@ -25,6 +25,12 @@ data class GateLaneInfo(
     val analysisYn: Boolean,
     /** `tb_gate_dtl.dtl_nm` — `tb_data_rcv_anal.desc_gate_name` 적재에 쓴다(2026-08-14 매핑 누락 수정). */
     val dtlName: String? = null,
+    /**
+     * `tb_gate_dtl.dtl_no`("Serial 연결 번호") — [kr.co.securance.secuhub.server.db.OprStatusPersister]가
+     * `tb_opr_status.dtl_no`에 그대로 싣는다(2026-09-08 운영 DB 실측 — 이 필드가 없어 항상 하드코딩된
+     * 0을 썼는데, 레거시 `usp_rcv_data_raw`는 실제로 `tb_gate_dtl.dtl_no`를 조회해서 넘겼다).
+     */
+    val dtlNo: Int = 0,
 )
 
 interface GateLocationRepository : JpaRepository<GateLocation, Long> {
@@ -206,7 +212,7 @@ interface GateDetailRepository : JpaRepository<GateDetail, Long> {
     @Query(
         """
         SELECT new kr.co.securance.secuhub.domain.repository.GateLaneInfo(
-            d.location.locId, d.group.grpId, d.dtlId, d.dtlLaneNo, d.dtlType, d.analysisYn, d.dtlName
+            d.location.locId, d.group.grpId, d.dtlId, d.dtlLaneNo, d.dtlType, d.analysisYn, d.dtlName, d.dtlNo
         )
         FROM GateDetail d
         WHERE d.dtlIp = :dtlIp AND d.useYn = true

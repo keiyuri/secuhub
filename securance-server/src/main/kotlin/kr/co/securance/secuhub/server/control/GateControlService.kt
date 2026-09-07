@@ -75,6 +75,16 @@ fun legacyDataTypeOf(request: GateControlRequest): String {
 /** `tb_data_snd.snd_server`(`VARCHAR(20)`) 컬럼 길이 — [localServerId]가 이 길이를 절대 넘지 않도록 강제한다. */
 private const val MAX_SND_SERVER_LENGTH = 20
 
+/**
+ * `tb_data_snd.snd_server_cd` 기본값(컬럼 누락 수정, 2026-09-08 사용자 요청 — 운영 DB 실측).
+ * `tb_net_state.server_cd`가 담는 연결 방향 코드([kr.co.securance.secuhub.server.config.GatewayMode].name)와
+ * 같은 개념이지만, 운영 DB에 남아 있는 실측 값이 전부 `'SERVER'` 고정이었다 — 이 값을 CLIENT
+ * 모드에서 채우는 경로가 실제로 존재한다는 근거가 없다(V3 마이그레이션이 `tb_net_state.server_cd`를
+ * `'SERVER'`로 고정한 것과 동일한 근거). CLIENT 모드로 명령을 발행하는 경로가 생기면 그때
+ * [kr.co.securance.secuhub.server.config.ServerModeConfig]를 주입해 실제 모드를 반영한다.
+ */
+const val SND_SERVER_CD = "SERVER"
+
 private val localServerIdLogger = LoggerFactory.getLogger("kr.co.securance.secuhub.server.control.LocalServerId")
 
 /**

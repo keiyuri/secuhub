@@ -93,6 +93,13 @@ class NetState(
     @Column(name = "applied_seq", nullable = false)
     var appliedSeq: Long = 0,
 
+    /**
+     * `mod_date` 누락 수정(2026-09-08, 사용자 요청 — 운영 DB 실측)까지는 [NetStateRepository.upsertIfNewer]
+     * 가 이 컬럼을 INSERT/UPDATE 절에 담지 않아 신규 서버 경로가 쓰는 행은 영구히 NULL이었다.
+     * 지금은 그 메서드가 `NOW()`를 직접 실어 보낸다([NetStateRepository.upsertIfNewer] KDoc 참고) —
+     * 운영 DB의 실제 컬럼 정의에 `ON UPDATE current_timestamp()`가 없어 DB 트리거에 의존할 수
+     * 없기 때문이다. 이 필드 자체는 여전히 조회 전용이다.
+     */
     @Column(name = "mod_date", insertable = false, updatable = false)
     val modDate: LocalDateTime? = null,
 ) {

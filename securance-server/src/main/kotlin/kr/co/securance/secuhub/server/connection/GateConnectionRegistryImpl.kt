@@ -288,17 +288,17 @@ class GateConnectionRegistryImpl(
         enqueueGuardedNetStateWrite(state.dtlIp, dtlLaneNo, online, seq, rawPacket) { target }
     }
 
+    /** [enqueueGuardedNetStateWrite]가 실제 UPSERT에 필요한 식별 정보를 한데 묶은 결과. */
+    private data class NetStateWriteTarget(val id: NetStateId, val dtlType: Int, val dtlId: Long?)
+
     /**
-     * `tb_net_state` 한 행의 갱신을 DB 쓰기 큐에 넣는다. [resolveId]는 실제 쓰기 직전(워커 스레드)
-     * 에 평가되며, null을 반환하면 갱신을 건너뛴다.
+     * `tb_net_state` 한 행의 갱신을 DB 쓰기 큐에 넣는다. [resolveTarget]은 실제 쓰기 직전(워커
+     * 스레드)에 평가되며, null을 반환하면 갱신을 건너뛴다.
      *
      * 시퀀스/락 키는 (dtlIp, dtlLaneNo)로 정규화한다 — NetStateId 전체를 키로 쓰면 같은 물리
      * 장치가 그룹/위치를 재배정받아 locId/grpId가 바뀔 때마다 시퀀스 기준선이 리셋돼 순서 역전
      * 가드가 무력화된다(클래스 상단 3차 리뷰 지적 주석 참고).
      */
-    /** [enqueueGuardedNetStateWrite]가 실제 UPSERT에 필요한 식별 정보를 한데 묶은 결과. */
-    private data class NetStateWriteTarget(val id: NetStateId, val dtlType: Int, val dtlId: Long?)
-
     private fun enqueueGuardedNetStateWrite(
         dtlIp: String,
         dtlLaneNo: Int,

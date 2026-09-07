@@ -73,11 +73,14 @@ class NetState(
     val serverCd: String? = null,
 
     /**
-     * 그 시점의 원시 수신 패킷 16진 문자열 — 조회 전용. 레거시 `usp_net_check_data`는 항상 채웠지만
-     * 신규 서버 경로는 온라인/오프라인 "전이" 이벤트에 원시 패킷이 있을 때만(커넥션 종료로 인한
-     * 오프라인 전이처럼 관련 패킷이 없으면 null) 채운다.
+     * 그 시점의 원시 수신 패킷 16진 문자열 — 조회 전용(코드 리뷰 지적 — 처음엔 `insertable/updatable
+     * = false`가 빠져 있었다. 지금은 이 컬럼에 `.save()`를 호출하는 프로덕션 코드가 없어 실제로
+     * 터지지 않지만, 나중에 누군가 이 엔티티로 `.save()`를 호출하면 기본값 `null`이 DB에 이미 쌓인
+     * 값을 조용히 지워버릴 수 있었다 — 위 [dtlType]/[dtlId]/[serverCd]와 동일하게 막는다).
+     * 레거시 `usp_net_check_data`는 항상 채웠지만, 신규 서버 경로는 온라인/오프라인 "전이" 이벤트에
+     * 원시 패킷이 있을 때만(커넥션 종료로 인한 오프라인 전이처럼 관련 패킷이 없으면 null) 채운다.
      */
-    @Column(name = "snd_raw")
+    @Column(name = "snd_raw", insertable = false, updatable = false)
     val sndRaw: String? = null,
 
     /**

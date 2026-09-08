@@ -21,7 +21,10 @@ class AppUser(
     @Column(name = "passwd", nullable = false)
     var passwordHash: String,
 
-    @Column(name = "user_nm", nullable = false, length = 100)
+    // 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): 실제 DB는 `user_nm varchar(20)`인데
+    // 엔티티는 length=100으로 선언돼 있었다 — 21자 이상 이름을 등록하면 화면 검증은 통과하고
+    // DB INSERT에서만 `Data too long` 예외가 나는 문제가 있어 실제 컬럼 길이로 정정한다.
+    @Column(name = "user_nm", nullable = false, length = 20)
     var userName: String,
 
     @Convert(converter = YnConverter::class)

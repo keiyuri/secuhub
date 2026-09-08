@@ -5,6 +5,7 @@ import kr.co.securance.secuhub.domain.entity.GateGroup
 import kr.co.securance.secuhub.domain.entity.GateLocation
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
@@ -38,6 +39,18 @@ data class GateLaneInfo(
 interface GateLocationRepository : JpaRepository<GateLocation, Long> {
     /** 대시보드 트리뷰 전체 조회 — GateLocation은 '분석' 컬럼이 없으므로 '사용'(useYn)만으로 필터한다. */
     fun findByUseYnTrueOrderByLocName(): List<GateLocation>
+
+    /**
+     * 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): `tb_gate_loc.mod_date`는
+     * `DEFAULT current_timestamp()`만 있고 `ON UPDATE current_timestamp()`가 없다 —
+     * [GateLocation.modDate]는 DB가 알아서 갱신해 줄 것으로 기대해 `insertable=false,
+     * updatable=false`로 매핑돼 있었지만 실제로는 최초 등록 이후 절대 갱신되지 않는다
+     * (`tb_net_state.mod_date`에서 이미 같은 유형의 버그가 발견·수정된 전례와 동일).
+     * [GateLocationService.update]가 이 네이티브 UPDATE로 직접 갱신한다.
+     */
+    @Modifying
+    @Query(value = "UPDATE tb_gate_loc SET mod_date = NOW() WHERE loc_id = :locId", nativeQuery = true)
+    fun touchModDate(@Param("locId") locId: Long): Int
 }
 
 interface GateGroupRepository : JpaRepository<GateGroup, Long> {

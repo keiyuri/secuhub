@@ -118,6 +118,11 @@ class GatePacketPersister(
         val hex = HexCodec.toHex(raw)
         val ackDate = LocalDateTime.now().format(TIMESTAMP_FORMAT)
 
+        // 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): `tb_data_rcv_ack.dtl_id`는
+        // `NOT NULL DEFAULT 1`이다. 레인 캐시가 아직 채워지지 않아 info가 null인 경우(신규/미확인
+        // 커넥션) `info?.dtlId`를 그대로 저장하면 NULL이 바인딩돼 INSERT 자체가 실패한다 —
+        // DB 기본값과 같은 1로 폴백한다.
+
         // ack_header/ack_data/ack_tail — enqueueReceiveInsert의 rcv_header/rcv_data/rcv_tail과
         // 동일한 Header(27)/Data/Tail(4) 구간 분할이다. 컬럼은 V1 스키마에 있었지만 이 값을 실제로
         // 채우는 코드가 없어 ack_raw(전체 원본)만 저장되고 나머지는 늘 빈 값이었다(2026-08-18 확인).
@@ -134,7 +139,7 @@ class GatePacketPersister(
                         ackDate = ackDate,
                         dtlIp = state.dtlIp,
                         dtlLaneNo = laneNo,
-                        dtlId = info?.dtlId,
+                        dtlId = info?.dtlId ?: 1L,
                         ackRaw = hex,
                         ackHeader = ackHeader,
                         ackData = ackData,
@@ -234,9 +239,13 @@ class GatePacketPersister(
                         dtlIp = state.dtlIp,
                         dtlLaneNo = laneNo,
                         dtlType = info?.dtlType ?: state.gateTypeCode,
-                        dtlId = info?.dtlId,
-                        locId = info?.locId,
-                        grpId = info?.grpId,
+                        // 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): `tb_data_rcv`의
+                        // dtl_id/loc_id/grp_id는 각각 `NOT NULL DEFAULT (1, 0, 0)`이다. info가
+                        // null(레인 캐시 미확보)이면 이전에는 NULL이 그대로 바인딩돼 고빈도
+                        // 원시패킷 INSERT가 NOT NULL 위반으로 실패할 수 있었다 — DB 기본값으로 폴백.
+                        dtlId = info?.dtlId ?: 1L,
+                        locId = info?.locId ?: 0L,
+                        grpId = info?.grpId ?: 0L,
                         rcvHeader = header,
                         rcvData = body,
                         rcvDataInfo = dataInfo,

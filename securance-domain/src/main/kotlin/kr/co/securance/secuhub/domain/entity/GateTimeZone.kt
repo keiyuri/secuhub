@@ -52,8 +52,11 @@ class GateTimeZone(
     @Column(name = "timezone_to4", length = 10) var timezoneTo4: String? = null,
     @Column(name = "timezone_day4", length = 100) var timezoneDay4: String? = null,
 
-    @Lob
-    @Column(name = "timezone_hex_data", nullable = false)
+    // 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): 실제 DB는 `timezone_hex_data tinytext`
+    // (최대 255바이트)인데 엔티티는 `@Lob`으로 선언돼 있었다 — `@Lob`은 Hibernate/MariaDB
+    // 방언에서 통상 LONGTEXT로 매핑돼 실제 컬럼(TINYTEXT)과 타입 카테고리가 어긋난다. 현재
+    // 페이로드(26바이트 16진 문자열, 52자)는 여유가 크지만 방언 매핑을 실제 컬럼에 맞춘다.
+    @Column(name = "timezone_hex_data", nullable = false, length = 255, columnDefinition = "tinytext")
     var timezoneHexData: String,
 
     @Convert(converter = YnConverter::class)

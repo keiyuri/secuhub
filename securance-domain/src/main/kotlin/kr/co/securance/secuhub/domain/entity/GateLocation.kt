@@ -26,11 +26,14 @@ class GateLocation(
     @Column(name = "use_yn", nullable = false)
     var useYn: Boolean = true,
 
-    @Column(name = "loc_x")
-    var locX: Int? = null,
+    // 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): 실제 DB는 `loc_x`/`loc_y` 모두
+    // `NOT NULL DEFAULT 0`인데 엔티티는 `Int?`(nullable)로 선언돼 있었다 — [GateGroup.grpX]와
+    // 동일한 이유(이 앱은 `@DynamicInsert`를 쓰지 않음)로 신규 등록 시 NOT NULL 위반이 난다.
+    @Column(name = "loc_x", nullable = false)
+    var locX: Int = 0,
 
-    @Column(name = "loc_y")
-    var locY: Int? = null,
+    @Column(name = "loc_y", nullable = false)
+    var locY: Int = 0,
 
     /** #5 SetupLocation 배치도 이미지 파일명(loc-images 업로드 디렉터리 기준, 확장자 포함). */
     @Column(name = "loc_map", length = 200)

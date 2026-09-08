@@ -84,6 +84,8 @@ class GateLocationService(
         }
         location.locName = form.locName
         location.useYn = form.useYn
+        // mod_date는 DB에 ON UPDATE 트리거가 없어 직접 갱신해야 한다(GateLocationRepository.touchModDate 참고).
+        locationRepository.touchModDate(locId)
     }
 
     @Transactional

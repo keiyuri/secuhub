@@ -262,8 +262,8 @@ CREATE TABLE tb_gate_loc (
     loc_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
     loc_nm      VARCHAR(200) NOT NULL,
     use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
-    loc_x       INT NULL,
-    loc_y       INT NULL,
+    loc_x       INT NOT NULL DEFAULT 0, -- 실 DB 실측(2026-09-09): NOT NULL DEFAULT 0 (GateLocation.locX 참고)
+    loc_y       INT NOT NULL DEFAULT 0,
     loc_map     VARCHAR(200) NULL,
     loc_map_w   INT NULL,
     loc_map_h   INT NULL,
@@ -279,8 +279,8 @@ CREATE TABLE tb_gate_grp (
     dtl_type    INT NULL, -- V35__relax_gate_grp_dtl_type_nullable.sql: GateGroup.gateTypeCode 제거로 NOT NULL 해제
     link_type   INT NOT NULL DEFAULT 1,
     use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
-    grp_x       INT NULL,
-    grp_y       INT NULL,
+    grp_x       INT NOT NULL DEFAULT 0, -- 실 DB 실측(2026-09-09): NOT NULL DEFAULT 0 (GateGroup.grpX 참고)
+    grp_y       INT NOT NULL DEFAULT 0,
     CONSTRAINT fk_gate_grp_loc FOREIGN KEY (loc_id) REFERENCES tb_gate_loc (loc_id)
 );
 

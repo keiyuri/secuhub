@@ -115,6 +115,9 @@ data class UserForm(
     )
     var password: String = "",
     @field:NotBlank(message = "이름은 필수입니다")
+    // DB `tb_users.user_nm`이 varchar(20)이라(2026-09-09 실측), 화면 검증에서 미리 막지 않으면
+    // DB INSERT/UPDATE 단계에서만 길이 초과 예외가 나 사용자에게 원인이 불분명하게 전달된다.
+    @field:Size(max = 20, message = "이름은 20자 이하여야 합니다")
     var userName: String = "",
     var useYn: Boolean = true,
     var authView: Boolean = true,

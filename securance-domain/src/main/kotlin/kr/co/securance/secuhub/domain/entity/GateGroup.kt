@@ -45,13 +45,21 @@ class GateGroup(
     @Column(name = "use_yn", nullable = false)
     var useYn: Boolean = true,
 
-    /** #5 SetupLocation — 소속 [GateLocation]의 배치도 이미지 위 그룹 아이콘 좌표(원본 이미지
-     * 픽셀 기준, [GateLocation.locMapWidth]/[GateLocation.locMapHeight]로 환산). 미배치 시 null. */
-    @Column(name = "grp_x")
-    var grpX: Int? = null,
+    /**
+     * #5 SetupLocation — 소속 [GateLocation]의 배치도 이미지 위 그룹 아이콘 좌표(원본 이미지
+     * 픽셀 기준, [GateLocation.locMapWidth]/[GateLocation.locMapHeight]로 환산). 미배치 시 0.
+     *
+     * 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): 실제 DB는 `grp_x`/`grp_y` 모두
+     * `NOT NULL DEFAULT 0`인데 엔티티는 `Int?`(nullable)로 선언돼 있었다. 이 프로젝트에는
+     * `@DynamicInsert`가 없어 Hibernate가 매핑된 컬럼을 항상 INSERT 문에 포함하므로, 신규
+     * 등록 화면(`GateGroupController.create`)처럼 값을 지정하지 않으면 Kotlin 기본값 `null`이
+     * 그대로 바인딩돼 `NOT NULL` 위반으로 INSERT가 실패한다 — DB 기본값과 같은 0으로 정정한다.
+     */
+    @Column(name = "grp_x", nullable = false)
+    var grpX: Int = 0,
 
-    @Column(name = "grp_y")
-    var grpY: Int? = null,
+    @Column(name = "grp_y", nullable = false)
+    var grpY: Int = 0,
 ) {
     /** 물리적 게이트(차단바) 유닛 수 = 레인 수 + 1 (계획서 3.2절 펜스포스트 규칙). */
     val physicalGateCount: Int

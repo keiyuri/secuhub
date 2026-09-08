@@ -170,8 +170,8 @@ CREATE TABLE tb_gate_loc (
     loc_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
     loc_nm      VARCHAR(200) NOT NULL,
     use_yn      CHAR(1) NOT NULL DEFAULT 'Y',
-    loc_x       INT NULL,
-    loc_y       INT NULL,
+    loc_x       INT NOT NULL DEFAULT 0, -- 실 DB 실측(2026-09-09): NOT NULL DEFAULT 0 (GateLocation.locX 참고)
+    loc_y       INT NOT NULL DEFAULT 0,
     loc_map     VARCHAR(200) NULL,
     loc_map_w   INT NULL,
     loc_map_h   INT NULL,

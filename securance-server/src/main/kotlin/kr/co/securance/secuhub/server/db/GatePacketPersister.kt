@@ -120,8 +120,15 @@ class GatePacketPersister(
 
         // 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): `tb_data_rcv_ack.dtl_id`는
         // `NOT NULL DEFAULT 1`이다. 레인 캐시가 아직 채워지지 않아 info가 null인 경우(신규/미확인
-        // 커넥션) `info?.dtlId`를 그대로 저장하면 NULL이 바인딩돼 INSERT 자체가 실패한다 —
-        // DB 기본값과 같은 1로 폴백한다.
+        // 커넥션) `info?.dtlId`를 그대로 저장하면 NULL이 바인딩돼 INSERT 자체가 실패한다.
+        //
+        // [Codex 적대적 리뷰 지적, 2026-09-09] 최초 수정은 DB DEFAULT와 같은 1로 폴백했으나,
+        // 실측 결과 `dtl_id=1`은 실제 장비("6층Demo1")다 — 미확인 연결의 패킷을 이 값으로 저장하면
+        // 감사/장애 분석 시 그 장비가 실제로 보내지 않은 기록으로 조용히 오귀속된다. `dtl_id`는
+        // AUTO_INCREMENT라 0은 어떤 실제 장비와도 절대 충돌하지 않으며, `locId`/`grpId`의 "미확인"
+        // 폴백값(0, tb_gate_loc/tb_gate_grp도 AUTO_INCREMENT라 0은 존재하지 않음)과도 의미가
+        // 일관된다 — 이 코드베이스의 다른 "미확인 dtlId" 폴백(DirectGateControlService,
+        // GateStatusAnalysisPersister, QueuedGateControlService가 모두 `?: 0`을 씀)과도 통일한다.
 
         // ack_header/ack_data/ack_tail — enqueueReceiveInsert의 rcv_header/rcv_data/rcv_tail과
         // 동일한 Header(27)/Data/Tail(4) 구간 분할이다. 컬럼은 V1 스키마에 있었지만 이 값을 실제로
@@ -139,7 +146,7 @@ class GatePacketPersister(
                         ackDate = ackDate,
                         dtlIp = state.dtlIp,
                         dtlLaneNo = laneNo,
-                        dtlId = info?.dtlId ?: 1L,
+                        dtlId = info?.dtlId ?: 0L,
                         ackRaw = hex,
                         ackHeader = ackHeader,
                         ackData = ackData,
@@ -242,8 +249,16 @@ class GatePacketPersister(
                         // 컬럼 타입 재점검(2026-09-09, 개발 DB 실측): `tb_data_rcv`의
                         // dtl_id/loc_id/grp_id는 각각 `NOT NULL DEFAULT (1, 0, 0)`이다. info가
                         // null(레인 캐시 미확보)이면 이전에는 NULL이 그대로 바인딩돼 고빈도
-                        // 원시패킷 INSERT가 NOT NULL 위반으로 실패할 수 있었다 — DB 기본값으로 폴백.
-                        dtlId = info?.dtlId ?: 1L,
+                        // 원시패킷 INSERT가 NOT NULL 위반으로 실패할 수 있었다.
+                        //
+                        // [Codex 적대적 리뷰 지적, 2026-09-09] dtl_id는 DB DEFAULT(1)로 폴백하지
+                        // 않는다 — 실측 결과 `dtl_id=1`은 실제 장비("6층Demo1")라, 미확인 연결의
+                        // 원시 패킷을 그 값으로 저장하면 해당 장비가 보내지 않은 기록으로 조용히
+                        // 오귀속된다. `dtl_id`도 AUTO_INCREMENT라 0은 어떤 실제 장비와도 충돌하지
+                        // 않으므로 loc_id/grp_id와 동일하게 0으로 폴백해 "미확인"임을 명확히 한다
+                        // (persistAck의 동일 수정, `?: 0`을 이미 쓰는 DirectGateControlService/
+                        // GateStatusAnalysisPersister/QueuedGateControlService와 통일).
+                        dtlId = info?.dtlId ?: 0L,
                         locId = info?.locId ?: 0L,
                         grpId = info?.grpId ?: 0L,
                         rcvHeader = header,

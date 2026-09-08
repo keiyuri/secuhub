@@ -50,10 +50,11 @@
           <li class="list-group-item d-flex justify-content-between align-items-center" th:each="grp : ${groups}">
             <span th:text="${grp.grpName}">그룹명</span>
             <!--/* 컬럼 타입 재점검(2026-09-09, 개발 DB 실측)으로 GateGroup.grpX/grpY의 미배치
-                 센티널이 null에서 0(DB NOT NULL DEFAULT 0)으로 바뀌었다 — 배치 판정도 동일 기준으로
-                 맞춘다(Codex 리뷰 지적: 그대로 두면 신규 그룹이 저장 직후 항상 "배치됨"으로 표시됨). */-->
-            <span th:if="${grp.grpX == 0 and grp.grpY == 0}" class="badge text-bg-secondary">미배치</span>
-            <span th:unless="${grp.grpX == 0 and grp.grpY == 0}" class="badge text-bg-success">배치됨</span>
+                 센티널이 null에서 -1로 바뀌었다(최초엔 0으로 정정했으나, 배치도 좌상단 모서리
+                 (0,0)에 정상 배치한 경우와 구분되지 않는다는 Codex 적대적 리뷰 지적으로 -1로
+                 재수정 — GateGroup.grpX KDoc 참고). 배치 판정도 동일 기준으로 맞춘다. */-->
+            <span th:if="${grp.grpX == -1 and grp.grpY == -1}" class="badge text-bg-secondary">미배치</span>
+            <span th:unless="${grp.grpX == -1 and grp.grpY == -1}" class="badge text-bg-success">배치됨</span>
           </li>
         </ul>
         <div class="card-body py-2 text-muted small">
@@ -99,7 +100,7 @@
             <div th:each="grp, iter : ${groups}"
                  class="group-marker"
                  th:attr="data-grp-id=${grp.grpId},data-grp-name=${grp.grpName}"
-                 th:styleappend="${!(grp.grpX == 0 and grp.grpY == 0) and location.locMapWidth != null and location.locMapHeight != null and location.locMapWidth > 0 and location.locMapHeight > 0 ? ('left:' + (grp.grpX * 100.0 / location.locMapWidth) + '%;top:' + (grp.grpY * 100.0 / location.locMapHeight) + '%;') : ('left:' + (5 + iter.index * 8) + '%;top:8%;')}"
+                 th:styleappend="${!(grp.grpX == -1 and grp.grpY == -1) and location.locMapWidth != null and location.locMapHeight != null and location.locMapWidth > 0 and location.locMapHeight > 0 ? ('left:' + (grp.grpX * 100.0 / location.locMapWidth) + '%;top:' + (grp.grpY * 100.0 / location.locMapHeight) + '%;') : ('left:' + (5 + iter.index * 8) + '%;top:8%;')}"
                  style="position:absolute; width:32px; height:32px; margin-left:-16px; margin-top:-16px;
                         border-radius:50%; background:#0d6efd; color:#fff; display:flex; align-items:center;
                         justify-content:center; font-size:.7rem; cursor:grab; box-shadow:0 1px 3px rgba(0,0,0,.4);"

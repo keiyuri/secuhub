@@ -135,6 +135,15 @@ class OprStatus(
     @Column(name = "opr_door_before")
     var doorBefore: Long? = null,
 
+    // 컬럼 누락 재점검(2026-09-08, 운영 DB 실측): `opr_door_before` 다음 자리에는
+    // `opr_start_date varchar(20) DEFAULT NULL`("최초 운영 시작일")도 존재하며, V4가 신규 DB에
+    // 이 컬럼까지 함께 ALTER한다. 하지만 `usp_process_status`(이 클래스가 이식한 레거시 SP) 원문의
+    // INSERT/UPDATE 절 어디에도 이 컬럼이 없다 — 즉 레거시 SP도 이 값을 채우지 않는다. 운영 DB
+    // 실측 결과 대부분의 행(283,209건 중 282,945건)이 채워져 있지만 "202201041207" 같은 특정
+    // 시점 몇 개 값에 몰려 있어(전수 조사 결과 상이한 값이 극소수) 이 앱/레거시 SP가 아닌 별도의
+    // 외부 도구·수동 백필로 채워진 값으로 보인다 — [mod_user]와 동일하게 이 앱은 매핑하지 않고
+    // DB 컬럼 기본값(NULL)에 맡긴다.
+
     @Column(name = "use_yn", length = 1)
     var useYn: String = "Y",
 )

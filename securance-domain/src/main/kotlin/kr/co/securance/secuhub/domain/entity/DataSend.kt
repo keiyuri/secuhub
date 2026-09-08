@@ -80,6 +80,14 @@ class DataSend(
     @Column(name = "dtl_type", nullable = false)
     var dtlType: Int = 1,
 
+    // 컬럼 누락 재점검(2026-09-08, 운영 DB 실측): 실제 DB의 `dtl_type` 다음 자리에는
+    // `dtl_no int(11) unsigned DEFAULT 1`도 존재한다([V4__fix_tb_data_snd_tb_opr_status_missing_columns.sql]이
+    // 신규 DB에 이 컬럼까지 함께 ALTER한다) — 그런데도 엔티티에 매핑하지 않는 이유는, 운영 DB에
+    // 실제로 적재된 1,614건 전량(레거시/이 앱 적재분 모두)이 이 컬럼 값 `1`로 동일했기 때문이다.
+    // 엔티티가 매핑하지 않으면 Hibernate가 INSERT 문에 이 컬럼을 아예 포함하지 않으므로 DB의
+    // `DEFAULT 1`이 그대로 적용되어 결과적으로 항상 올바른 값이 들어간다 — [OprStatus.dtlNo]와
+    // 달리 이 테이블에서는 "Serial 연결 번호"별로 값이 갈리는 사례가 관측되지 않아 매핑을 생략했다.
+
     /**
      * 코드 리뷰 지적(2026-08-14): `tb_data_snd.dtl_id`는 V1부터 `BIGINT UNSIGNED NULL`로
      * 생성된 뒤 이후 마이그레이션에서도 NOT NULL로 바뀐 적이 없다(V8이 `loc_id`/`grp_id`는

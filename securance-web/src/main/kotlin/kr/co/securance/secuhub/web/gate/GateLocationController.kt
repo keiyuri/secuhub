@@ -143,6 +143,9 @@ class GateLocationService(
         location.locMap = fileName
         location.locMapWidth = image.width
         location.locMapHeight = image.height
+        // Codex 리뷰 지적(2026-09-09): mod_date 직접 갱신을 update()에만 넣으면 배치도만 새로
+        // 업로드한 경우 mod_date가 갱신되지 않는다 — 이 엔티티를 변경하는 모든 경로에서 호출한다.
+        locationRepository.touchModDate(locId)
 
         if (oldFileName != null) {
             TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {

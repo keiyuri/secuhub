@@ -19,10 +19,12 @@
 -- NetStateRepository.kt, DataSend 생성 지점들, GateControlDispatcher.kt)은 이 세션에서 함께
 -- 반영했다 — 컬럼만 추가하고 쓰는 코드가 없으면 여전히 비어 있을 것이기 때문이다.
 --
--- tb_opr_status_outbox.dtl_no는 레거시 유산이 아니라 이 프로젝트가 만든 테이블이라(2026-08-12
--- 도입) BASELINE 여부와 무관하게 이번 세션에서 공유 개발 DB에 직접 `ALTER TABLE ... ADD COLUMN`을
--- 실행해 추가했다(다른 BASELINE 전용 컬럼처럼 "원래 있었는데 V1이 놓친" 것이 아니라 이번에 새로
--- 도입하는 컬럼이므로, 몫이 다르다) — 이 마이그레이션은 신규 DB에서만 동일하게 ALTER한다.
+-- tb_opr_status_outbox.dtl_no는 레거시 유산이 아니라 이 프로젝트가 만든 테이블에 이번에 새로
+-- 도입하는 컬럼이다(2026-08-12 도입한 테이블) — 1)/2)와 달리 "BASELINE DB에는 원래 있었을
+-- 것"이라는 전제가 성립하지 않으므로 BASELINE 여부와 무관하게 컬럼이 없으면 항상 ALTER한다
+-- (최초 버전은 1)/2)와 같은 패턴을 그대로 복사해 BASELINE 환경에서 컬럼이 없으면 마이그레이션을
+-- 실패시켰는데, Codex 적대적 리뷰가 이를 "코드/마이그레이션만 배포하는 정상 환경에서 Flyway가
+-- 막혀 기동조차 안 되는 배포 차단 결함"으로 지적해 수정했다 — 아래 3) 참고).
 -- ============================================================================
 
 SET @is_baseline_env = (
@@ -110,8 +112,16 @@ EXECUTE v4_opr_guard_call_stmt;
 DEALLOCATE PREPARE v4_opr_guard_call_stmt;
 
 -- ---------------------------------------------------------------------------
--- 3) tb_opr_status_outbox: dtl_no (레거시 컬럼이 아니라 이번에 새로 도입 — 공유 개발 DB에는
---    이 마이그레이션과 별개로 이미 수동 ALTER를 적용해 두었다. 신규 DB만 여기서 ALTER한다.)
+-- 3) tb_opr_status_outbox: dtl_no
+--
+-- [Codex 적대적 리뷰 지적, 2026-09-08] 이 컬럼은 레거시 유산이 아니라 이 프로젝트가 만든
+-- 테이블(2026-08-12 도입)에 이번에 새로 추가하는 것이므로, 1)/2)와 달리 "BASELINE DB는 이미
+-- 컬럼이 있을 것"이라는 전제 자체가 성립하지 않는다 — BASELINE 여부와 무관하게 모든 환경에서
+-- 아직 컬럼이 없으면(예: 이번 세션에서 수동 ALTER한 공유 개발 DB 밖의 다른 스테이징/운영 DB)
+-- 이 마이그레이션이 직접 추가해야 정상 배포된다. 최초 버전은 1)/2)와 같은
+-- "BASELINE이면 검증만, 신규 DB만 ALTER" 패턴을 그대로 복사해, 컬럼이 없는 BASELINE 환경에서는
+-- Flyway가 마이그레이션 실패로 기동을 막아버리는 배포 차단 결함이 있었다 — 컬럼 존재 여부만으로
+-- 멱등하게 ALTER하도록 고친다(이미 컬럼이 있으면 no-op, 없으면 어떤 환경이든 추가).
 -- ---------------------------------------------------------------------------
 SET @outbox_matched = (
     SELECT COUNT(*) FROM information_schema.columns
@@ -119,7 +129,7 @@ SET @outbox_matched = (
       AND column_name = 'dtl_no'
 );
 
-SET @v4_outbox_alter_sql = IF(@is_baseline_env = 0,
+SET @v4_outbox_alter_sql = IF(@outbox_matched = 0,
     'ALTER TABLE `tb_opr_status_outbox`
        ADD COLUMN `dtl_no` int(11) NOT NULL DEFAULT 1 AFTER `dtl_type`',
     'DO 0'
@@ -127,21 +137,3 @@ SET @v4_outbox_alter_sql = IF(@is_baseline_env = 0,
 PREPARE v4_outbox_alter_stmt FROM @v4_outbox_alter_sql;
 EXECUTE v4_outbox_alter_stmt;
 DEALLOCATE PREPARE v4_outbox_alter_stmt;
-
-SET @v4_outbox_guard_create_sql = IF(@is_baseline_env > 0 AND @outbox_matched < 1,
-    'CREATE OR REPLACE PROCEDURE `_v4_fail_on_baseline_drift_opr_status_outbox`()
-       SIGNAL SQLSTATE ''45000''
-       SET MESSAGE_TEXT = ''V4: tb_opr_status_outbox.dtl_no가 BASELINE DB에 없습니다 - 이 마이그레이션 작성 전에 수동으로 추가해뒀어야 합니다. DBA가 ALTER TABLE tb_opr_status_outbox ADD COLUMN dtl_no int(11) NOT NULL DEFAULT 1을 직접 실행하세요.''',
-    'DO 0'
-);
-PREPARE v4_outbox_guard_create_stmt FROM @v4_outbox_guard_create_sql;
-EXECUTE v4_outbox_guard_create_stmt;
-DEALLOCATE PREPARE v4_outbox_guard_create_stmt;
-
-SET @v4_outbox_guard_call_sql = IF(@is_baseline_env > 0 AND @outbox_matched < 1,
-    'CALL `_v4_fail_on_baseline_drift_opr_status_outbox`()',
-    'DO 0'
-);
-PREPARE v4_outbox_guard_call_stmt FROM @v4_outbox_guard_call_sql;
-EXECUTE v4_outbox_guard_call_stmt;
-DEALLOCATE PREPARE v4_outbox_guard_call_stmt;
